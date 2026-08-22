@@ -29,6 +29,15 @@ final case class ResultField(
 
 final case class Underlay(asset: String, domain: String, label: String)
 
+final case class Estimand(id: String, label: String, order: Option[Int])
+final case class Analysis(
+    id: String,
+    label: String,
+    estimands: List[Estimand],
+    sampleSize: Option[Int],
+    method: Option[Json]
+)
+
 final case class Manifest(
     core: String,
     title: String,
@@ -36,6 +45,7 @@ final case class Manifest(
     assets: List[ManifestAsset],
     resultFields: List[ResultField],
     underlays: List[Underlay],
+    analyses: List[Analysis],
     warnings: List[Json],
     raw: Json
 ):
@@ -61,6 +71,9 @@ object Manifest:
     "publishedDisplay"
   )(ResultField.apply)
   given Decoder[Underlay] = Decoder.forProduct3("asset", "domain", "label")(Underlay.apply)
+  given Decoder[Estimand] = Decoder.forProduct3("id", "label", "order")(Estimand.apply)
+  given Decoder[Analysis] =
+    Decoder.forProduct5("id", "label", "estimands", "sampleSize", "method")(Analysis.apply)
 
   given Decoder[Manifest] = Decoder.instance { c =>
     for
@@ -70,8 +83,9 @@ object Manifest:
       assets <- c.downField("assets").as[List[ManifestAsset]]
       fields <- c.downField("resultFields").as[Option[List[ResultField]]].map(_.getOrElse(Nil))
       underlays <- c.downField("underlays").as[Option[List[Underlay]]].map(_.getOrElse(Nil))
+      analyses <- c.downField("analyses").as[Option[List[Analysis]]].map(_.getOrElse(Nil))
       warnings <- c.downField("warnings").as[Option[List[Json]]].map(_.getOrElse(Nil))
-    yield Manifest(core, title, synopsis, assets, fields, underlays, warnings, c.value)
+    yield Manifest(core, title, synopsis, assets, fields, underlays, analyses, warnings, c.value)
   }
 
   /** Admit the bytes (ADR 0001), then decode. Returns the digest with the manifest. */

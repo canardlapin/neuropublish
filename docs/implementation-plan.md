@@ -451,6 +451,35 @@ JVM/Scala.js conformance tests before the app consumes them.
 - Playwright screenshots cover ordinary, narrow, error, and loading states;
 - all controllers and resources dispose on navigation and unmount.
 
+### Status (2026-08-22)
+
+Built on the Stage 1 spine (Stage 2 deferred by decision; its schemas, stores,
+and foreign-producer proof slot in behind the same contract). Verified by
+`scripts/e2e.sh` (four Playwright scenarios) and `sbt npCheck`:
+
+| Criterion | Evidence |
+| --- | --- |
+| reference result: underlay + two overlays | workspace renders t and z per the published recommendation; colour-pixel check |
+| affine and click/readout values | cursor set from the URL at two oracle probes; status bar shows the oracle's world coordinate and per-layer values exactly |
+| threshold vs window independence | editing one leaves the other unchanged (separate `ViewerAction`s) |
+| no reread on control change | display actions dispatch into the existing controller; only reorder/colormap rebuild the `ViewerModel` from already-decoded volumes |
+| URL round trip | `?l=…&c=…&p=…&i=…` (`ViewUrl`) encodes order and presentation; property-tested round trip; reload restores order, threshold, window |
+| keyboard reach | navigator measures are buttons with `aria-pressed`; Tab/Enter toggles a layer; controls are native inputs |
+| screenshots | overview, workspace, narrow (900 px), error; loading is a text state |
+| disposal | navigating to the overview unmounts the pane with no page errors (lifecycle suite covers the host) |
+| published vs current, reset | each layer card shows "published" or "modified · reset"; per-layer and whole-view reset |
+| scalar histogram / missing summary | server-derived `ScalarSummary` in the rendition header, drawn in the layer card |
+
+Not done, carried: atlas lookup (plan decision 7); the UI system is applied as
+`--np-*` tokens and components but not yet the full visual pass of the
+Components artboard; surface rendition fidelity (now Stage 5 with the surface
+pane).
+
+Upstream items found: ScalaFIM has no reorder or colormap action (the app
+rebuilds the model, carrying state); Intaglio `DisplayThreshold` supports one
+transparent band only (no one-sided modes yet) and `ColorRamp` is two-stop
+(the "viridis (2-stop)" choice is honest about that).
+
 ## Stage 4 — application provenance, identity, and sharing
 
 This stage completes the first vertical slice. It depends only on the

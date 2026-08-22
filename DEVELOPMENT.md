@@ -19,7 +19,7 @@ Aliases are `np`-prefixed because ScalaFIM's build, loaded by source pin into th
 | `sbt "publisherCli/run validate modules/conformance/fixtures/reference"` | `npub validate` on the reference bundle |
 | `cd modules/frontend && npm install && npm run dev` | Vite dev server with live Scala.js linking |
 | `cd modules/frontend && npm run test:browser` | Playwright lifecycle tests in Chromium against `spike.html` (starts Vite itself) |
-| `scripts/e2e.sh` | Stage 1 proof: build frontend, start a backend on a temp data dir, `npub push` the reference bundle, assert the stale-parent rejection and digest, render in Chromium |
+| `scripts/e2e.sh` | Stage 1 + 3 proof: build frontend, start a backend on a temp data dir, `npub push` the reference bundle, assert the stale-parent rejection and digest, render in Chromium |
 
 ## Running the thin spine by hand
 

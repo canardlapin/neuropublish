@@ -51,6 +51,23 @@ class RenditionFidelitySuite extends FunSuite:
     }
   }
 
+  test("server-derived summary matches the oracle counts") {
+    ids.foreach { id =>
+      val h = VolumeRendition.decodeHeader(
+        FixtureIO.readText(s"reference/renditions/$id.json")
+      ).toOption.get
+      val sm = h.summary.getOrElse(fail(s"$id has no summary"))
+      assertEquals(
+        sm.finite - sm.zero,
+        oracle.hcursor.downField("nonzero").downField(id).as[Int].toOption.get,
+        s"$id nonzero"
+      )
+      assertEquals(sm.missing, 0)
+      assertEquals(sm.histogram.sum, sm.finite)
+      assert(sm.quantiles.zip(sm.quantiles.tail).forall(_ <= _), "quantiles monotone")
+    }
+  }
+
   test("sums and non-zero counts match") {
     ids.foreach { id =>
       val v = volumes(id); val n = v.space.spatialDims.product

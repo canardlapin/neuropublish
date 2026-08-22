@@ -12,7 +12,13 @@ import scala.scalajs.js.typedarray.*
 final class Api(base: String)(using ExecutionContext):
   private def json[A: Decoder](path: String): Future[A] =
     dom.fetch(s"$base$path").toFuture.flatMap { r =>
-      if !r.ok then Future.failed(RuntimeException(s"${r.status} ${r.statusText} for $path"))
+      if !r.ok then
+        r.text().toFuture.flatMap { t =>
+          val msg = _root_.io.circe.parser.decode[ApiError](
+            t
+          ).toOption.map(_.message).getOrElse(s"${r.status} ${r.statusText} for $path")
+          Future.failed(RuntimeException(msg))
+        }
       else r.text().toFuture.flatMap(t => Future.fromTry(_root_.io.circe.parser.decode[A](t).toTry))
     }
   private def bytes(url: String): Future[Array[Byte]] =
