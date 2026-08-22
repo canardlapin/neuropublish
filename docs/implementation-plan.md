@@ -254,6 +254,9 @@ Upstream findings recorded for dogfooding (fix in the owning library, then bump 
   WebGL budget until garbage collection; 24 mount/unmount cycles evicted older
   contexts until the host forced loss via `WEBGL_lose_context` itself. Upstream
   should do this in `dispose()`.
+- `scalafim-atlas` derives its volume domain key from a runtime `hashCode` and
+  has not completed its locus4s migration; both gate ADR 0005's Scala
+  realization adapters, not its protocol.
 - `CanvasScrollCoordinator` cannot cancel a pending scheduled flush; a host that unmounts mid-burst has no way to stop it.
 - `image4s-nifti` abstracts its filesystem behind a `private[nifti]` trait, so a browser backend must be added inside image4s if ever wanted.
 - ScalaFIM's atlas path still depends on its local parcellation facade. The
@@ -679,6 +682,7 @@ repository once those stores and paths exist.
 | Dedup leaks private asset existence | API reports another tenant's digest | Hide cross-tenant existence and separate public catalog assets. |
 | Provenance presents modal settings as shared | Mixed receipts collapse to one value | Fingerprint groups and compatibility assessment; no inferred consensus. |
 | R package release cadence gates the product | Stage 4 waits on an `fmrireg` CRAN release | R track is parallel; hand-written fixture covers every provenance interface. |
+| ScalaFIM atlas migration gates parcel space | `scalafim-atlas` still on its local parcellation facade; `VolumeDomain` key uses `hashCode` | ADR 0005 protocol work proceeds independently; only the Scala realization adapters (Stage 5b) wait on the locus4s migration and the persistent-key fix. |
 | Public sharing leaks sensitive metadata | Subject IDs or local paths enter manifest | Local and server admission policy; conservative default sensitivity. |
 | Browser memory grows without bound | Revision switching retains arrays/GPU resources | Hash-keyed bounded cache, explicit resource ownership, disposal tests. |
 
