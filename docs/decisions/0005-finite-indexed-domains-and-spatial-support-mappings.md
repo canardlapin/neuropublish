@@ -54,6 +54,16 @@ Neuropublish will use one language-neutral result protocol with a general
 finite-domain core. Parcel space is a first-class use of that core, not a second
 atlas-specific publication protocol.
 
+### Staging
+
+The Stage 2 protocol freeze includes only the hook: every `domains[]` entry
+carries a `descriptor` open record (`{schema, payload}`) and an exact `key`
+computed by a descriptor-specific procedure. The trusted `finite-indexed`
+descriptor, atlas realization records, parcel renditions, and the display
+pullback in the ingestion worker are post-MVP work on a parallel parcel
+track; nothing in Stages 3–5 depends on them. The reference manifest already
+uses the descriptor form.
+
 ### 0. Stage 2 freezes the domain hook, not the parcel implementation
 
 Stage 2 freezes the shape shared by every domain entry: a manifest-local ID,
