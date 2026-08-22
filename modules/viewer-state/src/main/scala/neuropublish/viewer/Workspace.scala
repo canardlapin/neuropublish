@@ -14,7 +14,7 @@ final case class Window(min: Double, max: Double)
 final case class Threshold(mode: String, min: Double)
 object Threshold:
   val Modes: Set[String] = Set("two-sided", "positive", "negative", "off")
-  val Renderable: Set[String] = Set("two-sided", "off")
+  val Renderable: Set[String] = Modes // every mode renders (Intaglio Below/Above/TwoSided)
 
 /** Colormap identifiers are a closed, URL-safe grammar here; the palette itself lives with the
   * renderer.

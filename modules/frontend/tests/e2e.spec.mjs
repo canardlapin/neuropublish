@@ -80,6 +80,31 @@ test("threshold and window are independent, reorder and presentation survive a U
   expect(url).toContain("ts4.5"); expect(url).toContain("-8,10");
   expect(url.indexOf("speech-z:")).toBeLessThan(url.indexOf("speech-t:")); // z now drawn below t (moved up the list)
 
+  // one-sided thresholds render (Intaglio Below/Above): "positive" shows a strict subset of two-sided.
+  // Measure the t layer alone: z sits underneath and would show through wherever t is hidden.
+  await page.locator('.layer-card[data-layer="speech-z"] input[type=checkbox]').click();
+  await card.locator(".pill.warn").click(); // back to published two-sided 3.1
+  await settle(page); await settle(page);
+  const twoSided = await colourPixels(page);
+  await card.locator("select").first().selectOption("positive");
+  await settle(page); await settle(page);
+  const positive = await colourPixels(page);
+  await card.locator("select").first().selectOption("negative");
+  await settle(page); await settle(page);
+  const negative = await colourPixels(page);
+  expect(positive).toBeLessThan(twoSided);
+  expect(negative).toBeLessThan(twoSided);
+  expect(positive).toBeGreaterThan(0);
+  await expect(card.locator(".pill.warn")).toContainText("modified");
+  await expect(page.locator(".layer-card .pill.warn", { hasText: "cannot be rendered" })).toHaveCount(0);
+  await card.locator("select").first().selectOption("two-sided");
+  await page.locator('.layer-card[data-layer="speech-z"] input[type=checkbox]').click(); // z back on
+  await settle(page);
+  // re-apply the modified threshold/window so the round trip below carries non-published values
+  await thr.click(); await thr.selectText(); await page.keyboard.type("4.5"); await page.keyboard.press("Enter");
+  await wmax.click(); await wmax.selectText(); await page.keyboard.type("10"); await page.keyboard.press("Tab");
+  await expect(thr).toHaveValue("4.50"); await expect(wmax).toHaveValue("10.00");
+
   // colormap change must reach the canvas: gray overlays carry no chroma
   await settle(page);
   const colourBefore = await colourPixels(page);

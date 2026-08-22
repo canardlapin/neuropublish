@@ -246,7 +246,7 @@ with a static, locally configured bearer token.
 | documentation | `DEVELOPMENT.md`, `docs/architecture.md`, this file |
 | rendition decision | **confirmed**: typed-binary derivative (JSON header + float32) decoded into ScalaFIM objects on JS exactly for float32 sources (the fixtures); float64 and wide-integer sources lose precision in the rendition, documented in the profile, and the canonical asset remains the record. In-browser NIfTI decoding not attempted (image4s-nifti JS is Node-only) |
 
-Upstream findings recorded for dogfooding (fix in the owning library, then bump the pin). Filed 2026-08-22 as motes in the owning stores: scalafim `bd-01M0NS3CM5…` (controller dispose), `bd-01M0NS3EFB…` (Three context loss), `bd-01M0NS3ERV…` (reorder/colorizer actions), `bd-01M0NS3F26…` (scroll cancel), `bd-01M0NS3FBV…` (atlas keys / locus4s), `bd-01M0NS3FNR…` (Three pin); image4s `bd-01M0NS3FZ8…` (NiftiFileSystem); workspace root, tagged `intaglio`: `bd-01M0NS3G6H…` (threshold modes), `bd-01M0NS3G95…` (multi-stop colormaps).
+Upstream findings recorded for dogfooding (fix in the owning library, then bump the pin). Filed 2026-08-22 as motes in the owning stores; the first three are implemented on branches (ScalaFIM `neuropublish/lifecycle-dispose-on-97c7ff1` = `2a64eba`, Intaglio `neuropublish/threshold-modes` = `cdf1562`) and pinned here pending merge to their mains: scalafim `bd-01M0NS3CM5…` (controller dispose), `bd-01M0NS3EFB…` (Three context loss), `bd-01M0NS3ERV…` (reorder/colorizer actions), `bd-01M0NS3F26…` (scroll cancel), `bd-01M0NS3FBV…` (atlas keys / locus4s), `bd-01M0NS3FNR…` (Three pin); image4s `bd-01M0NS3FZ8…` (NiftiFileSystem); workspace root, tagged `intaglio`: `bd-01M0NS3G6H…` (threshold modes), `bd-01M0NS3G95…` (multi-stop colormaps).
 
 - `CanvasViewerController.close()` only flips a flag; it does not release the viewer/raster caches or `ImageBitmap` handles. Add a real `dispose()`.
 - `ThreeJsRuntime.dispose()` calls `renderer.dispose()` but never forces
@@ -476,9 +476,10 @@ Components artboard; surface rendition fidelity (now Stage 5 with the surface
 pane).
 
 Upstream items found: ScalaFIM has no reorder or colormap action (the app
-rebuilds the model, carrying state); Intaglio `DisplayThreshold` supports one
-transparent band only (no one-sided modes yet) and `ColorRamp` is two-stop
-(the "viridis (2-stop)" choice is honest about that).
+rebuilds the model, carrying state); `ColorRamp` is two-stop (the "viridis
+(2-stop)" choice is honest about that). One-sided and bounded two-sided
+thresholds now exist in Intaglio (`Below`/`Above`/`TwoSided`) and render here
+(`positive`/`negative` modes verified by the e2e as strict subsets of two-sided).
 
 ## Stage 4 — application provenance, identity, and sharing
 

@@ -31,17 +31,19 @@ final class WorkspaceStore(val loaded: Loaded, initial: Workspace):
   /** What requires a model rebuild: draw order and colormap per layer. */
   private def modelKey(w: Workspace) = w.layers.map(l => (l.id, l.current.colormap))
 
-  /** Only `two-sided` is renderable today (Intaglio: one transparent band). Other modes render
-    * unthresholded and are flagged in the card.
+  /** Manifest/URL threshold modes onto Intaglio's thresholds (two-sided magnitude, one-sided
+    * cutoffs).
     */
   private def thresholdOf(d: LayerDisplay): DisplayThreshold =
-    if d.threshold.mode == "two-sided" && d.threshold.min > 0
-    then
-      DisplayThreshold.transparentBand(
-        -d.threshold.min,
-        d.threshold.min
-      ).getOrElse(DisplayThreshold.Disabled)
-    else DisplayThreshold.Disabled
+    val m = d.threshold.min
+    d.threshold.mode match
+      case "two-sided" if m > 0 =>
+        DisplayThreshold.twoSidedMagnitude(m).getOrElse(DisplayThreshold.Disabled)
+      case "positive" =>
+        DisplayThreshold.below(m).getOrElse(DisplayThreshold.Disabled) // show v >= min
+      case "negative" =>
+        DisplayThreshold.above(-m).getOrElse(DisplayThreshold.Disabled) // show v <= -min
+      case _ => DisplayThreshold.Disabled
 
   private def scalar(id: String, vol: NeuroVol[Double], d: LayerDisplay) =
     SliceLayer(

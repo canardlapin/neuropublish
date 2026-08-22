@@ -19,6 +19,8 @@ object Versions {
   val munitCatsEffect = "2.1.0"
   val scalacheck = "1.19.0"
 
+  // Pin = branch neuropublish/lifecycle-dispose-on-97c7ff1: 97c7ff1 + controller dispose,
+  // forced WebGL context loss, and the threshold scene codec (Intaglio cdf1562 via ScalaFIM).
   // Upstream Scala imaging libraries are consumed as exact git revisions
   // (see docs/architecture.md, "Scala library dogfooding"). Override locally
   // with -Dneuropublish.scalafim.build=/path/to/checkout.
@@ -26,5 +28,5 @@ object Versions {
   // sbt-scalajs-crossproject plugin versions must match project/plugins.sbt
   // here (1.22.0 / 1.3.2 at this revision) or Scala.js IR linking fails
   // opaquely. Re-check both when bumping the pin.
-  val scalafimRevision = "97c7ff16ff24739a147fd43d7a5477d1024071ea"
+  val scalafimRevision = "2a64eba2e21ce6510d6bf9cf4eaeb3a71e6bba6e"
 }

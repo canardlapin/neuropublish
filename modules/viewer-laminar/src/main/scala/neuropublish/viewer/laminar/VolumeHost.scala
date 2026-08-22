@@ -108,7 +108,7 @@ final class VolumeHost(initialModel: ViewerModel, initial: ViewerSession, val pr
     r.raf.foreach { id => dom.window.cancelAnimationFrame(id); probe.rafOutstanding -= 1 }
     r.raf = None
     if !r.controller.isClosed then
-      r.controller.close()
+      r.controller.dispose() // closes and releases caches and ImageBitmaps (ScalaFIM bd-01M0NS3CM5…)
       probe.disposed += 1
 
 object VolumeHost:

@@ -35,21 +35,10 @@ final class SurfaceHost(three: js.Dynamic, val probe: LifecycleProbe)
       r.disposed = true
       r.canvas.removeEventListener("webglcontextlost", r.onLost)
       r.runtime.dispose().left.foreach(e => probe.errors += e.toString)
-      // Three's dispose() releases GPU objects but leaves the context alive until
-      // the canvas is garbage collected; browsers count it against their live
-      // context budget until then. Release it deterministically.
-      forceContextLoss(r.canvas)
+      // ThreeJsRuntime.dispose() now forces WEBGL_lose_context itself (ScalaFIM bd-01M0NS3EFB…)
       probe.disposed += 1
 
   def contextState(r: Live): String = r.runtime.contextState.toString
-
-  private def forceContextLoss(canvas: dom.html.Canvas): Unit =
-    val dyn = canvas.asInstanceOf[js.Dynamic]
-    val ctx = dyn.getContext("webgl2")
-    val gl = if js.isUndefined(ctx) || ctx == null then dyn.getContext("webgl") else ctx
-    if !(js.isUndefined(gl) || gl == null) then
-      val ext = gl.getExtension("WEBGL_lose_context")
-      if !(js.isUndefined(ext) || ext == null) then ext.loseContext()
 
 object SurfaceHost:
   final class Live(
