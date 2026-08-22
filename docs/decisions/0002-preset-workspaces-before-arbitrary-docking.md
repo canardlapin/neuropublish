@@ -49,8 +49,9 @@ slice. Compare (two linked result or revision views) is the first extension
 after their shared workspace state has been proven to reuse cleanly.
 
 The implementation uses semantic DOM, CSS Grid, and accessible resizable
-dividers. DOM order remains stable and meaningful. A versioned
-`WorkspaceLayoutV1` stores the preset and pane proportions. It does not store a
+dividers. DOM order remains stable and meaningful. A versioned open record
+(`org.neuropublish.view/workspace-layout@1`, domain type `WorkspaceLayout`)
+stores the preset and pane proportions. It does not store a
 GoldenLayout or Dockview config.
 
 Arbitrary docking is a post-MVP experiment. The evaluation order is:
@@ -58,7 +59,7 @@ Arbitrary docking is a post-MVP experiment. The evaluation order is:
 1. cross-compile `scaladock-core` and add a DOM/Laminar interpreter if the
    feature deserves ownership in the Scala ecosystem;
 2. otherwise wrap Dockview's vanilla API behind a narrow Scala.js facade and
-   translate to and from `WorkspaceLayoutV1`;
+   translate to and from `WorkspaceLayout`;
 3. reconsider GoldenLayout after a fresh maintenance and lifecycle spike.
 
 No docking engine may own scientific layer state, result selection, saved-view

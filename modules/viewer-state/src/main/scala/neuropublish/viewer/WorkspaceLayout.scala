@@ -4,11 +4,13 @@ package neuropublish.viewer
 enum LayoutPreset:
   case Volume, Surface, Hybrid
 
-/** The saved-view wire type for arrangement: preset plus pane proportions. Fractions are of the
-  * total width for the left/right inspectors and of the centre height for the lower drawer; all in
-  * (0, 1).
+/** Workspace arrangement: preset plus pane proportions. This is the domain type; the saved-view
+  * wire record carries it as the open record `org.neuropublish.view/workspace-layout@1` (ADR 0001),
+  * so versioning lives in the schema reference, not in Scala type names. Fractions are of the total
+  * width for the left/right inspectors and of the centre height for the lower drawer; all in (0,
+  * 1).
   */
-final case class WorkspaceLayoutV1(
+final case class WorkspaceLayout(
     preset: LayoutPreset,
     navigatorFraction: Double,
     inspectorFraction: Double,
@@ -18,8 +20,8 @@ final case class WorkspaceLayoutV1(
     List(navigatorFraction, inspectorFraction, drawerFraction).forall(f => f > 0.0 && f < 1.0) &&
       navigatorFraction + inspectorFraction < 1.0
 
-object WorkspaceLayoutV1:
-  val default: WorkspaceLayoutV1 = WorkspaceLayoutV1(LayoutPreset.Volume, 0.18, 0.25, 0.3)
+object WorkspaceLayout:
+  val default: WorkspaceLayout = WorkspaceLayout(LayoutPreset.Volume, 0.18, 0.25, 0.3)
 
   enum Action:
     case SetPreset(preset: LayoutPreset)
@@ -30,7 +32,7 @@ object WorkspaceLayoutV1:
   private def clamp(f: Double) = math.min(0.9, math.max(0.05, f))
 
   /** Pure reducer; never produces an invalid layout from a valid one. */
-  def reduce(l: WorkspaceLayoutV1, a: Action): WorkspaceLayoutV1 = a match
+  def reduce(l: WorkspaceLayout, a: Action): WorkspaceLayout = a match
     case Action.SetPreset(p) => l.copy(preset = p)
     case Action.ResizeNavigator(f) =>
       val nf = math.min(clamp(f), 0.95 - l.inspectorFraction)

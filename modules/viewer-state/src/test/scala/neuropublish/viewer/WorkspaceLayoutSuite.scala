@@ -3,9 +3,9 @@ package neuropublish.viewer
 import munit.ScalaCheckSuite
 import org.scalacheck.{Arbitrary, Gen}
 import org.scalacheck.Prop.forAll
-import WorkspaceLayoutV1.Action
+import WorkspaceLayout.Action
 
-class WorkspaceLayoutV1Suite extends ScalaCheckSuite:
+class WorkspaceLayoutSuite extends ScalaCheckSuite:
   given Arbitrary[Action] = Arbitrary(
     Gen.oneOf(
       Gen.oneOf(LayoutPreset.values.toSeq).map(Action.SetPreset.apply),
@@ -15,17 +15,17 @@ class WorkspaceLayoutV1Suite extends ScalaCheckSuite:
     )
   )
 
-  test("default is valid") { assert(WorkspaceLayoutV1.default.isValid) }
+  test("default is valid") { assert(WorkspaceLayout.default.isValid) }
 
   property("reducer preserves validity under any action sequence") {
     forAll { (actions: List[Action]) =>
-      actions.foldLeft(WorkspaceLayoutV1.default)(WorkspaceLayoutV1.reduce).isValid
+      actions.foldLeft(WorkspaceLayout.default)(WorkspaceLayout.reduce).isValid
     }
   }
 
   property("preset changes never touch pane fractions") {
     forAll(Gen.oneOf(LayoutPreset.values.toSeq)) { p =>
-      val l = WorkspaceLayoutV1.reduce(WorkspaceLayoutV1.default, Action.SetPreset(p))
-      l.preset == p && l.copy(preset = LayoutPreset.Volume) == WorkspaceLayoutV1.default
+      val l = WorkspaceLayout.reduce(WorkspaceLayout.default, Action.SetPreset(p))
+      l.preset == p && l.copy(preset = LayoutPreset.Volume) == WorkspaceLayout.default
     }
   }

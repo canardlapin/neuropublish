@@ -507,7 +507,7 @@ The viewer is built as two reusable modules plus the application that uses
 them:
 
 - `viewer-state` (JVM/JS): pure workspace model — application layers, result
-  selection, linked world coordinate, layout preset, `WorkspaceLayoutV1`, and
+  selection, linked world coordinate, layout preset, `WorkspaceLayout`, and
   the reducers over them. Depends on ScalaFIM/Intaglio core types only.
 - `viewer-laminar` (JS): Laminar components that host a ScalaFIM volume
   controller or Three.js surface backend, own their lifecycle, translate
@@ -556,8 +556,9 @@ signed asset URLs, saved views, sharing, notes, and new revisions.
 ## Workspace and docking decision
 
 The MVP uses semantic DOM, CSS Grid, and accessible resizable dividers for the
-Volume, Surface, Hybrid, and Compare presets. The saved-view wire type is a
-Neuropublish `WorkspaceLayoutV1`, not a third-party library's serialized config.
+Volume, Surface, Hybrid, and Compare presets. The saved-view wire record is a
+Neuropublish open record, `org.neuropublish.view/workspace-layout@1`, not a
+third-party library's serialized config; the domain type is `WorkspaceLayout`.
 
 Full docking is reassessed after the volume and hybrid workspaces have real
 users. If it becomes necessary, the preferred sequence is:
