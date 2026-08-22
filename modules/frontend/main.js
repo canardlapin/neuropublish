@@ -1,1 +1,1 @@
-import "scalajs:main.js";
+export * from "scalajs:main.js";

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8" /><title>Neuropublish lifecycle spike</title>
+    <style>body{margin:0} .host{width:320px;height:240px;border:1px solid #888;margin:8px;display:inline-block}</style>
+  </head>
+  <body>
+    <div id="vol" class="host"></div>
+    <div id="surf" class="host"></div>
+    <script type="module">
+      import * as THREE from "three";
+      import * as app from "./main.js";
+      const counts = { add: 0, remove: 0 };
+      const origAdd = window.addEventListener.bind(window), origRemove = window.removeEventListener.bind(window);
+      window.addEventListener = (...a) => { counts.add++; return origAdd(...a); };
+      window.removeEventListener = (...a) => { counts.remove++; return origRemove(...a); };
+      window.__spike = {
+        mountVolume: (id) => app.spikeMountVolume(id),
+        mountSurface: (id) => app.spikeMountSurface(id, THREE),
+        unmount: (id) => app.spikeUnmount(id),
+        report: () => ({ ...app.spikeReport(), listeners: { ...counts } }),
+        resize: (id, w, h) => { const el = document.getElementById(id); el.style.width = w + "px"; el.style.height = h + "px"; },
+      };
+      window.__spikeReady = true;
+    </script>
+  </body>
+</html>
