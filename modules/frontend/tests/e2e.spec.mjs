@@ -62,19 +62,38 @@ test("threshold and window are independent, reorder and presentation survive a U
   await expect(wmax).toHaveValue("8.00");
   await expect(card.locator(".pill.accent")).toHaveText("published");
 
-  await thr.fill("4.5"); await thr.dispatchEvent("input");
+  // type like a person: select all, key the digits, commit with Enter
+  await thr.click(); await thr.selectText(); await page.keyboard.type("4.5"); await page.keyboard.press("Enter");
+  await expect(thr).toHaveValue("4.50");
   await expect(wmin).toHaveValue("-8.00"); // window untouched by threshold
-  await wmax.fill("10"); await wmax.dispatchEvent("input");
+  await wmax.click(); await wmax.selectText(); await page.keyboard.type("10"); await page.keyboard.press("Tab");
+  await expect(wmax).toHaveValue("10.00");
   await expect(thr).toHaveValue("4.50"); // threshold untouched by window
+  // an invalid window (min ≥ max) is refused and flagged, not silently applied
+  await wmin.click(); await wmin.selectText(); await page.keyboard.type("50"); await page.keyboard.press("Enter");
+  await expect(wmin).toHaveAttribute("aria-invalid", "true");
+  await expect(wmax).toHaveValue("10.00");
   await expect(card.locator(".pill.warn")).toContainText("modified");
   await page.locator('.layer-card[data-layer="speech-z"] [aria-label="move layer up"]').click();
-  await settle(page);
+  await settle(page); await page.waitForTimeout(400); // URL sync is debounced
   const url = page.url();
   expect(url).toContain("ts4.5"); expect(url).toContain("-8,10");
   expect(url.indexOf("speech-z:")).toBeLessThan(url.indexOf("speech-t:")); // z now drawn below t (moved up the list)
 
-  await page.goto(url); // round trip
-  await ready(page); await settle(page);
+  // colormap change must reach the canvas: gray overlays carry no chroma
+  await settle(page);
+  const colourBefore = await colourPixels(page);
+  await page.locator('.layer-card[data-layer="speech-t"] select').nth(1).selectOption("gray");
+  await page.locator('.layer-card[data-layer="speech-z"] select').nth(1).selectOption("gray");
+  await settle(page); await settle(page);
+  expect(await colourPixels(page)).toBeLessThan(colourBefore / 4);
+
+  await page.waitForTimeout(400); // URL sync is debounced
+  const url2 = page.url();
+  expect(url2).toContain("gray");
+  await page.goto(url2); // round trip, including colormap and order, must render from the first frame
+  await ready(page); await settle(page); await settle(page);
+  expect(await colourPixels(page)).toBeLessThan(colourBefore / 4);
   const order = await page.locator(".layer-card").evaluateAll((els) => els.map((e) => e.dataset.layer));
   expect(order.indexOf("speech-z")).toBeLessThan(order.indexOf("speech-t"));
   await expect(page.locator('.layer-card[data-layer="speech-t"]').getByLabel("minimum |value|")).toHaveValue("4.50");

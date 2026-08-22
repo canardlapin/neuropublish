@@ -7,10 +7,21 @@ package neuropublish.viewer
   * difference.
   */
 final case class Window(min: Double, max: Double)
-final case class Threshold(
-    mode: String,
-    min: Double
-) // mode: "two-sided" | "off" (Stage 3); positive/negative need upstream work
+
+/** mode ∈ Threshold.Modes. `positive`/`negative` are carried faithfully but cannot yet be rendered
+  * (upstream item).
+  */
+final case class Threshold(mode: String, min: Double)
+object Threshold:
+  val Modes: Set[String] = Set("two-sided", "positive", "negative", "off")
+  val Renderable: Set[String] = Set("two-sided", "off")
+
+/** Colormap identifiers are a closed, URL-safe grammar here; the palette itself lives with the
+  * renderer.
+  */
+object Colormap:
+  private val Grammar = "^[a-z0-9][a-z0-9-]{0,31}$".r
+  def valid(id: String): Boolean = Grammar.matches(id)
 
 final case class LayerDisplay(
     visible: Boolean,
@@ -23,12 +34,14 @@ final case class LayerDisplay(
 final case class WorkspaceLayer(
     id: String, // result field id
     published: LayerDisplay,
-    current: LayerDisplay
+    current: LayerDisplay,
+    recommended: Boolean =
+      true // false when `published` is a data-derived default, not a producer recommendation
 ):
   def modified: Boolean = current != published
 
 final case class Workspace(
-    layers: Vector[WorkspaceLayer], // draw order, underlay excluded
+    layers: Vector[WorkspaceLayer], // list order: first = drawn on top; underlay excluded
     cursor: Option[(Double, Double, Double)],
     layout: WorkspaceLayout,
     inspector: String // "layers" | "analysis" | "provenance"
@@ -58,14 +71,21 @@ object Workspace:
     if i < 0 || j < 0 || i >= v.length || j >= v.length then v
     else v.updated(i, v(j)).updated(j, v(i))
 
+  /** Invalid inputs leave the state unchanged (callers may report that via `tryDispatch`). */
   def reduce(w: Workspace, a: Action): Workspace = a match
     case Action.SetVisible(id, v) => update(w, id)(_.copy(visible = v))
-    case Action.SetOpacity(id, o) => update(w, id)(_.copy(opacity = clamp01(o)))
+    case Action.SetOpacity(id, o) =>
+      if o.isNaN then w else update(w, id)(_.copy(opacity = clamp01(o)))
     case Action.SetWindow(id, win) =>
-      if win.min < win.max then update(w, id)(_.copy(window = win)) else w
+      if win.min.isFinite && win.max.isFinite && win.min < win.max then
+        update(w, id)(_.copy(window = win))
+      else w
     case Action.SetThreshold(id, t) =>
-      if t.min >= 0 then update(w, id)(_.copy(threshold = t)) else w
-    case Action.SetColormap(id, c) => update(w, id)(_.copy(colormap = c))
+      if t.min.isFinite && t.min >= 0 && Threshold.Modes(t.mode) then
+        update(w, id)(_.copy(threshold = if t.mode == "off" then Threshold("off", 0.0) else t))
+      else w
+    case Action.SetColormap(id, c) =>
+      if Colormap.valid(c) then update(w, id)(_.copy(colormap = c)) else w
     case Action.MoveUp(id) =>
       val i = w.layers.indexWhere(_.id == id); w.copy(layers = swap(w.layers, i, i - 1))
     case Action.MoveDown(id) =>
@@ -73,15 +93,17 @@ object Workspace:
     case Action.ResetLayer(id) =>
       w.copy(layers = w.layers.map(l => if l.id == id then l.copy(current = l.published) else l))
     case Action.ResetAll => w.copy(layers = w.layers.map(l => l.copy(current = l.published)))
-    case Action.SetCursor(x, y, z) => w.copy(cursor = Some((x, y, z)))
-    case Action.SetInspector(t) => w.copy(inspector = t)
+    case Action.SetCursor(x, y, z) =>
+      if x.isFinite && y.isFinite && z.isFinite then w.copy(cursor = Some((x, y, z))) else w
+    case Action.SetInspector(t) =>
+      if Set("layers", "analysis", "provenance")(t) then w.copy(inspector = t) else w
     case Action.Layout(la) => w.copy(layout = WorkspaceLayout.reduce(w.layout, la))
 
   /** Invariants the reducer must preserve from a valid state. */
   def isValid(w: Workspace): Boolean =
     w.layers.map(_.id).distinct.length == w.layers.length &&
-      w.layers.forall(l =>
-        l.current.opacity >= 0 && l.current.opacity <= 1 &&
-          l.current.window.min < l.current.window.max && l.current.threshold.min >= 0
-      ) &&
-      w.layout.isValid
+      w.layers.forall { l =>
+        val c = l.current
+        c.opacity >= 0 && c.opacity <= 1 && c.window.min < c.window.max && c.threshold.min >= 0 &&
+        Threshold.Modes(c.threshold.mode) && Colormap.valid(c.colormap)
+      } && w.layout.isValid

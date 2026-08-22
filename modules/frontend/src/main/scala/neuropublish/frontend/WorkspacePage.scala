@@ -13,11 +13,12 @@ import scalafim.image.view.LayerSampleValue
   */
 object WorkspacePage:
   def render(store: WorkspaceStore, onStateChange: Workspace => Unit): HtmlElement =
-    val L = store.loaded; val m = L.manifest
+    val L = store.loaded
+    val m = L.manifest
     val ws = store.state.signal
-    ws.foreach(onStateChange)(using unsafeWindowOwner)
 
     def fmt(d: Double) = if d.abs >= 100 then f"$d%.0f" else f"$d%.2f"
+    def layerOf(id: String) = store.state.now().layers.find(_.id == id)
 
     // ---- navigator: analysis → estimand → measure ----
     val navigator = navTag(
@@ -38,18 +39,17 @@ object WorkspacePage:
               cls := "tree-estimand",
               div(cls := "tree-row estimand", e.label),
               fields.map { f =>
+                val visible = ws.map(_.layers.find(_.id == f.id).exists(_.current.visible))
                 button(
                   cls := "tree-row measure",
                   dataAttr("field") := f.id,
-                  cls.toggle("selected") <--
-                    ws.map(_.layers.find(_.id == f.id).exists(_.current.visible)),
-                  aria.pressed <--
-                    ws.map(_.layers.find(_.id == f.id).exists(_.current.visible)).map(_.toString),
+                  cls.toggle("selected") <-- visible,
+                  aria.pressed <-- visible.map(_.toString),
                   span(Measures.label(f.measure)),
                   span(cls := "muted short", Measures.short(f.measure)),
                   onClick --> { _ =>
-                    val vis = store.state.now().layers.find(_.id == f.id).exists(_.current.visible)
-                    store.dispatch(Workspace.Action.SetVisible(f.id, !vis));
+                    val vis = layerOf(f.id).exists(_.current.visible)
+                    store.dispatch(Workspace.Action.SetVisible(f.id, !vis))
                     store.dispatch(Workspace.Action.SetInspector("layers"))
                   }
                 )
@@ -60,18 +60,21 @@ object WorkspacePage:
       }
     )
 
-    // ---- layer card ----
-    def num(name: String, sig: Signal[Double], onChange: Double => Unit, stepV: String = "0.1") =
+    /** Numeric field: the user types freely; the value commits on change (Enter/blur). Rejected
+      * values are marked invalid.
+      */
+    def num(name: String, sig: Signal[Double], commit: Double => Boolean, stepV: String = "0.1") =
+      val invalid = Var(false)
       label(
         cls := "field",
         span(name),
         input(
           typ := "number",
           stepAttr := stepV,
-          controlled(
-            value <-- sig.map(fmt),
-            onInput.mapToValue --> { v => v.toDoubleOption.foreach(onChange) }
-          )
+          aria.invalid <-- invalid.signal.map(_.toString),
+          cls.toggle("invalid") <-- invalid.signal,
+          value <-- sig.map(fmt),
+          onChange.mapToValue --> { v => invalid.set(!v.toDoubleOption.exists(commit)) }
         )
       )
 
@@ -79,6 +82,8 @@ object WorkspacePage:
       val layer = ws.map(_.layers.find(_.id == f.id))
       val cur = layer.map(_.map(_.current))
       val sm = L.summaries.get(L.assetOf(f))
+      val estimandLabel =
+        m.analyses.flatMap(_.estimands).find(_.id == f.estimand).map(_.label).getOrElse(f.estimand)
       div(
         cls := "layer-card",
         dataAttr("layer") := f.id,
@@ -95,14 +100,12 @@ object WorkspacePage:
           ),
           div(
             cls := "layer-title",
-            span(m.analyses.flatMap(
-              _.estimands
-            ).find(_.id == f.estimand).map(_.label).getOrElse(f.estimand)),
+            span(estimandLabel),
             span(cls := "muted", s" · ${Measures.label(f.measure)}")
           ),
           button(
             cls := "ghost",
-            title := "move up (draw later)",
+            title := "move up (drawn on top)",
             aria.label := "move layer up",
             "↑",
             onClick --> (_ => store.dispatch(Workspace.Action.MoveUp(f.id)))
@@ -114,15 +117,22 @@ object WorkspacePage:
             "↓",
             onClick --> (_ => store.dispatch(Workspace.Action.MoveDown(f.id)))
           ),
-          child <-- layer.map(_.exists(_.modified)).map(mod =>
-            if mod then
-              button(
-                cls := "pill warn reset",
-                "modified · reset",
-                onClick --> (_ => store.dispatch(Workspace.Action.ResetLayer(f.id)))
-              )
-            else span(cls := "pill accent", "published")
-          )
+          child <-- layer.map(l => (l.exists(_.modified), l.exists(_.recommended))).map {
+            (mod, rec) =>
+              if mod then
+                button(
+                  cls := "pill warn reset",
+                  "modified · reset",
+                  onClick --> (_ => store.dispatch(Workspace.Action.ResetLayer(f.id)))
+                )
+              else if rec then span(cls := "pill accent", "published")
+              else
+                span(
+                  cls := "pill",
+                  title := "no display recommendation in the manifest; window from the data range",
+                  "default"
+                )
+          }
         ),
         label(
           cls := "field",
@@ -153,16 +163,13 @@ object WorkspacePage:
                   (v =>
                     store.dispatch(Workspace.Action.SetThreshold(
                       f.id,
-                      Threshold(
-                        v,
-                        store.state.now().layers.find(
-                          _.id == f.id
-                        ).map(_.current.threshold.min).getOrElse(0.0)
-                      )
+                      Threshold(v, layerOf(f.id).map(_.current.threshold.min).getOrElse(0.0))
                     ))
                   )
               ),
               option(value := "two-sided", "two-sided"),
+              option(value := "positive", "positive"),
+              option(value := "negative", "negative"),
               option(value := "off", "off")
             )
           ),
@@ -170,16 +177,17 @@ object WorkspacePage:
             "minimum |value|",
             cur.map(_.map(_.threshold.min).getOrElse(0.0)),
             v =>
-              store.dispatch(Workspace.Action.SetThreshold(
+              store.tryDispatch(Workspace.Action.SetThreshold(
                 f.id,
-                Threshold(
-                  store.state.now().layers.find(
-                    _.id == f.id
-                  ).map(_.current.threshold.mode).getOrElse("two-sided"),
-                  v
-                )
+                Threshold(layerOf(f.id).map(_.current.threshold.mode).getOrElse("two-sided"), v)
               ))
-          )
+          ),
+          child.maybe <-- cur.map(_.filter(c => !Threshold.Renderable(c.threshold.mode)).map(c =>
+            span(
+              cls := "pill warn",
+              s"${c.threshold.mode} threshold cannot be rendered yet; shown unthresholded"
+            )
+          ))
         ),
         div(
           cls := "group",
@@ -188,28 +196,18 @@ object WorkspacePage:
             "minimum",
             cur.map(_.map(_.window.min).getOrElse(0.0)),
             v =>
-              store.dispatch(Workspace.Action.SetWindow(
+              store.tryDispatch(Workspace.Action.SetWindow(
                 f.id,
-                Window(
-                  v,
-                  store.state.now().layers.find(
-                    _.id == f.id
-                  ).map(_.current.window.max).getOrElse(v + 1)
-                )
+                Window(v, layerOf(f.id).map(_.current.window.max).getOrElse(v + 1))
               ))
           ),
           num(
             "maximum",
             cur.map(_.map(_.window.max).getOrElse(1.0)),
             v =>
-              store.dispatch(Workspace.Action.SetWindow(
+              store.tryDispatch(Workspace.Action.SetWindow(
                 f.id,
-                Window(
-                  store.state.now().layers.find(
-                    _.id == f.id
-                  ).map(_.current.window.min).getOrElse(v - 1),
-                  v
-                )
+                Window(layerOf(f.id).map(_.current.window.min).getOrElse(v - 1), v)
               ))
           ),
           label(
@@ -281,8 +279,9 @@ object WorkspacePage:
                 onClick --> (_ => store.dispatch(Workspace.Action.ResetAll))
               )
             ),
-            children <-- ws.map(_.layers.map(_.id)).distinct.map(ids =>
-              ids.flatMap(id => L.volumeFields.find(_.id == id)).map(layerCard)
+            // keyed by layer id so a reorder moves the existing card (focus survives) instead of re-creating it
+            children <-- ws.map(_.layers.map(_.id)).distinct.split(identity)((id, _, _) =>
+              L.volumeFields.find(_.id == id).map(layerCard).getOrElse(emptyNode)
             )
           )
       }
@@ -317,13 +316,13 @@ object WorkspacePage:
             ),
             r.layers.map { lr =>
               val id = lr.layer.toString
-              val label = L.volumeFields.find(_.id == id).map(f =>
+              val name = L.volumeFields.find(_.id == id).map(f =>
                 Measures.short(f.measure)
               ).getOrElse(m.underlays.headOption.map(_.label).getOrElse(id))
               span(
                 cls := "readout-layer",
                 dataAttr("readout") := id,
-                span(cls := "k", label),
+                span(cls := "k", name),
                 span(
                   cls := "mono",
                   lr.value match
@@ -337,7 +336,7 @@ object WorkspacePage:
       }
     )
 
-    div(
+    val page = div(
       cls := "page workspace-page",
       dataAttr("preset") <-- ws.map(_.layout.preset.toString.toLowerCase),
       headerTag(
@@ -358,8 +357,10 @@ object WorkspacePage:
       status,
       m.warnings.headOption.map(w =>
         div(cls := "callout warn", w.hcursor.downField("message").as[String].getOrElse(""))
-      )
+      ),
+      ws --> onStateChange // subscription owned by the page; released on unmount
     )
+    page
 
   private def analysisPanel(L: Loaded) =
     val m = L.manifest

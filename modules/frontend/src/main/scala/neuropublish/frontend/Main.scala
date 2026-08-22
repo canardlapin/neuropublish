@@ -28,17 +28,27 @@ object Main:
         Loaded.load(api, ws, p, Some(rev)).onComplete {
           case Success(l) =>
             Try {
-              val store = WorkspaceStore(l)
-              val fromUrl = ViewUrl(dom.window.location.search, store.state.now())
-              store.state.set(fromUrl)
+              val fromUrl = ViewUrl(dom.window.location.search, l.initialWorkspace)
+              val store =
+                WorkspaceStore(l, fromUrl) // the host's first model already reflects the URL
+              var pending: Option[Int] = None
               WorkspacePage.render(
                 store,
-                w =>
-                  dom.window.history.replaceState(
-                    null,
-                    "",
-                    s"${dom.window.location.pathname}?${ViewUrl.encode(w)}"
-                  )
+                w => {
+                  // coalesce slider ticks; browsers rate-limit replaceState
+                  pending.foreach(dom.window.clearTimeout)
+                  pending = Some(dom.window.setTimeout(
+                    () => {
+                      pending = None
+                      dom.window.history.replaceState(
+                        null,
+                        "",
+                        s"${dom.window.location.pathname}?${ViewUrl.encode(w)}"
+                      )
+                    },
+                    250
+                  ))
+                }
               )
             } match
               case Success(el) => content.set(Some(el)); status.set("ready")

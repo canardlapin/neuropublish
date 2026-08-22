@@ -16,7 +16,7 @@ final case class ScalarSummary(
     quantiles: Vector[Double], // 1, 5, 25, 50, 75, 95, 99 %
     histogram: Vector[Int], // 32 equal-width bins over [min, max]
     finite: Int,
-    missing: Int,
+    missing: Int, // NaN and ±Inf
     zero: Int
 )
 

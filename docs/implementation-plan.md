@@ -463,8 +463,8 @@ and foreign-producer proof slot in behind the same contract). Verified by
 | affine and click/readout values | cursor set from the URL at two oracle probes; status bar shows the oracle's world coordinate and per-layer values exactly |
 | threshold vs window independence | editing one leaves the other unchanged (separate `ViewerAction`s) |
 | no reread on control change | display actions dispatch into the existing controller; only reorder/colormap rebuild the `ViewerModel` from already-decoded volumes |
-| URL round trip | `?l=…&c=…&p=…&i=…` (`ViewUrl`) encodes order and presentation; property-tested round trip; reload restores order, threshold, window |
-| keyboard reach | navigator measures are buttons with `aria-pressed`; Tab/Enter toggles a layer; controls are native inputs |
+| URL round trip | `?l=…&c=…&p=…&i=…` (`ViewUrl`, ids percent-encoded) encodes order and presentation; property-tested round trip with reserved characters; after reload the inspector *and the canvas* reflect order, threshold, window, and colormap from the first frame (colour-pixel check) |
+| keyboard reach | navigator measures are buttons with `aria-pressed`; Tab/Enter toggles a layer; numeric fields commit on Enter/blur and flag rejected values with `aria-invalid`; layer cards are keyed so reorder keeps focus |
 | screenshots | overview, workspace, narrow (900 px), error; loading is a text state |
 | disposal | navigating to the overview unmounts the pane with no page errors (lifecycle suite covers the host) |
 | published vs current, reset | each layer card shows "published" or "modified · reset"; per-layer and whole-view reset |

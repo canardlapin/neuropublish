@@ -6,10 +6,30 @@ package neuropublish.viewer
   *
   * ?l=speech-t:1:0.85:-8,8:ts3.1:cold-hot;speech-z:0:0.85:-8,8:off:cold-hot&c=-56,-22,14&p=volume&i=layers
   *
+  * Layer ids and colormap names are percent-encoded so they can never collide with the separators.
   * Only *current* display state is encoded; published recommendations come from the revision.
   * Unknown or malformed parts are ignored (the revision's recommendation fills in), never guessed.
   */
 object ViewUrl:
+  private def esc(s: String): String =
+    val sb = new StringBuilder
+    s.getBytes("UTF-8").foreach { b =>
+      val c = (b & 0xff).toChar
+      if (c < 128 && c.isLetterOrDigit) || c == '-' || c == '_' || c == '.' then sb += c
+      else sb.append(f"%%${b & 0xff}%02X")
+    }
+    sb.toString
+
+  private def unesc(s: String): String =
+    val out = new java.io.ByteArrayOutputStream
+    var i = 0
+    while i < s.length do
+      if s.charAt(i) == '%' && i + 2 < s.length then
+        try { out.write(Integer.parseInt(s.substring(i + 1, i + 3), 16)); i += 3 }
+        catch case _: NumberFormatException => { out.write(s.charAt(i).toInt); i += 1 }
+      else { out.write(s.charAt(i).toInt); i += 1 }
+    new String(out.toByteArray, "UTF-8")
+
   private def num(d: Double): String =
     if d == d.floor && d.abs < 1e9 then d.toLong.toString
     else f"$d%.4f".replaceAll("0+$", "").replaceAll("\\.$", "")
@@ -19,8 +39,10 @@ object ViewUrl:
       val c = l.current
       val thr = c.threshold.mode match
         case "two-sided" => s"ts${num(c.threshold.min)}"
+        case "positive" => s"pos${num(c.threshold.min)}"
+        case "negative" => s"neg${num(c.threshold.min)}"
         case _ => "off"
-      s"${l.id}:${if c.visible then 1 else 0}:${num(c.opacity)}:${num(c.window.min)},${num(c.window.max)}:$thr:${c.colormap}"
+      s"${esc(l.id)}:${if c.visible then 1 else 0}:${num(c.opacity)}:${num(c.window.min)},${num(c.window.max)}:$thr:${esc(c.colormap)}"
     }.mkString(";")
     val cursor = w.cursor.map((x, y, z) => s"&c=${num(x)},${num(y)},${num(z)}").getOrElse("")
     s"l=$layers$cursor&p=${w.layout.preset.toString.toLowerCase}&i=${w.inspector}"
@@ -30,14 +52,15 @@ object ViewUrl:
     val params = query.stripPrefix("?").split('&').filter(_.contains('=')).map(kv =>
       kv.splitAt(kv.indexOf('='))
     ).map((k, v) => k -> v.drop(1)).toMap
-    val withLayers = params.get("l").map(_.split(';').toVector.flatMap(parseLayer)).map { specs =>
-      val byId = specs.map(s => s._1 -> s._2).toMap
-      val ordered = specs.map(_._1).flatMap(id => base.layers.find(_.id == id)) ++
-        base.layers.filterNot(l => byId.contains(l.id))
-      base.copy(layers =
-        ordered.map(l => byId.get(l.id).fold(l)(d => l.copy(current = d(l.current))))
-      )
-    }.getOrElse(base)
+    val withLayers =
+      params.get("l").map(_.split(';').toVector.flatMap(parseLayer).distinctBy(_._1)).map { specs =>
+        val byId = specs.toMap
+        val ordered = specs.map(_._1).flatMap(id => base.layers.find(_.id == id)) ++
+          base.layers.filterNot(l => byId.contains(l.id))
+        base.copy(layers =
+          ordered.map(l => byId.get(l.id).fold(l)(d => l.copy(current = d(l.current))))
+        )
+      }.getOrElse(base)
     val withCursor = params.get("c").flatMap(parseCursor).fold(withLayers)((x, y, z) =>
       withLayers.copy(cursor = Some((x, y, z)))
     )
@@ -63,14 +86,20 @@ object ViewUrl:
             case "off" => Some(Threshold("off", 0.0))
             case x if x.startsWith("ts") =>
               x.drop(2).toDoubleOption.filter(_ >= 0).map(Threshold("two-sided", _))
+            case x if x.startsWith("pos") =>
+              x.drop(3).toDoubleOption.filter(_ >= 0).map(Threshold("positive", _))
+            case x if x.startsWith("neg") =>
+              x.drop(3).toDoubleOption.filter(_ >= 0).map(Threshold("negative", _))
             case _ => None
-        yield id ->
+          cm <- Some(unesc(cmap)).filter(Colormap.valid)
+        yield unesc(id) ->
           ((d: LayerDisplay) =>
-            d.copy(visible = v, opacity = o, window = w, threshold = t, colormap = cmap)
+            d.copy(visible = v, opacity = o, window = w, threshold = t, colormap = cm)
           )
       case _ => None
 
   private def parseCursor(s: String): Option[(Double, Double, Double)] =
     s.split(',').map(_.toDoubleOption) match
-      case Array(Some(x), Some(y), Some(z)) => Some((x, y, z))
+      case Array(Some(x), Some(y), Some(z)) if x.isFinite && y.isFinite && z.isFinite =>
+        Some((x, y, z))
       case _ => None

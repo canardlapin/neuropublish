@@ -24,8 +24,9 @@ final case class Loaded(
       .sortBy(_.order.getOrElse(Int.MaxValue))
   def assetOf(f: ResultField): String = f.representations.find(_.kind == "volume").get.asset
 
-  /** The producer's recommendation for a field, or a conservative default (axiom 7: never guessed
-    * beyond the data range).
+  /** The producer's recommendation, or — when the manifest carries none — a data-derived default
+    * (window = data range, no threshold) that the layer card labels "default" rather than
+    * "published". Unknown threshold modes are not guessed: they become `off`.
     */
   def published(f: ResultField): LayerDisplay =
     val c = f.publishedDisplay.map(_.hcursor)
@@ -36,9 +37,18 @@ final case class Loaded(
     val hi = c.flatMap(
       _.downField("window").downField("max").as[Double].toOption
     ).orElse(sm.map(_.max)).getOrElse(1.0)
-    val thr = c.flatMap(_.downField("threshold").downField("min").as[Double].toOption)
-      .map(m => Threshold("two-sided", m)).getOrElse(Threshold("off", 0.0))
-    val cmap = c.flatMap(_.downField("colormap").as[String].toOption).getOrElse("cold-hot")
+    val thr = c.flatMap(_.downField("threshold").downField("min").as[Double].toOption).filter(m =>
+      m.isFinite && m >= 0
+    ).map { m =>
+      val mode = c.flatMap(
+        _.downField("threshold").downField("mode").as[String].toOption
+      ).getOrElse("two-sided")
+      Threshold(if Threshold.Modes(mode) then mode else "off", m)
+    }.getOrElse(Threshold("off", 0.0))
+    val cmap = c.flatMap(
+      _.downField("colormap").as[String].toOption
+    ).filter(Colormap.valid).getOrElse("cold-hot")
+    // Product rule (product definition, MVP scope): inferential measures are shown by default, descriptive ones are available.
     val visibleByDefault = f.measure.endsWith("/t-statistic") || f.measure.endsWith("/z-statistic")
     LayerDisplay(
       visible = visibleByDefault,
@@ -50,7 +60,9 @@ final case class Loaded(
 
   def initialWorkspace: Workspace =
     Workspace(
-      volumeFields.map(f => WorkspaceLayer(f.id, published(f), published(f))).toVector,
+      volumeFields.map(f =>
+        WorkspaceLayer(f.id, published(f), published(f), recommended = f.publishedDisplay.isDefined)
+      ).toVector,
       None,
       WorkspaceLayout.default,
       "layers"

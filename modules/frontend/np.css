@@ -21,6 +21,7 @@ button, .btn { display: inline-flex; align-items: center; gap: 8px; height: var(
 button.primary, .btn.primary { background: var(--np-accent); border-color: var(--np-accent); color: #fff; }
 button.ghost { background: transparent; } button:disabled { opacity: .45; cursor: default; }
 input, select { height: var(--np-h-input); padding: 0 8px; border-radius: var(--np-r1); border: 1px solid var(--np-border-strong); background: #0f1219; color: var(--np-text); font: 12px var(--np-mono); }
+input.invalid { border-color: var(--np-warn); }
 input[type=checkbox] { height: 16px; width: 16px; accent-color: var(--np-accent); } input[type=range] { padding: 0; accent-color: var(--np-accent); height: var(--np-s5); }
 .page { padding: var(--np-s6) var(--np-s7); } .page-header h1 { font-size: 22px; font-weight: 600; margin: 0 0 var(--np-s2); } .synopsis { color: var(--np-text-2); max-width: 720px; text-wrap: pretty; }
 .facts { display: flex; gap: var(--np-s3); color: var(--np-text-2); margin: var(--np-s4) 0; } .dot { color: var(--np-muted); }

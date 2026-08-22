@@ -57,6 +57,9 @@ final class VolumeHost(initialModel: ViewerModel, initial: ViewerSession, val pr
     if !r.controller.isClosed then
       r.controller.dispatch(a).left.foreach(e => probe.errors += e.toString)
       scheduleRender(r)
+      a match
+        case _: ViewerAction.SetCursor => r.onCursor.foreach(_())
+        case _ => ()
 
   /** Pick at canvas CSS-pixel coordinates (scaled by devicePixelRatio internally). */
   def pick(r: Live, cssX: Double, cssY: Double): Unit =
@@ -64,6 +67,7 @@ final class VolumeHost(initialModel: ViewerModel, initial: ViewerSession, val pr
       val dpr = dom.window.devicePixelRatio
       r.controller.pick(cssX * dpr, cssY * dpr).left.foreach(e => probe.errors += e.toString)
       scheduleRender(r)
+      r.onCursor.foreach(_())
 
   def scroll(r: Live, cssX: Double, cssY: Double, steps: Int): Unit =
     if !r.controller.isClosed then
@@ -72,6 +76,7 @@ final class VolumeHost(initialModel: ViewerModel, initial: ViewerSession, val pr
         probe.errors += e.toString
       )
       scheduleRender(r)
+      r.onCursor.foreach(_())
 
   /** Current readouts (world cursor and per-layer sample) for one plane, from the viewer's own
     * frame.
@@ -94,7 +99,6 @@ final class VolumeHost(initialModel: ViewerModel, initial: ViewerSession, val pr
           given CanvasRasterFactory = CanvasRasterFactory.browser
           r.controller.render(r.ctx).left.foreach(e => probe.errors += e.toString)
           probe.frames += 1
-          r.onFrame.foreach(_())
       }
       r.raf = Some(id)
       probe.rafOutstanding += 1
@@ -116,8 +120,8 @@ object VolumeHost:
   ):
     var raf: Option[Int] = None
 
-    /** Called after each committed frame (e.g. to refresh readouts). */
-    var onFrame: Option[() => Unit] = None
+    /** Called after a pick or cursor change (readouts are recomputed then, not per frame). */
+    var onCursor: Option[() => Unit] = None
 
 /** Mutable counters a browser test reads back; deliberately plain. */
 final class LifecycleProbe:

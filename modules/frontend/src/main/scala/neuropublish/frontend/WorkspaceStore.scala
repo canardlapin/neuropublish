@@ -4,20 +4,20 @@ import com.raquo.laminar.api.L.*
 import intaglio.{DeviceContext, DisplayThreshold, DisplayWindow, ScalarColorizer}
 import neuropublish.viewer.*
 import neuropublish.viewer.laminar.*
-import org.scalajs.dom
 import scalafim.image.*
 import scalafim.image.view.*
 
 /** Owns the pure `Workspace` state and pushes changes into the ScalaFIM host as typed actions.
-  * Display changes never reread a rendition; only a reorder rebuilds the `ViewerModel` (from
-  * already-decoded volumes).
+  * Display changes never reread a rendition; a reorder or a colormap change rebuilds the
+  * `ViewerModel` (from already-decoded volumes), carrying the viewer state across. The host's first
+  * model is built from `initial`, so a URL-restored order/colormap renders from the first frame.
   */
-final class WorkspaceStore(val loaded: Loaded):
-  val state: Var[Workspace] = Var(loaded.initialWorkspace)
+final class WorkspaceStore(val loaded: Loaded, initial: Workspace):
+  val state: Var[Workspace] = Var(initial)
   val readout: Var[Option[PanelReadout]] = Var(None)
   val probe = new LifecycleProbe
   private var live: Option[VolumeHost.Live] = None
-  private var lastOrder: Vector[String] = state.now().layers.map(_.id)
+  private var lastModelKey: Vector[(String, String)] = modelKey(initial)
 
   private val underlay = loaded.manifest.underlays.headOption.getOrElse(throw RuntimeException(
     "This revision has no underlay."
@@ -28,15 +28,22 @@ final class WorkspaceStore(val loaded: Loaded):
   )
   val space: VolumeSpace = VolumeSpace(underlayVol.space)
 
+  /** What requires a model rebuild: draw order and colormap per layer. */
+  private def modelKey(w: Workspace) = w.layers.map(l => (l.id, l.current.colormap))
+
+  /** Only `two-sided` is renderable today (Intaglio: one transparent band). Other modes render
+    * unthresholded and are flagged in the card.
+    */
+  private def thresholdOf(d: LayerDisplay): DisplayThreshold =
+    if d.threshold.mode == "two-sided" && d.threshold.min > 0
+    then
+      DisplayThreshold.transparentBand(
+        -d.threshold.min,
+        d.threshold.min
+      ).getOrElse(DisplayThreshold.Disabled)
+    else DisplayThreshold.Disabled
+
   private def scalar(id: String, vol: NeuroVol[Double], d: LayerDisplay) =
-    val thr =
-      if d.threshold.mode == "two-sided" && d.threshold.min > 0
-      then
-        DisplayThreshold.transparentBand(
-          -d.threshold.min,
-          d.threshold.min
-        ).getOrElse(DisplayThreshold.Disabled)
-      else DisplayThreshold.Disabled
     SliceLayer(
       LayerId.unsafe(id),
       vol,
@@ -44,12 +51,14 @@ final class WorkspaceStore(val loaded: Loaded):
       ScalarColorizer(
         DisplayWindow.unsafe(d.window.min, d.window.max),
         Colormaps.ramp(d.colormap),
-        threshold = thr
+        threshold = thresholdOf(d)
       ),
       LayerOpacity.unsafe(d.opacity)
     )
 
-  /** Build the ScalaFIM model from the workspace's draw order. Layer draw order = vector order. */
+  /** Build the ScalaFIM model. Workspace lists top-first; ScalaFIM draws vector order bottom→top,
+    * hence the reverse.
+    */
   def model(w: Workspace): ViewerModel =
     val (ulo, uhi) =
       loaded.summaries.get(underlay.asset).map(s => (s.min, s.max)).getOrElse((0.0, 1.0))
@@ -62,27 +71,26 @@ final class WorkspaceStore(val loaded: Loaded):
         intaglio.ColorRamp.Grayscale
       )
     )
-    val overlays = w.layers.reverse.flatMap {
-      l => // last in list = drawn on top, so reverse for draw order bottom→top
-        loaded.volumeFields.find(_.id == l.id).flatMap(f =>
-          loaded.volumes.get(loaded.assetOf(f))
-        ).map(v => scalar(l.id, v, l.current))
+    val overlays = w.layers.reverse.flatMap { l =>
+      loaded.volumeFields.find(_.id == l.id).flatMap(f =>
+        loaded.volumes.get(loaded.assetOf(f))
+      ).map(v => scalar(l.id, v, l.current))
     }
     ViewerModel.unsafe(space, under +: overlays)
 
   val host: VolumeHost = new VolumeHost(
-    model(state.now()),
+    model(initial),
     ViewerSession(ViewerState.centered(space), DeviceContext.unsafe(600.0, 400.0)),
     probe
   )
 
   def attach(l: VolumeHost.Live): Unit =
     live = Some(l)
-    l.onFrame = Some(() => readout.set(host.readout(l)))
+    l.onCursor = Some(() => readout.set(host.readout(l)))
     applyAll(state.now())
-    state.now().cursor.foreach((x, y, z) =>
-      host.dispatch(l, ViewerAction.SetCursor(WorldPoint(x, y, z)))
-    )
+    state.now().cursor match
+      case Some((x, y, z)) => host.dispatch(l, ViewerAction.SetCursor(WorldPoint(x, y, z)))
+      case None => readout.set(host.readout(l))
 
   private def applyAll(w: Workspace): Unit = live.foreach { l =>
     w.layers.foreach { layer =>
@@ -94,31 +102,26 @@ final class WorkspaceStore(val loaded: Loaded):
     }
   }
 
-  private def thresholdOf(d: LayerDisplay): DisplayThreshold =
-    if d.threshold.mode == "two-sided" && d.threshold.min > 0
-    then
-      DisplayThreshold.transparentBand(
-        -d.threshold.min,
-        d.threshold.min
-      ).getOrElse(DisplayThreshold.Disabled)
-    else DisplayThreshold.Disabled
+  /** Like dispatch, but reports whether the reducer accepted the action (e.g. window min ≥ max is
+    * rejected).
+    */
+  def tryDispatch(a: Workspace.Action): Boolean =
+    val before = state.now()
+    dispatch(a)
+    state.now() != before
 
   /** Apply an action to the pure state, then mirror the delta into the renderer. */
   def dispatch(a: Workspace.Action): Unit =
-    val before = state.now()
-    val after = Workspace.reduce(before, a)
+    val after = Workspace.reduce(state.now(), a)
     state.set(after)
     live.foreach { l =>
-      val order = after.layers.map(_.id)
-      val colormapChanged = after.layers.exists(x =>
-        before.layers.find(_.id == x.id).exists(_.current.colormap != x.current.colormap)
-      )
-      if order != lastOrder || colormapChanged then
-        lastOrder = order
+      val key = modelKey(after)
+      if key != lastModelKey then
+        lastModelKey = key
         host.rebuild(
           l,
           model(after)
-        ) // colormap lives in the colorizer; ScalaFIM has no SetColormap action
+        ) // order and colormap live in the model; ScalaFIM has neither a reorder nor a colormap action
         applyAll(after)
       else
         a match
@@ -154,7 +157,9 @@ final class WorkspaceStore(val loaded: Loaded):
           case _ => ()
     }
 
-  /** A pick in the canvas: ScalaFIM resolves it to a world cursor; we mirror the cursor back. */
+  /** A pick in the canvas: the controller reduces it synchronously; we mirror the resulting cursor
+    * back.
+    */
   def pick(cssX: Double, cssY: Double): Unit = live.foreach { l =>
     host.pick(l, cssX, cssY)
     host.state(l).foreach(s =>
