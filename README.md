@@ -38,8 +38,9 @@ subject to change until the first vertical slice ships.
 - [ADR 0001: language-neutral publication protocol](docs/decisions/0001-language-neutral-publication-protocol.md)
 - [ADR 0002: preset workspaces before arbitrary docking](docs/decisions/0002-preset-workspaces-before-arbitrary-docking.md)
 - [ADR 0003: Typelevel backend stack and Laminar frontend](docs/decisions/0003-typelevel-backend-and-laminar-frontend.md)
-- [UI design concept and adoption table](docs/design/README.md)
 - [ADR 0004: single-workspace alpha on a multi-workspace schema](docs/decisions/0004-single-workspace-alpha-on-multi-workspace-schema.md)
+- [ADR 0005: finite indexed domains and spatial-support mappings](docs/decisions/0005-finite-indexed-domains-and-spatial-support-mappings.md)
+- [UI design concept and adoption table](docs/design/README.md)
 
 The first product proof is deliberately narrow: publish one GDS-derived result
 with one anatomical underlay and two statistical overlays, inspect it in the

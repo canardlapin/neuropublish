@@ -84,6 +84,12 @@ now fixed; change them only through a new ADR.
     workspace is created for the alpha lab; every table, query, URL, and
     dedup key is workspace-scoped from the first migration so that multisite
     operation is an enablement, not a migration. See ADR 0004.
+11. **The MVP freezes an open domain hook; parcel behavior follows in Stage
+    5b.** Every domain has an exact key and an open descriptor. Stage 2
+    implements the trusted volume-grid descriptor and preserves unknown
+    descriptors. The later parcel track adds finite-indexed interpretation,
+    atlas realizations, and pullbacks without changing that envelope. See ADR
+    0005.
 
 ## UI design cadence
 
@@ -139,11 +145,13 @@ interaction states, accessibility, responsive and narrow behaviour, and
 component specifications. The Volume workspace is built against this
 system, not against the concept mockup.
 
-### Stages 3–5 — one stage ahead
+### Stages 3–5b — one stage ahead
 
 - provenance and identity/sharing design before Stage 4;
 - Hybrid workspace, surface picking, and empty/absent-representation states
   before Stage 5;
+- parcel-table linking, incomplete-atlas warnings, and pullback provenance
+  before Stage 5b;
 - loading, error, and pending-ingestion states are designed with the stage
   that introduces them.
 
@@ -174,6 +182,10 @@ thin local spine  (push -> commit -> two overlays visible, static token)
 
 parallel R track: fmrireg receipts, fmrigds descriptors, adapters
                   (joins at "R clients" in Stage 5; never blocks Stages 1-4)
+
+post-MVP parcel track: Stage 2 domain hook -> finite-indexed + hard assignment
+                       -> Scala realization adapters -> Stage 5b parcel UI
+                       (does not block the volume MVP)
 
 full arbitrary docking: post-MVP experiment, not an MVP dependency
 ```
@@ -244,6 +256,15 @@ Upstream findings recorded for dogfooding (fix in the owning library, then bump 
   should do this in `dispose()`.
 - `CanvasScrollCoordinator` cannot cancel a pending scheduled flush; a host that unmounts mid-burst has no way to stop it.
 - `image4s-nifti` abstracts its filesystem behind a `private[nifti]` trait, so a browser backend must be added inside image4s if ever wanted.
+- ScalaFIM's atlas path still depends on its local parcellation facade. The
+  direct locus4s `PartialSurjection` migration is tracked by
+  `bd-01KZ6BCHPJEFGJYEVWQZKMBT8V`; the image4s categorical-image bridge is
+  `bd-01KZ6B8RCZ1P8DJG42W2SRCGNR`.
+- The current ScalaFIM atlas adapter derives a `VolumeDomain` key from runtime
+  `hashCode`. Persistent image4s-backed volume identity is tracked by
+  `bd-01KZ6BDWJDSZ34YD0QY573N1V0`. The downstream atlas/publication adapter is
+  `bd-01M0NDTJ145M5NH0V7VD5R9ED9` and waits on those migrations; the neutral
+  Neuropublish descriptor and conformance work does not.
 - ScalaFIM links Scala.js as CommonJS; consumers linking ESModule work fine, but ScalaFIM's own browser pages import Three.js from a hardcoded sibling path. Neuropublish pins `three` 0.185.1 in its own `package.json`.
 - Intaglio is at Scala 3.4.2 and sbt 1.10.5 (workspace outlier); compiles fine as a TASTy dependency.
 
@@ -283,8 +304,17 @@ intentionally provisional except the bundle layout and the revision model.
 - define core JSON Schema 2020-12 documents and freeze the vocabulary needed
   by the reference result;
 - implement stable semantic IDs, schema references, open records, axes,
-  domains, result fields, representations, assets, provenance graphs, warnings,
-  and sensitivity;
+  the common domain envelope, the trusted volume-grid descriptor, result
+  fields, representations, assets, provenance graphs, warnings, and
+  sensitivity;
+- require every domain entry to carry an exact key and an open descriptor
+  record (`schema` plus `payload`); preserve unknown descriptors without
+  granting rendering, alignment, or transformation behavior;
+- specify and test the version-1 volume-grid binary identity preimage so the
+  server can recompute its structural fingerprint without JSON
+  canonicalization;
+- reserve finite-indexed descriptors, atlas realizations, hard assignments,
+  parcel pullbacks, and other relation kinds for the Stage 5b parcel track;
 - distinguish canonical assets (in the digest) from derived representations
   (recorded by the server);
 - keep wire DTOs separate from validated Scala domain types;
@@ -339,6 +369,10 @@ extension fields.
 
 - valid, invalid, old-version, new-extension, and schema-digest-mismatch golden
   fixtures pass;
+- the reference volume domain uses the open descriptor and exact-key envelope;
+  Scala and an independent fixture oracle recompute the same volume-grid
+  fingerprint, while an unknown domain descriptor is preserved but cannot be
+  rendered or aligned;
 - Scala, Julia, R, and `shasum` calculate the same digest for the same
   fixture bytes; a Julia producer independently writes a manifest the server
   admits; a byte-profile violation is rejected with a JSON Pointer path;
@@ -482,6 +516,60 @@ hand-written fixture for provenance content; it does not wait for the R track.
 - static Quarto export and interactive publication can coexist from the same
   source description.
 
+## Stage 5b — post-MVP finite-indexed and parcel track
+
+This track depends on the Stage 2 domain envelope but does not block the
+volume-only MVP. Its neutral protocol work may proceed while the ScalaFIM
+realization adapters wait for the locus4s and image4s migrations recorded in
+the upstream findings.
+
+### Protocol and admission
+
+- trusted `finite-indexed/v1` descriptor with a deterministic ordered-key
+  binary identity preimage;
+- hard-assignment records as checked partial maps from an exact volume or
+  surface support domain to an exact parcel domain;
+- version-1 assignment assets encoded as one signed int32 little-endian value
+  per support element, with `-1` for background and `0 .. |P| - 1` for parcel
+  ordinals;
+- explicit `complete` and `allow-empty` coverage policies; the server computes
+  the empty parcel keys, requires the `allow-empty` declaration to match, and
+  surfaces a warning for admitted incomplete realizations;
+- label-coded source images converted through a recorded label-to-parcel-key
+  table, converter identity and version, parameters, and output digest;
+- hierarchy maps that preserve the authoritative parcel-domain order;
+- distinct reserved records for overlapping Boolean ROI relations and future
+  probabilistic membership; neither is admitted as a hard assignment.
+
+### Realization and workspace proof
+
+- one scalar field whose scientific domain is an exact parcel index;
+- one volume and one surface atlas realization targeting that parcel domain;
+- a searchable parcel table linked to slice and surface selection;
+- server-derived spatial pullbacks that retain the parcel field as the
+  scientific authority and record source field, realization, converter,
+  parameters, and output digest;
+- ScalaFIM atlas adapters built only after their tracked locus4s and image4s
+  identity migrations land;
+- no inferred atlas from parcel count and no overlapping/probabilistic
+  composite rendering policy in this stage.
+
+### Exit criteria
+
+- the correct ordered parcel domain admits, while a same-sized reordered or
+  foreign domain fails with a path-specific error;
+- a complete hard assignment upgrades to a certified partial surjection;
+  an assignment with empty targets is admitted only under `allow-empty`, keeps
+  the full parcel domain, and reports the exact empty parcel keys;
+- a label-coded atlas without an explicit label-to-key conversion receipt is
+  rejected;
+- an overlapping ROI relation cannot pass the hard-assignment validator;
+- a cross-domain pullback without a complete derivation receipt is rejected;
+- parcel selection resolves to the same stable key and value in the table,
+  volume, and surface views;
+- JVM, Scala.js, R, and Julia fixtures agree on finite-domain and assignment
+  identities.
+
 ## Stage 6 — hardening and first hosted release
 
 ### Deliverables
@@ -546,6 +634,7 @@ repository once those stores and paths exist.
 | `neuropublish-v0-1-bootstrap` | Repository, dependency bootstrap, rendition and lifecycle spikes | Clean JVM/JS scaffold, external resolution, fidelity measurements |
 | `neuropublish-v0-1-thin-spine` | Thin local spine | Push → commit → two overlays visible with a static token |
 | `neuropublish-v0-1-protocol` | Neutral core protocol | Versioned schemas, typed validation, byte digest, route scheme |
+| `neuropublish-v0-1-parcel-domains` | Stage 5b finite-indexed and parcel-domain track | Ordered identity, coverage-aware hard assignments, mismatch fixtures, linked parcel-space proof |
 | `neuropublish-v0-1-foreign-producer` | Foreign-producer conformance | Julia bundle publishes without Scala SDK |
 | `neuropublish-v0-1-ingestion` | Server-side rendition and summary worker | Derived representations recorded outside the digest |
 | `neuropublish-v0-1-viewer-prereqs` | Reusable Scala viewer prerequisites | Thresholds, colormaps, lifecycle |
@@ -564,12 +653,14 @@ repository once those stores and paths exist.
 | --- | --- | --- |
 | Protocol becomes Scala-shaped | A foreign producer needs generated Scala knowledge | Keep JSON Schema normative and require Julia conformance before freeze. |
 | Open semantics become stringly | UI branches on labels or arbitrary keys | Namespaced IDs, schema digests, typed known modules, preserved unknown records. |
+| Parcel values attach to the wrong atlas | Equal length or label text is treated as alignment | Exact ordered domain fingerprints, explicit atlas mappings, and foreign/reordered fixtures. |
 | Extensions claim unsafe behavior | Unknown statistic enables inferential conversions | Core controls rendering; only trusted modules grant privileged transformations. |
 | Browser cannot ingest canonical assets faithfully | Affine/topology mismatch in the typed-binary rendition | Stage 0 fidelity measurement; retain canonical assets; server-side derivation keeps readers on the JVM. |
 | Ingestion worker becomes a hidden second server | Control plane starts touching asset bytes | Worker is a separate process with its own queue; control plane only records its results. |
 | First map appears too late | Identity or sharing work precedes a visible overlay | Stage 1 thin spine is the first gate; static token until Stage 4. |
 | Product duplicates ScalaFIM | Viewer-specific state or color logic appears in frontend | Move reusable behavior upstream and require JVM/JS conformance. |
 | Pre-release dependency graph blocks deployment | Local siblings compile but clean consumer fails | Exact pins, explicit overrides, provider release plan, external consumer gate. |
+| Scala atlas adapters inherit unstable domain identity | An adapter still uses ScalaFIM's local parcellation facade or a runtime `hashCode` key | Let the neutral protocol and conformance fixtures proceed; block only Scala realization adapters on `bd-01KZ6BCHPJEFGJYEVWQZKMBT8V` and `bd-01KZ6BDWJDSZ34YD0QY573N1V0`, then verify through `bd-01M0NDTJ145M5NH0V7VD5R9ED9`. |
 | Docking destabilizes canvases | Reparenting loses state or WebGL contexts | Presets first; lifecycle harness before any docking engine. |
 | Login is harder than Here.Now | Tokens copied manually for normal pushes | One-time device flow, project credentials only for automation, direct URL output. |
 | Dedup leaks private asset existence | API reports another tenant's digest | Hide cross-tenant existence and separate public catalog assets. |
@@ -600,7 +691,7 @@ These choices have a decision deadline rather than an implicit default:
 
 ## Immediate next actions
 
-1. ~~Accept ADRs 0001–0004.~~ Accepted 2026-08-22.
+1. ~~Accept ADRs 0001–0005.~~ Accepted 2026-08-22.
 2. Initialize the repository at `canardlapin/neuropublish` and the child Mote
    store.
 3. Scaffold the cross JVM/JS build and protocol conformance module.

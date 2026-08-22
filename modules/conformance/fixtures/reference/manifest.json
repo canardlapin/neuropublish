@@ -24,39 +24,59 @@
   "domains": [
     {
       "id": "mni-2mm",
-      "kind": "volume-grid",
-      "space": "MNI152NLin2009cAsym",
-      "shape": [
-        91,
-        109,
-        91
-      ],
-      "affine": [
-        [
-          -2.0,
-          0.0,
-          0.0,
-          90.0
-        ],
-        [
-          0.0,
-          2.0,
-          0.0,
-          -126.0
-        ],
-        [
-          0.0,
-          0.0,
-          2.0,
-          -72.0
-        ],
-        [
-          0.0,
-          0.0,
-          0.0,
-          1.0
-        ]
-      ]
+      "key": {
+        "descriptor": {
+          "id": "org.neuropublish.domain/volume-grid",
+          "version": "1.0",
+          "digest": "sha256:c1871091d7dc2bf6c5d3b1acafdf2d9c0d47e62d5a737a571ed7433ba778b7ac"
+        },
+        "size": 13440,
+        "structuralFingerprint": "sha256:655d2d778d0cc2fd8f25226d044d65868984fe84510944c86b26bac93b251a37"
+      },
+      "descriptor": {
+        "schema": {
+          "id": "org.neuropublish.domain/volume-grid",
+          "version": "1.0",
+          "digest": "sha256:c1871091d7dc2bf6c5d3b1acafdf2d9c0d47e62d5a737a571ed7433ba778b7ac"
+        },
+        "payload": {
+          "space": "MNI152NLin2009cAsym",
+          "coordinateConvention": "RAS+",
+          "spatialUnit": "mm",
+          "ordinalLayout": "x-fastest",
+          "shape": [
+            24,
+            28,
+            20
+          ],
+          "affine": [
+            [
+              2.0,
+              0.0,
+              0.0,
+              -22.0
+            ],
+            [
+              0.0,
+              2.0,
+              0.0,
+              -30.0
+            ],
+            [
+              0.0,
+              0.0,
+              2.0,
+              -18.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        }
+      }
     }
   ],
   "assets": [

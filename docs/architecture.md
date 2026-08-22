@@ -81,7 +81,8 @@ The portable snapshot contains:
 core protocol version
 snapshot title, synopsis, notes, warnings, sensitivity
 axes and selections
-spatial and table domains
+finite indexed, spatial, and table domains
+exact maps, relations, and spatial-support realizations
 canonical assets
 analyses and estimands
 result fields and representations
@@ -127,8 +128,10 @@ them.
 The core protocol understands:
 
 - axes, selections, and labels;
+- finite indexed domains with exact persistent identity and ordering;
 - volume grids and coordinate transforms;
 - cortical topology and coordinate-system identities;
+- regions, exact maps, hard parcellations, and declared relation kinds;
 - scalar, label, mask, table, and preview representations, distinguishing
   canonical assets from server-derived renditions;
 - immutable assets and derivation relations;
@@ -139,6 +142,69 @@ The core protocol understands:
 
 These concepts determine whether bytes can be loaded and safely displayed.
 They must not depend on an extension's unsupported scientific claims.
+
+### Domains, atlases, and support mappings
+
+`Domain` means the ordered scientific set over which a field is defined. It is
+more general than an image grid and is not synonymous with an atlas. The wire
+model uses a manifest-local reference plus an exact persistent key:
+
+```scala
+final case class DomainKeyV1(
+  descriptor: SchemaRef,
+  size: NonNegativeInt,
+  structuralFingerprint: Sha256
+)
+
+final case class DomainV1(
+  id: DomainId,
+  key: DomainKeyV1,
+  descriptor: OpenRecord
+)
+```
+
+These are illustrative validated-domain types, not permission to derive the
+wire encoding from Scala. Each trusted descriptor defines a fixed binary
+identity preimage from which every producer and the server recompute the
+structural fingerprint. These encodings are descriptor-specific and do not
+canonicalize the manifest. A finite indexed domain uses length-prefixed stable
+keys in domain order; a volume domain includes its space, grid shape, affine,
+coordinate convention, unit, and ordinal layout; a surface domain includes its
+surface space, hemisphere, topology, and vertex-order identity but not geometry
+coordinates. Labels and colors are keyed metadata and do not establish
+alignment. ADR 0005 defines the version-1 byte profiles.
+
+Stage 2 freezes this domain envelope and implements only the trusted
+volume-grid descriptor required by the reference result. Trusted
+finite-indexed interpretation, atlas mappings, parcel pullbacks, and parcel UI
+arrive in the Stage 5b parcel track. Unknown descriptors remain preserved and
+inspectable but confer no rendering or alignment behavior.
+
+A parcel field is defined over a finite parcel domain. An atlas realization is
+a separate mapping from an exact volume or surface support domain to that
+parcel domain. The first mapping kind is a hard assignment represented as a
+checked partial map: background is absence and each supported voxel or vertex
+has exactly one parcel. Coverage is certified separately. `complete` requires
+every parcel to have a non-empty fiber and permits a locus4s
+`PartialSurjection`; `allow-empty` retains the full target domain, records the
+producer-declared and server-verified empty parcel keys, and produces a
+warning. Overlapping ROI collections are Boolean relations, and probabilistic
+atlases are future weighted relations; neither may be disguised as a hard
+parcellation.
+
+The version-1 hard-assignment asset is one signed int32 little-endian ordinal
+per source element. `-1` is background and `0 .. |P| - 1` address the parcel
+domain in its authoritative order. A source label image must be converted with
+an explicit label-to-parcel-key table and a provenance receipt; the server does
+not infer ordinals from label values.
+
+The authoritative parcel asset contains one value per parcel. Volume and
+surface views are checked pullbacks through atlas realizations and are recorded
+as derived representations. Reducing a spatial field into parcel space is a
+different scientific derivation with an explicit reducer and provenance. A
+cross-domain representation is invalid without a derivation receipt naming its
+source field, realization, converter, parameters, and output digest. See [ADR
+0005](decisions/0005-finite-indexed-domains-and-spatial-support-mappings.md).
 
 ### Open semantic records
 
@@ -225,7 +291,10 @@ final case class ResultField(
 ```
 
 The same t-statistic field may have a NIfTI canonical asset, a browser
-typed-binary rendition, left and right surface fields, a table, and a preview.
+typed-binary rendition, left and right surface fields, a parcel-indexed asset,
+a table, and a preview. Its `domain` identifies where the scientific values
+live; a representation on another support must reference an explicit mapping
+or derivation rather than silently changing that domain.
 Every derived representation records its source assets, conversion parameters,
 converter version, and output digest. In the domain model `summary` is
 populated by the ingestion worker; the wire DTO for a producer manifest does
@@ -378,7 +447,11 @@ owning library, and product policy stays in Neuropublish.
 | ScalaFIM `image-view` and `image-view-canvas` | Orthogonal volume model, reducer, picking, caching, Canvas host | Wrap from Laminar; do not reimplement slice geometry or viewer state. |
 | ScalaFIM `surface-view` and `surface-view-three` | Typed surface state, render plans, WebGL, picking, world linking | Wrap from Laminar; application owns DOM lifecycle and cross-view actions. |
 | Intaglio | Display windows, thresholding, opacity, blending, renderer-neutral chrome | Extend reusable colormap and threshold semantics upstream. |
-| image4s, locus4s, mesh4s, spatial4s | Image, domain, topology, and coordinate foundations | Prefer access through the ScalaFIM public boundary until direct ownership is justified. |
+| locus4s | Finite domains, fields, regions, partial maps and surjections, relations, alignment, and aggregation | Use as the Scala algebra behind validated protocol values; keep atlas metadata out of it. |
+| image4s | Exact sampled image/grid identity and ordinal layout | Use checked grid-domain bridges; never derive persistent identity from a runtime hash. |
+| mesh4s and ScalaFIM surface modules | Exact topology and vertex-order identity plus neuroimaging surface policy | Require topology identity for every surface realization. |
+| ScalaFIM `atlas` | Atlas identity, parcel metadata, provenance, hierarchy, and volume/surface realization adapters | Add the rich neuroimaging layer after direct locus4s adoption; do not add another generic domain algebra. |
+| spatial4s | Coordinate and spatial foundations where its public contract fits | Adopt directly only after an ownership review demonstrates the needed boundary. |
 | zarr4s and ScalaFIM archive modules | Candidate browser-ready chunked renditions | The MVP rendition is a typed-binary derivative produced by the ingestion worker; zarr4s is a candidate format for it, validated by the Stage 0 fidelity spike. |
 | templateflow4s | Resolve curated standard templates and surfaces | Resolve server-side or in the publisher and pin exact digests. |
 | bids4s | BIDS entities and provenance references | Reuse typed parsing; do not upload raw BIDS datasets by implication. |

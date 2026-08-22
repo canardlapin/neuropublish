@@ -94,8 +94,10 @@ scientific revision.
    package unknown to Neuropublish must be able to publish a valid result using
    the documented ingredients.
 5. **A result field is not a file.** An estimand, measure, axis selection, and
-   scientific domain identify the field. Volume, surface, table, and preview
-   assets are representations of that field.
+   scientific domain identify the field. A domain may be a volume grid,
+   cortical topology, parcel index, or another exact finite scientific set.
+   Volume, surface, parcel, table, and preview assets are representations or
+   checked views of that field.
 6. **The spatial core is small and typed; scientific semantics are open.** The
    core understands axes, domains, scalar fields, tables, representations,
    assets, provenance graphs, and views. Versioned semantic records describe
@@ -116,7 +118,8 @@ scientific revision.
     than copied into product code.
 11. **The common path is short.** Login happens once, an ordinary push needs
     one command, and a link-shared view opens without an account.
-12. **The MVP uses designed workspace presets.** Arbitrary docking is a later
+12. **The MVP uses a designed Volume workspace.** Surface and Hybrid reuse the
+    same preset model after the first slice. Arbitrary docking is a later
     capability, not a prerequisite for testing the scientific product.
 
 ## Domain language
@@ -131,7 +134,8 @@ Workspace
         ├── immutable scientific snapshot digest
         ├── publication author, time, and message
         └── Scientific snapshot
-            ├── axes and spatial domains
+            ├── axes and finite/spatial domains
+            ├── exact maps, relations, and atlas realizations
             ├── analyses and estimands
             ├── result fields
             ├── representations and assets
@@ -179,15 +183,37 @@ A result field combines:
 - a measure such as effect, standard error, t, z, accuracy, or an open semantic
   record;
 - an axis selection such as group, subject, session, or contrast;
-- a domain such as a volume grid or cortical topology;
+- a domain such as a volume grid, cortical topology, or ordered parcel index;
 - one or more representations;
 - descriptive summaries and a recommended display.
+
+### Domain, atlas realization, and ROI
+
+A domain is the exact ordered set over which field values live. Domain identity
+includes element ordering and a structural fingerprint; equal size or similar
+labels are insufficient. Human labels and colors are metadata keyed to stable
+domain elements.
+
+A parcel result remains a field over its parcel domain. An atlas realization
+maps one exact spatial support domain, such as a volume grid or bilateral
+surface topology, to those parcels. The same parcel field can therefore be
+inspected as a searchable table and displayed on every supplied realization
+without being reclassified as a voxelwise or vertexwise scientific result.
+
+One ROI is a region of a support domain. A disjoint labelled atlas is a hard
+partial assignment to a parcel domain. An overlapping ROI collection is a
+many-to-many relation, and a probabilistic atlas is a weighted relation. The
+product preserves these distinctions and never chooses an overlap winner or
+hard label implicitly. The full contract and Scala library ownership boundary
+are in [ADR 0005](decisions/0005-finite-indexed-domains-and-spatial-support-mappings.md).
 
 ### Representation
 
 A concrete way to inspect or download a field. Initial kinds are volume,
-surface, table, and preview. A field can have both volume and left/right surface
-representations without pretending that those files are independent results.
+surface, parcel-indexed, table, and preview. A spatial representation whose
+support differs from the field domain names the exact mapping or derivation
+that produced it. A field can have volume and left/right surface views without
+pretending that those files are independent results.
 
 ### Saved view
 
@@ -313,6 +339,9 @@ Included:
 
 Deferred:
 
+- surface and Hybrid workspaces;
+- trusted finite-indexed domains, atlas realizations, and parcel-space
+  visualization (the open domain-descriptor hook ships in the MVP protocol);
 - arbitrary docking and popout windows;
 - comments and concurrent collaboration;
 - full institutional RBAC and billing;

@@ -4,6 +4,8 @@ Status: accepted (2026-08-22)
 
 Date: 2026-08-22
 
+Scope clarified: 2026-08-22 (volume-only MVP versus later preset additions)
+
 ## Context
 
 The scientific workspace needs volume, surface, hybrid, and eventually compare
@@ -35,15 +37,16 @@ needed before a Scala DOM interpreter exists.
 
 ## Decision
 
-The MVP commits to three Neuropublish-owned layout presets:
+The workspace vocabulary commits to three Neuropublish-owned layout presets:
 
 - Volume;
 - Surface;
 - Hybrid.
 
-Compare (two linked result or revision views) is the first extension after
-the shared workspace state those three require has been proven to reuse
-cleanly. It is not an MVP commitment.
+The volume-only MVP implements the Volume preset. Surface and Hybrid use the
+same versioned layout model and arrive in Stage 5 after the first vertical
+slice. Compare (two linked result or revision views) is the first extension
+after their shared workspace state has been proven to reuse cleanly.
 
 The implementation uses semantic DOM, CSS Grid, and accessible resizable
 dividers. DOM order remains stable and meaningful. A versioned
@@ -76,7 +79,7 @@ identity, or ScalaFIM renderer state. It only arranges long-lived pane hosts.
 
 ### Costs
 
-- Power users cannot invent arbitrary layouts in the MVP.
+- Power users cannot invent arbitrary layouts in the initial releases.
 - The application must implement good split resizing and pane maximization.
 - A later docking engine requires a deliberate adapter and migration from the
   preset layout document.
