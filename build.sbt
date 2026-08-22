@@ -35,6 +35,8 @@ lazy val scalafimBuild =
     .map(p => file(p).getCanonicalFile.toURI)
     .getOrElse(uri(s"https://github.com/canardlapin/scalafim.git#${Versions.scalafimRevision}"))
 
+lazy val scalafimImageJVM = ProjectRef(scalafimBuild, "imageJVM")
+lazy val scalafimImageJS = ProjectRef(scalafimBuild, "imageJS")
 lazy val scalafimImageViewJVM = ProjectRef(scalafimBuild, "imageViewJVM")
 lazy val scalafimImageViewJS = ProjectRef(scalafimBuild, "imageViewJS")
 lazy val scalafimImageViewCanvasJS = ProjectRef(scalafimBuild, "imageViewCanvasJS")
@@ -104,6 +106,18 @@ lazy val viewerState = crossProject(JSPlatform, JVMPlatform)
   .dependsOn(protocolCore)
   .jvmConfigure(_.dependsOn(scalafimImageViewJVM, scalafimSurfaceViewJVM))
   .jsConfigure(_.dependsOn(scalafimImageViewJS, scalafimSurfaceViewJS))
+
+// Browser-ready typed-binary volume rendition: JVM encodes from canonical
+// assets (ingestion), JVM and JS decode into ScalaFIM volumes (Spike A).
+lazy val rendition = crossProject(JSPlatform, JVMPlatform)
+  .crossType(CrossType.Full)
+  .withoutSuffixFor(JVMPlatform)
+  .in(file("modules/rendition"))
+  .settings(crossSettings("rendition"))
+  .jsSettings(jsSettings)
+  .dependsOn(protocolJson)
+  .jvmConfigure(_.dependsOn(scalafimImageJVM, scalafimImageViewJVM % "test"))
+  .jsConfigure(_.dependsOn(scalafimImageJS, scalafimImageViewJS % "test"))
 
 // Tapir endpoints shared by server and browser client; OpenAPI source.
 lazy val apiContract = crossProject(JSPlatform, JVMPlatform)
@@ -218,6 +232,8 @@ lazy val root = project
     viewerState.js,
     apiContract.jvm,
     apiContract.js,
+    rendition.jvm,
+    rendition.js,
     viewerLaminar,
     frontend,
     backend,

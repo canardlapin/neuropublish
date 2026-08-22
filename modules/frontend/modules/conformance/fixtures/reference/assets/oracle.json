@@ -1,0 +1,63 @@
+{
+  "dim": [24, 28, 20],
+  "spacing": [2, 2, 2],
+  "origin": [-22, -30, -18],
+  "trans": [
+    [2, 0, 0, -22],
+    [0, 2, 0, -30],
+    [0, 0, 2, -18],
+    [0, 0, 0, 1]
+  ],
+  "files": {
+    "t1": "t1.nii",
+    "speech-t": "speech-t.nii",
+    "speech-z": "speech-z.nii"
+  },
+  "probes": [
+    {
+      "voxel0": [11, 13, 9],
+      "world": [0, -4, 0],
+      "t1": 99.375,
+      "speech-t": -0.5,
+      "speech-z": 0
+    },
+    {
+      "voxel0": [0, 0, 0],
+      "world": [-22, -30, -18],
+      "t1": 0,
+      "speech-t": 0,
+      "speech-z": 0
+    },
+    {
+      "voxel0": [23, 27, 19],
+      "world": [24, 24, 20],
+      "t1": 0,
+      "speech-t": 0,
+      "speech-z": 0
+    },
+    {
+      "voxel0": [5, 19, 3],
+      "world": [-12, 8, -12],
+      "t1": 0,
+      "speech-t": 0,
+      "speech-z": 0
+    },
+    {
+      "voxel0": [17, 8, 14],
+      "world": [12, -14, 10],
+      "t1": 32.125,
+      "speech-t": 0,
+      "speech-z": 1.875
+    }
+  ],
+  "sums": {
+    "t1": 215651,
+    "speech-t": -622,
+    "speech-z": -484.5
+  },
+  "nonzero": {
+    "t1": 5376,
+    "speech-t": 2409,
+    "speech-z": 1900
+  }
+}

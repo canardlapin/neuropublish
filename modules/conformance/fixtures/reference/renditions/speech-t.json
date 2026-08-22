@@ -1,0 +1,39 @@
+{
+  "profile" : "org.neuropublish.rendition/volume-f32@0",
+  "shape" : [
+    24,
+    28,
+    20
+  ],
+  "affine" : [
+    [
+      2.0,
+      0.0,
+      0.0,
+      -22.0
+    ],
+    [
+      0.0,
+      2.0,
+      0.0,
+      -30.0
+    ],
+    [
+      0.0,
+      0.0,
+      2.0,
+      -18.0
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "dtype" : "float32",
+  "byteOrder" : "little",
+  "order" : "x-fastest",
+  "missing" : "nan",
+  "source" : "assets/speech-t.nii"
+}
