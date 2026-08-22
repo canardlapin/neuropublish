@@ -137,7 +137,8 @@ lazy val apiContract = crossProject(JSPlatform, JVMPlatform)
   .settings(
     libraryDependencies ++= Seq(
       "com.softwaremill.sttp.tapir" %%% "tapir-core" % Versions.tapir,
-      "com.softwaremill.sttp.tapir" %%% "tapir-json-circe" % Versions.tapir
+      "com.softwaremill.sttp.tapir" %%% "tapir-json-circe" % Versions.tapir,
+      "io.circe" %%% "circe-generic" % Versions.circe
     )
   )
 
@@ -160,7 +161,7 @@ lazy val viewerLaminar = project
 lazy val frontend = project
   .in(file("modules/frontend"))
   .enablePlugins(ScalaJSPlugin)
-  .dependsOn(viewerLaminar, apiContract.js)
+  .dependsOn(viewerLaminar, apiContract.js, rendition.js)
   .settings(commonSettings, jsSettings)
   .settings(
     name := "neuropublish-frontend",
@@ -183,14 +184,18 @@ lazy val frontend = project
 // http4s + Tapir control-plane service.
 lazy val backend = project
   .in(file("modules/backend"))
-  .dependsOn(apiContract.jvm)
+  .dependsOn(apiContract.jvm, rendition.jvm)
   .settings(commonSettings)
   .settings(
     name := "neuropublish-backend",
     libraryDependencies ++= Seq(
       "org.typelevel" %% "cats-effect" % Versions.catsEffect,
       "org.http4s" %% "http4s-ember-server" % Versions.http4s,
+      "org.http4s" %% "http4s-ember-client" % Versions.http4s % Test,
+      "org.http4s" %% "http4s-circe" % Versions.http4s % Test,
       "com.softwaremill.sttp.tapir" %% "tapir-http4s-server" % Versions.tapir,
+      "com.softwaremill.sttp.tapir" %% "tapir-http4s-client" % Versions.tapir % Test,
+      "co.fs2" %% "fs2-io" % Versions.fs2,
       "com.softwaremill.sttp.tapir" %% "tapir-openapi-docs" % Versions.tapir,
       "com.softwaremill.sttp.apispec" %% "openapi-circe-yaml" % Versions.apispec,
       "org.typelevel" %% "munit-cats-effect" % Versions.munitCatsEffect % Test
@@ -208,6 +213,8 @@ lazy val publisherCli = project
       "org.typelevel" %% "cats-effect" % Versions.catsEffect,
       "co.fs2" %% "fs2-io" % Versions.fs2,
       "com.monovore" %% "decline-effect" % Versions.decline,
+      "org.http4s" %% "http4s-ember-client" % Versions.http4s,
+      "com.softwaremill.sttp.tapir" %% "tapir-http4s-client" % Versions.tapir,
       "org.typelevel" %% "munit-cats-effect" % Versions.munitCatsEffect % Test
     )
   )

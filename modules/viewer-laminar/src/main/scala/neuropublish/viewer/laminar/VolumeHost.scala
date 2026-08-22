@@ -30,6 +30,9 @@ final class VolumeHost(model: ViewerModel, initial: ViewerSession, val probe: Li
       probe.resizes += 1
       scheduleRender(r)
 
+  /** Schedule one render for the next animation frame (coalesced). */
+  def requestRender(r: Live): Unit = scheduleRender(r)
+
   private def scheduleRender(r: Live): Unit =
     if r.raf.isEmpty then
       val id = dom.window.requestAnimationFrame { _ =>

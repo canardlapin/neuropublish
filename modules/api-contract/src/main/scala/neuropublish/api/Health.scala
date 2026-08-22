@@ -23,4 +23,4 @@ object Endpoints:
       .out(jsonBody[Health])
       .description("Liveness and protocol version of the control plane.")
 
-  val all: List[AnyEndpoint] = List(health)
+  val all: List[AnyEndpoint] = Protocol.all

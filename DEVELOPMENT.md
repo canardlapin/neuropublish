@@ -19,6 +19,19 @@ Aliases are `np`-prefixed because ScalaFIM's build, loaded by source pin into th
 | `sbt "publisherCli/run validate modules/conformance/fixtures/reference"` | `npub validate` on the reference bundle |
 | `cd modules/frontend && npm install && npm run dev` | Vite dev server with live Scala.js linking |
 | `cd modules/frontend && npm run test:browser` | Playwright lifecycle tests in Chromium against `spike.html` (starts Vite itself) |
+| `scripts/e2e.sh` | Stage 1 proof: build frontend, start a backend on a temp data dir, `npub push` the reference bundle, assert the stale-parent rejection and digest, render in Chromium |
+
+## Running the thin spine by hand
+
+```
+sbt backend/run                       # http://127.0.0.1:8080, token "dev-token", project rotman/sherlock
+NP_TOKEN=dev-token sbt "publisherCli/run push modules/conformance/fixtures/reference --project rotman/sherlock"
+cd modules/frontend && npm run dev    # http://127.0.0.1:5173/w/rotman/p/sherlock (talks to :8080)
+```
+
+Set `NP_STATIC_DIR=modules/frontend/dist` (after `npm run build`) to have the
+backend serve the page itself, which is what the `view` URL printed by `push`
+expects.
 
 ## Upstream Scala libraries
 

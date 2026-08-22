@@ -297,6 +297,18 @@ intentionally provisional except the bundle layout and the revision model.
 - the revision digest equals `sha256(manifest.json)` as computed by
   `shasum -a 256` on the bundle file.
 
+### Status (2026-08-22)
+
+All four criteria pass via `scripts/e2e.sh` (builds the frontend, starts a
+backend on a fresh data directory, runs `npub push`, runs Playwright) and the
+backend's in-process suite. Provisional choices, to be replaced in Stage 2:
+objects flow through the control plane rather than signed object-store URLs;
+the revision store and object store are local-filesystem implementations of
+the algebras; ingestion runs in-process immediately after commit; identity is
+one static token; the viewer has visibility/order/opacity controls only and
+no visual system. The surface (GIFTI) rendition check is still open and moves
+to Stage 3 alongside the surface pane, since Stage 2 has no browser work.
+
 ## Stage 2 — language-neutral protocol and publication spine
 
 ### Protocol

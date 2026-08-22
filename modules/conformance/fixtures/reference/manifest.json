@@ -89,15 +89,15 @@
     },
     {
       "id": "speech-effect",
-      "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000002",
+      "digest": "sha256:2b38327c1c4606258b9c7bcfd169ce769f32a398aa0d56e1e192d09d0ddf6091",
       "mediaType": "application/x-nifti",
-      "size": 1
+      "size": 54112
     },
     {
       "id": "speech-se",
-      "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000003",
+      "digest": "sha256:25600aaf1da936cd6689ff696be414da43f81eb5420510f46a8527cdf63d7a89",
       "mediaType": "application/x-nifti",
-      "size": 1
+      "size": 54112
     },
     {
       "id": "speech-t",

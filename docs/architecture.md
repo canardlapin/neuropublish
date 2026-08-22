@@ -336,6 +336,10 @@ assets are a separate namespace.
 
 ### 3. Upload assets directly
 
+(Stage 1 provisionally routes object uploads through the control plane with
+the same session/URL shape; Stage 2 replaces the URLs with signed
+object-store targets without changing the CLI flow.)
+
 The CLI streams missing objects to S3-compatible storage with bounded FS2
 concurrency, checksums, resumable multipart upload where warranted, and clear
 progress. The application server does not proxy the payload.
