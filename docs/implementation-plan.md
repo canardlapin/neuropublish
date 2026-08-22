@@ -246,7 +246,7 @@ with a static, locally configured bearer token.
 | documentation | `DEVELOPMENT.md`, `docs/architecture.md`, this file |
 | rendition decision | **confirmed**: typed-binary derivative (JSON header + float32) decoded into ScalaFIM objects on JS exactly for float32 sources (the fixtures); float64 and wide-integer sources lose precision in the rendition, documented in the profile, and the canonical asset remains the record. In-browser NIfTI decoding not attempted (image4s-nifti JS is Node-only) |
 
-Upstream findings recorded for dogfooding (fix in the owning library, then bump the pin):
+Upstream findings recorded for dogfooding (fix in the owning library, then bump the pin). Filed 2026-08-22 as motes in the owning stores: scalafim `bd-01M0NS3CM5…` (controller dispose), `bd-01M0NS3EFB…` (Three context loss), `bd-01M0NS3ERV…` (reorder/colorizer actions), `bd-01M0NS3F26…` (scroll cancel), `bd-01M0NS3FBV…` (atlas keys / locus4s), `bd-01M0NS3FNR…` (Three pin); image4s `bd-01M0NS3FZ8…` (NiftiFileSystem); workspace root, tagged `intaglio`: `bd-01M0NS3G6H…` (threshold modes), `bd-01M0NS3G95…` (multi-stop colormaps).
 
 - `CanvasViewerController.close()` only flips a flag; it does not release the viewer/raster caches or `ImageBitmap` handles. Add a real `dispose()`.
 - `ThreeJsRuntime.dispose()` calls `renderer.dispose()` but never forces
