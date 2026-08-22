@@ -226,17 +226,22 @@ with a static, locally configured bearer token.
 
 | Criterion | Evidence |
 | --- | --- |
-| modules compile and test on JVM and JS | `sbt npCheck` green; 49 tests across 9 modules on both platforms |
+| modules compile and test on JVM and JS | `sbt npCheck` green on JVM and Scala.js |
 | clean external resolution | ScalaFIM and its pinned tree cloned from GitHub by SHA on first load; no sibling checkout consulted |
 | volume fidelity | `rendition` suite on JVM and Scala.js: exact shape, affine, every oracle probe value and world coordinate, sums, and `ViewerModel` cursor readouts for underlay + two overlays against an R/neuroim2 oracle |
 | surface fidelity | **open** — GIFTI fixture (`tetra_lh_midthickness.surf.gii` from ScalaFIM) not yet run through a rendition; carried into Stage 1 alongside the surface pane |
-| lifecycle | Playwright in Chromium: volume pane mount/resize/unmount disposes exactly once, cancels outstanding frames; 24 surface mount/unmount cycles (past Chrome's live-context limit) leave `contextState = Available`, no net window listeners, no errors |
+| lifecycle | Playwright in Chromium: volume pane mount/resize/unmount disposes exactly once and cancels outstanding frames; a sentinel surface pane stays mounted through 24 further surface mount/unmount cycles (more than Chrome's live-context budget) and keeps `contextState = Available` with zero `webglcontextlost` events on any canvas; every `EventTarget.addEventListener` is matched by a remove |
 | documentation | `DEVELOPMENT.md`, `docs/architecture.md`, this file |
-| rendition decision | **confirmed**: typed-binary derivative (JSON header + float32) decoded into ScalaFIM objects on JS with zero loss; in-browser NIfTI decoding not attempted (image4s-nifti JS is Node-only) |
+| rendition decision | **confirmed**: typed-binary derivative (JSON header + float32) decoded into ScalaFIM objects on JS exactly for float32 sources (the fixtures); float64 and wide-integer sources lose precision in the rendition, documented in the profile, and the canonical asset remains the record. In-browser NIfTI decoding not attempted (image4s-nifti JS is Node-only) |
 
 Upstream findings recorded for dogfooding (fix in the owning library, then bump the pin):
 
 - `CanvasViewerController.close()` only flips a flag; it does not release the viewer/raster caches or `ImageBitmap` handles. Add a real `dispose()`.
+- `ThreeJsRuntime.dispose()` calls `renderer.dispose()` but never forces
+  context loss, so disposed canvases keep counting against the browser's live
+  WebGL budget until garbage collection; 24 mount/unmount cycles evicted older
+  contexts until the host forced loss via `WEBGL_lose_context` itself. Upstream
+  should do this in `dispose()`.
 - `CanvasScrollCoordinator` cannot cancel a pending scheduled flush; a host that unmounts mid-burst has no way to stop it.
 - `image4s-nifti` abstracts its filesystem behind a `private[nifti]` trait, so a browser backend must be added inside image4s if ever wanted.
 - ScalaFIM links Scala.js as CommonJS; consumers linking ESModule work fine, but ScalaFIM's own browser pages import Three.js from a hardcoded sibling path. Neuropublish pins `three` 0.185.1 in its own `package.json`.

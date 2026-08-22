@@ -14,7 +14,7 @@ trait RendererHost[R]:
   /** Notify the renderer that its canvas box changed. */
   def resize(r: R, widthPx: Int, heightPx: Int): Unit
 
-  /** Release listeners, GPU resources, and caches. Must be idempotent. */
+  /** Release listeners, GPU resources, and caches. Implementations must be idempotent. */
   def dispose(r: R): Unit
 
 object RendererHost:
@@ -22,7 +22,7 @@ object RendererHost:
   final class Handle[R](val renderer: R, host: RendererHost[R]):
     private var disposed = false
     private var observer: Option[dom.ResizeObserver] = None
-    def observe(el: dom.Element): Unit =
+    def observe(el: dom.Element): Unit = if !disposed then
       val o = new dom.ResizeObserver((entries, _) =>
         entries.headOption.foreach { e =>
           host.resize(renderer, e.contentRect.width.toInt, e.contentRect.height.toInt)

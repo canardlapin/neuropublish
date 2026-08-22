@@ -22,5 +22,9 @@ object Versions {
   // Upstream Scala imaging libraries are consumed as exact git revisions
   // (see docs/architecture.md, "Scala library dogfooding"). Override locally
   // with -Dneuropublish.scalafim.build=/path/to/checkout.
+  // ScalaFIM's build is loaded into this sbt session, so its sbt-scalajs and
+  // sbt-scalajs-crossproject plugin versions must match project/plugins.sbt
+  // here (1.22.0 / 1.3.2 at this revision) or Scala.js IR linking fails
+  // opaquely. Re-check both when bumping the pin.
   val scalafimRevision = "97c7ff16ff24739a147fd43d7a5477d1024071ea"
 }

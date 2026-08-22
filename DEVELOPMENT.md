@@ -38,8 +38,8 @@ implicit sibling checkout; a clean consumer must resolve from the pin alone.
 ## Module map
 
 See `docs/architecture.md`. Stage 0 scaffolds `protocol-core`, `protocol-json`,
-`viewer-state`, `api-contract` (cross JVM/JS), `viewer-laminar`, `frontend`
-(JS), and `backend`, `publisher-cli`, `conformance` (JVM). `domain`,
+`viewer-state`, `api-contract`, `rendition` (cross JVM/JS), `viewer-laminar`,
+`frontend` (JS), and `backend`, `publisher-cli`, `conformance` (JVM). `domain`,
 `semantic-registry`, `persistence`, and `ingestion` arrive with Stages 1–2.
 
 ## Fixtures

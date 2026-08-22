@@ -1,0 +1,9 @@
+#!/bin/sh
+# gh for this repository only, routed through the isolated canardlapin profile.
+# Fails closed unless the repo-local identity is canardlapin.
+set -eu
+acct=$(git config --local --get github.account || true)
+[ "$acct" = "canardlapin" ] || { echo "gh-repo: repo-local github.account is '$acct', expected canardlapin" >&2; exit 2; }
+unset GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN
+export GH_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/gh-canardlapin"
+exec "${GH_BIN:-/Users/bbuchsbaum/.local/bin/gh}" "$@"

@@ -47,6 +47,37 @@ class ByteProfileSuite extends FunSuite:
     reject("""{"a":1.}""", "fraction digits")
     reject("""{"a":NaN}""", "unexpected character")
   }
+  test("accepts RFC 8259 corner cases") {
+    List(
+      "{\"a\":-0}",
+      "{\"a\":1e5}",
+      "{\"a\":1E+5}",
+      "{\"a\":1.5e-3}",
+      "{\"a\":{},\"b\":[],\"c\":[[{}]]}",
+      "{\"a\":\"\\/\\b\\f\\n\\r\\t\\\"\\\\\"}",
+      "{\"a\":\"\\u00e9\\ud83e\\udde0\"}",
+      "{ }",
+      "{\n\t\"a\" : [ 1 , 2 ] \n}"
+    ).foreach(t => assert(ByteProfile.admit(bytes(t)).isRight, t))
+  }
+  test("rejects signed or malformed \\u escapes (Integer.parseInt would accept them)") {
+    reject("{\"a\":\"\\u+041\"}", "bad \\u escape")
+    reject("{\"a\":\"\\u-041\"}", "bad \\u escape")
+    reject("{\"a\":\"\\u00g1\"}", "bad \\u escape")
+  }
+  test("rejects nesting deeper than the cap instead of overflowing the stack") {
+    val deep = "{\"a\":" + "[" * 100000 + "]" * 100000 + "}"
+    reject(deep, "nesting deeper than")
+  }
+  test("duplicate keys are compared after escape decoding (RFC 8259 section 4)") {
+    reject("{\"a\":1,\"\\u0061\":2}", "duplicate object key \"a\"")
+  }
+  test("violation offsets are byte offsets, even after non-ASCII text") {
+    ByteProfile.admit(bytes("{\"\u00e9\":1,\"\u00e9\":2}")) match
+      case Left(vs) => assertEquals(vs.head.offset, 8)
+      case Right(_) => fail("admitted")
+  }
+
   test("whitespace changes the digest, not admissibility") {
     val a = ByteProfile.admit(bytes("""{"a":1}"""))
     val b = ByteProfile.admit(bytes("""{ "a" : 1 }"""))

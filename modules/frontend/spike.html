@@ -6,17 +6,21 @@
   <body>
     <div id="vol" class="host"></div>
     <div id="surf" class="host"></div>
+    <div id="sentinel" class="host"></div>
     <script type="module">
-      import * as THREE from "three";
-      import * as app from "./main.js";
+      // Count every listener registration on every EventTarget (canvas, window, document, ...).
       const counts = { add: 0, remove: 0 };
-      const origAdd = window.addEventListener.bind(window), origRemove = window.removeEventListener.bind(window);
-      window.addEventListener = (...a) => { counts.add++; return origAdd(...a); };
-      window.removeEventListener = (...a) => { counts.remove++; return origRemove(...a); };
+      const proto = EventTarget.prototype;
+      const origAdd = proto.addEventListener, origRemove = proto.removeEventListener;
+      proto.addEventListener = function (...a) { counts.add++; return origAdd.apply(this, a); };
+      proto.removeEventListener = function (...a) { counts.remove++; return origRemove.apply(this, a); };
+      const THREE = await import("three");
+      const app = await import("./main.js");
       window.__spike = {
         mountVolume: (id) => app.spikeMountVolume(id),
         mountSurface: (id) => app.spikeMountSurface(id, THREE),
         unmount: (id) => app.spikeUnmount(id),
+        contextState: (id) => app.spikeSurfaceContextState(id),
         report: () => ({ ...app.spikeReport(), listeners: { ...counts } }),
         resize: (id, w, h) => { const el = document.getElementById(id); el.style.width = w + "px"; el.style.height = h + "px"; },
       };

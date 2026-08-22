@@ -20,6 +20,13 @@ ThisBuild / githubWorkflowJavaVersions := Seq(JavaSpec.temurin("21"))
 ThisBuild / tlCiHeaderCheck := false
 ThisBuild / tlCiDocCheck := false
 ThisBuild / tlFatalWarnings := false
+ThisBuild / githubWorkflowBuild := Seq(WorkflowStep.Sbt(List("npCheck"), name = Some("Check")))
+ThisBuild / githubWorkflowBuildPreamble := Seq(
+  WorkflowStep.Use(
+    UseRef.Public("actions", "setup-node", "v4"),
+    params = Map("node-version" -> "22")
+  )
+)
 
 // Pre-release: no publication until Stage 6 decides a release channel.
 ThisBuild / tlCiReleaseBranches := Seq()

@@ -19,9 +19,14 @@ final class VolumeHost(model: ViewerModel, initial: ViewerSession, val probe: Li
     Live(canvas, ctx, controller)
 
   def resize(r: Live, w: Int, h: Int): Unit =
-    if w > 0 && h > 0 then
-      r.canvas.width = w; r.canvas.height = h
-      r.controller.dispatch(ViewerAction.Resize(DeviceContext.unsafe(w.toDouble, h.toDouble)))
+    if w > 0 && h > 0 && !r.controller.isClosed then
+      val dpr = dom.window.devicePixelRatio
+      val pw = math.max(1, math.round(w * dpr).toInt)
+      val ph = math.max(1, math.round(h * dpr).toInt)
+      r.canvas.width = pw; r.canvas.height = ph
+      r.controller
+        .dispatch(ViewerAction.Resize(DeviceContext.unsafe(pw.toDouble, ph.toDouble)))
+        .left.foreach(e => probe.errors += e.toString)
       probe.resizes += 1
       scheduleRender(r)
 
@@ -38,11 +43,13 @@ final class VolumeHost(model: ViewerModel, initial: ViewerSession, val probe: Li
       r.raf = Some(id)
       probe.rafOutstanding += 1
 
+  /** Idempotent: a second call finds the controller closed and nothing pending. */
   def dispose(r: Live): Unit =
     r.raf.foreach { id => dom.window.cancelAnimationFrame(id); probe.rafOutstanding -= 1 }
     r.raf = None
-    r.controller.close()
-    probe.disposed += 1
+    if !r.controller.isClosed then
+      r.controller.close()
+      probe.disposed += 1
 
 object VolumeHost:
   final class Live(
@@ -60,4 +67,5 @@ final class LifecycleProbe:
   var frames = 0
   var rafOutstanding = 0
   var lastContextState = "n/a"
+  var contextLost = 0
   val errors = scala.collection.mutable.ListBuffer.empty[String]

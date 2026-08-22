@@ -18,6 +18,8 @@ object LifecycleSpike:
   private val surfaceProbe = new LifecycleProbe
   private var roots = Map.empty[String, RootNode]
   private var handles = Map.empty[String, RendererHost.Handle[?]]
+  private var surfaces = Map.empty[String, (SurfaceHost, SurfaceHost.Live)]
+  private var disposedHandles = 0
 
   private lazy val model: ViewerModel =
     val space = VolumeSpace(NeuroSpace(Vector(16, 16, 16)))
@@ -47,7 +49,13 @@ object LifecycleSpike:
   @JSExportTopLevel("spikeMountSurface")
   def mountSurface(containerId: String, three: js.Dynamic): Unit =
     val host = new SurfaceHost(three, surfaceProbe)
-    mount(containerId, RendererHost.pane(host, h => handles += containerId -> h))
+    mount(
+      containerId,
+      RendererHost.pane(
+        host,
+        h => { handles += containerId -> h; surfaces += containerId -> (host, h.renderer) }
+      )
+    )
 
   private def mount(containerId: String, pane: HtmlElement): Unit =
     val container = dom.document.getElementById(containerId)
@@ -57,6 +65,14 @@ object LifecycleSpike:
   def unmount(containerId: String): Unit =
     roots.get(containerId).foreach(_.unmount())
     roots -= containerId
+    handles.get(containerId).foreach(h => if h.isDisposed then disposedHandles += 1)
+    handles -= containerId
+    surfaces -= containerId
+
+  /** Context state of a still-mounted surface pane (the leak sentinel). */
+  @JSExportTopLevel("spikeSurfaceContextState")
+  def surfaceContextState(containerId: String): String =
+    surfaces.get(containerId).map((h, live) => h.contextState(live)).getOrElse("unmounted")
 
   @JSExportTopLevel("spikeReport")
   def report(): js.Dynamic =
@@ -67,11 +83,12 @@ object LifecycleSpike:
       frames = x.frames,
       rafOutstanding = x.rafOutstanding,
       lastContextState = x.lastContextState,
+      contextLost = x.contextLost,
       errors = js.Array(x.errors.toSeq*)
     )
     js.Dynamic.literal(
       volume = p(volumeProbe),
       surface = p(surfaceProbe),
-      handlesDisposed = handles.values.count(_.isDisposed),
-      handles = handles.size
+      disposedHandles = disposedHandles,
+      liveHandles = handles.size
     )

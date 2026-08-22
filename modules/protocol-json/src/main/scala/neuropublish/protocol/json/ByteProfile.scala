@@ -22,9 +22,23 @@ object ByteProfile:
     then errors += Violation(0, "UTF-8 byte order mark is not allowed")
     Utf8.validate(bytes).foreach(o => errors += Violation(o, "invalid UTF-8 sequence"))
     val text = new String(bytes, "UTF-8")
-    errors ++= Scanner.scan(text)
+    errors ++= Scanner.scan(text).map(v => v.copy(offset = byteOffset(text, v.offset)))
     val es = errors.result()
     if es.isEmpty then Right(Sha256.of(bytes)) else Left(es)
+
+  /** UTF-8 byte offset of a UTF-16 char index, so every Violation reports bytes. */
+  private def byteOffset(text: String, charIndex: Int): Int =
+    var bytes = 0
+    var i = 0
+    val end = math.min(charIndex, text.length)
+    while i < end do
+      val c = text.charAt(i)
+      if c < 0x80 then bytes += 1
+      else if c < 0x800 then bytes += 2
+      else if Character.isHighSurrogate(c) && i + 1 < text.length then { bytes += 4; i += 1 }
+      else bytes += 3
+      i += 1
+    bytes
 
   /** Strict UTF-8 validation (rejects overlongs, surrogates, > U+10FFFF). Returns first bad offset.
     */
@@ -58,8 +72,12 @@ object ByteProfile:
     * unpaired surrogate escapes.
     */
   private[json] object Scanner:
+    /** Nesting limit; deeper manifests are rejected rather than risking a stack overflow. */
+    val MaxDepth = 512
+
     def scan(s: String): List[Violation] =
       val out = List.newBuilder[Violation]
+      depth = 0
       var i = skipWs(s, 0)
       if i >= s.length || s.charAt(i) != '{' then
         out += Violation(i, "manifest must be exactly one JSON object")
@@ -77,12 +95,22 @@ object ByteProfile:
       do i += 1
       i
 
+    private var depth = 0
+
     private def fail(
         out: collection.mutable.Builder[Violation, List[Violation]],
         i: Int,
         m: String
     ): Int =
       out += Violation(i, m); Int.MaxValue
+
+    private def enter(
+        out: collection.mutable.Builder[Violation, List[Violation]],
+        i: Int
+    ): Boolean =
+      depth += 1
+      if depth > MaxDepth then { fail(out, i, s"nesting deeper than $MaxDepth"); false }
+      else true
 
     private def value(
         s: String,
@@ -92,8 +120,10 @@ object ByteProfile:
       val i = skipWs(s, from)
       if i >= s.length then return fail(out, i, "unexpected end of input")
       s.charAt(i) match
-        case '{' => obj(s, i + 1, out)
-        case '[' => arr(s, i + 1, out)
+        case '{' => if enter(out, i) then { val r = obj(s, i + 1, out); depth -= 1; r }
+          else Int.MaxValue
+        case '[' => if enter(out, i) then { val r = arr(s, i + 1, out); depth -= 1; r }
+          else Int.MaxValue
         case '"' => string(s, i + 1, out)._1
         case 't' => literal(s, i, "true", out)
         case 'f' => literal(s, i, "false", out)
@@ -167,18 +197,30 @@ object ByteProfile:
                 sb += hi.toChar += lo.toChar; i += 12
               else if hi >= 0xdc00 && hi <= 0xdfff then
                 return (fail(out, i, "lone low surrogate escape"), "")
-              else sb += hi.toChar;
-              i += 6
+              else
+                sb += hi.toChar
+                i += 6
             case e => return (fail(out, i, s"bad escape '\\$e'"), "")
-        else sb += c;
-        i += 1
+        else
+          sb += c
+          i += 1
       (fail(out, i, "unterminated string"), "")
 
     private def hex4(s: String, at: Int): Int =
       if at + 4 > s.length then -1
       else
-        try Integer.parseInt(s.substring(at, at + 4), 16)
-        catch case _: NumberFormatException => -1
+        var v = 0
+        var k = 0
+        while k < 4 do
+          val c = s.charAt(at + k)
+          val d =
+            if c >= '0' && c <= '9' then c - '0'
+            else if c >= 'a' && c <= 'f' then c - 'a' + 10
+            else if c >= 'A' && c <= 'F' then c - 'A' + 10
+            else return -1
+          v = (v << 4) | d
+          k += 1
+        v
 
     private def obj(
         s: String,

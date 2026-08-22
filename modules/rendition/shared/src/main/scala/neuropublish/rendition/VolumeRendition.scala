@@ -86,6 +86,9 @@ object VolumeRendition:
         Left("unsupported encoding")
       else if h.shape.length != 3 || h.affine.length != 4 || h.affine.exists(_.length != 4) then
         Left("shape must be 3-D and affine 4x4")
+      else if h.shape.exists(_ <= 0) then Left("shape entries must be positive")
+      else if h.shape.map(_.toLong).product * 4L > Int.MaxValue.toLong then
+        Left("volume too large for a single rendition payload")
       else Right(h)
     }
 
@@ -93,8 +96,10 @@ object VolumeRendition:
       header: VolumeRenditionHeader,
       payload: Array[Byte]
   ): Either[String, NeuroVol[Double]] =
-    val n = header.shape.product
-    if payload.length != n * 4 then Left(s"payload has ${payload.length} bytes, expected ${n * 4}")
+    val n = header.shape.product // validated positive and bounded by decodeHeader
+    if header.shape.exists(_ <= 0) then Left("shape entries must be positive")
+    else if payload.length != n * 4 then
+      Left(s"payload has ${payload.length} bytes, expected ${n * 4}")
     else
       val values = new Array[Double](n)
       var i = 0
