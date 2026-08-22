@@ -338,7 +338,8 @@ modules/
 ├── protocol-core/       # cross JVM/JS wire-independent core types
 ├── protocol-json/       # cross JVM/JS codecs, byte-profile admission, schema fixtures
 ├── semantic-registry/   # trusted interpreters, schemas, migrations, facts
-├── viewer-state/        # cross JVM/JS workspace, layers, and saved views
+├── viewer-state/        # cross JVM/JS workspace, layers, and saved views (no app deps)
+├── viewer-laminar/      # Laminar hosts for ScalaFIM volume/surface (no app deps)
 ├── api-contract/        # cross JVM/JS Tapir endpoints, OpenAPI, Scala.js client
 ├── ingestion/           # rendition and summary worker over canonical assets
 ├── frontend/            # Scala.js, Laminar, Airstream, Vite
@@ -382,7 +383,7 @@ owning library, and product policy stays in Neuropublish.
 | templateflow4s | Resolve curated standard templates and surfaces | Resolve server-side or in the publisher and pin exact digests. |
 | bids4s | BIDS entities and provenance references | Reuse typed parsing; do not upload raw BIDS datasets by implication. |
 | scaladock | Typed layout tree and persistence ideas | Current implementation is JVM/JavaFX; cross-compile the core only if later docking evidence justifies it. |
-| Eidolon | Existing Laminar/Vite workbench patterns | Reuse patterns and design tokens selectively; do not couple the products. |
+| Eidolon | A separate product that may later consume Neuropublish viewer modules | Not a dependency. Keep `viewer-state` and `viewer-laminar` free of application stores, routing, and server types so Eidolon can depend on them without taking the product. |
 
 Most of these libraries are pre-release or source-only in the live workspace.
 Neuropublish must use exact artifacts or full Git revisions as defaults, with
@@ -420,6 +421,26 @@ The first implementation must not assume capabilities that are not present:
    making either renderer authoritative for the other.
 
 These are explicit upstream work items, not hidden product glue.
+
+## Viewer modularity
+
+The viewer is built as two reusable modules plus the application that uses
+them:
+
+- `viewer-state` (JVM/JS): pure workspace model — application layers, result
+  selection, linked world coordinate, layout preset, `WorkspaceLayoutV1`, and
+  the reducers over them. Depends on ScalaFIM/Intaglio core types only.
+- `viewer-laminar` (JS): Laminar components that host a ScalaFIM volume
+  controller or Three.js surface backend, own their lifecycle, translate
+  events to typed actions, and render layer controls. Depends on
+  `viewer-state`, ScalaFIM browser hosts, and Laminar; knows nothing about
+  projects, revisions, routes, identity, or the HTTP API.
+- `frontend`: the Neuropublish application — stores, routing, API client,
+  and the pages that compose `viewer-laminar` components.
+
+Eidolon or any other product can depend on the first two without the third.
+Anything that is not Neuropublish-specific goes in one of the first two or
+upstream in ScalaFIM/Intaglio.
 
 ## Frontend state and lifecycle
 

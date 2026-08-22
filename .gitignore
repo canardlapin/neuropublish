@@ -1,0 +1,25 @@
+# sbt / scala
+target/
+project/target/
+project/project/
+.bsp/
+.metals/
+.bloop/
+.scala-build/
+*.class
+*.log
+
+# js
+node_modules/
+dist/
+.vite/
+
+# local overrides and secrets (see docs/architecture.md)
+local.sbt
+*.local.conf
+.env
+
+# os / editors
+.DS_Store
+.idea/
+.vscode/
