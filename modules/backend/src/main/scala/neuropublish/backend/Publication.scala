@@ -41,11 +41,15 @@ final class Publication(
           case Left(m) => IO.pure(Left(err("bad_request", m)))
           case Right(md) =>
             val l = Protocol.limits
-            if req.assets.length > l.maxObjects then
+            if req.assets.exists(_.size < 0) || req.manifestSize < 0 then
+              IO.pure(Left(err("bad_request", "sizes must be non-negative")))
+            else if req.assets.length > l.maxObjects then
               IO.pure(Left(err("payload_too_large", s"more than ${l.maxObjects} objects")))
             else if req.assets.exists(_.size > l.maxObjectBytes) then
               IO.pure(Left(err("payload_too_large", "an object exceeds the size limit")))
-            else if req.assets.map(_.size).sum > l.maxSessionBytes then
+            else if req.assets.foldLeft(0L)((acc, a) => math.addExact(acc, a.size)) >
+                l.maxSessionBytes
+            then
               IO.pure(Left(err("payload_too_large", "session exceeds the size limit")))
             else
               req.assets.traverse(a =>
@@ -74,7 +78,8 @@ final class Publication(
     }
 
   private def session(id: String): IO[Either[ApiError, UploadSession]] =
-    sessions.get.map(_.get(id).toRight(err("not_found", s"upload session $id does not exist")))
+    if !Ids.valid(id) then IO.pure(Left(err("not_found", s"upload session $id does not exist")))
+    else sessions.get.map(_.get(id).toRight(err("not_found", s"upload session $id does not exist")))
 
   def uploadObject(id: String, digest: String, bytes: Array[Byte]): IO[Either[ApiError, Unit]] =
     session(id).flatMap {
@@ -82,9 +87,16 @@ final class Publication(
       case Right(s) =>
         Sha256.parse(digest) match
           case Left(m) => IO.pure(Left(err("bad_request", m)))
-          case Right(d) if !s.inventory.exists(_.digest == d.render) =>
-            IO.pure(Left(err("bad_request", s"$digest is not in this session's inventory")))
-          case Right(d) => objects.put(d, bytes).map(_.leftMap(m => err("bad_request", m)))
+          case Right(d) =>
+            s.inventory.find(_.digest == d.render) match
+              case None =>
+                IO.pure(Left(err("bad_request", s"$digest is not in this session's inventory")))
+              case Some(declared) if declared.size != bytes.length.toLong =>
+                IO.pure(Left(err(
+                  "bad_request",
+                  s"$digest: ${bytes.length} bytes received, ${declared.size} declared"
+                )))
+              case Some(_) => objects.put(d, bytes).map(_.leftMap(m => err("bad_request", m)))
     }
 
   def uploadManifest(id: String, bytes: Array[Byte]): IO[Either[ApiError, Unit]] =
@@ -92,7 +104,12 @@ final class Publication(
       case Left(e) => IO.pure(Left(e))
       case Right(s) =>
         val d = Sha256.of(bytes)
-        if d.hex != s.manifestDigest.hex then
+        if bytes.length.toLong != s.manifestSize then
+          IO.pure(Left(err(
+            "bad_request",
+            s"manifest: ${bytes.length} bytes received, ${s.manifestSize} declared"
+          )))
+        else if d.hex != s.manifestDigest.hex then
           IO.pure(Left(err(
             "bad_request",
             s"manifest digest mismatch: declared ${s.manifestDigest.render}, received ${d.render}"
@@ -121,35 +138,40 @@ final class Publication(
                     if problems.nonEmpty then
                       IO.pure(Left(err("bad_request", problems.mkString("; "))))
                     else
-                      // the manifest bytes are the scientific record; store them immutably by digest
-                      objects.put(digest, bytes).flatMap(r =>
-                        IO.fromEither(r.leftMap(IllegalStateException(_)))
-                      ) *>
-                        IO.realTimeInstant.flatMap { now =>
-                          revisions.commit(
-                            s.key,
-                            s.parent,
-                            digest,
-                            req.message,
-                            now.toString
-                          ).flatMap {
-                            case Left(StaleParent(head)) =>
-                              IO.pure(Left(err(
-                                "stale_parent",
-                                s"parent ${s.parent.getOrElse("(none)")} is not the head of ${s.key.render}",
-                                head
-                              )))
-                            case Right(rec) =>
-                              ingestion.run(rec.id, manifest) *> sessions.update(_ - id) *>
-                                IO.pure(Right(CommitResult(
-                                  rec.id,
-                                  digest.render,
-                                  rec.parent,
-                                  s"$baseUrl/w/${s.key.workspace}/p/${s.key.project}/r/${rec.id}",
-                                  s"$baseUrl/w/${s.key.workspace}/p/${s.key.project}/r/${rec.id}/view"
-                                )))
-                          }
-                        }
+                      // derive renditions first: an unreadable asset fails the push, never the head
+                      ingestion.stage(id, manifest).flatMap {
+                        case Left(m) => ingestion.discard(id).as(Left(err("bad_request", m)))
+                        case Right(()) =>
+                          // the manifest bytes are the scientific record; store them immutably by digest
+                          objects.put(digest, bytes).flatMap(r =>
+                            IO.fromEither(r.leftMap(IllegalStateException(_)))
+                          ) *>
+                            IO.realTimeInstant.flatMap { now =>
+                              revisions.commit(
+                                s.key,
+                                s.parent,
+                                digest,
+                                req.message,
+                                now.toString
+                              ).flatMap {
+                                case Left(StaleParent(head)) =>
+                                  ingestion.discard(id).as(Left(err(
+                                    "stale_parent",
+                                    s"parent ${s.parent.getOrElse("(none)")} is not the head of ${s.key.render}",
+                                    head
+                                  )))
+                                case Right(rec) =>
+                                  ingestion.publish(id, rec.id) *> sessions.update(_ - id) *>
+                                    IO.pure(Right(CommitResult(
+                                      rec.id,
+                                      digest.render,
+                                      rec.parent,
+                                      s"$baseUrl/w/${s.key.workspace}/p/${s.key.project}/r/${rec.id}",
+                                      s"$baseUrl/w/${s.key.workspace}/p/${s.key.project}/r/${rec.id}/view"
+                                    )))
+                              }
+                            }
+                      }
                 }
     }
 
@@ -168,36 +190,38 @@ final class Publication(
     }
 
   def revision(id: String): IO[Either[ApiError, RevisionDetail]] =
-    revisions.revision(id).flatMap {
-      case None => IO.pure(Left(err("not_found", s"revision $id does not exist")))
-      case Some(rec) =>
-        objects.get(Sha256.unsafe(rec.manifestDigest)).flatMap {
-          case None => IO.pure(Left(err("not_found", "manifest bytes missing")))
-          case Some(bytes) =>
-            IO.fromEither(Manifest.parse(bytes).leftMap(IllegalStateException(_))).flatMap {
-              (_, m) =>
-                m.volumeAssetIds.traverse(a =>
-                  ingestion.status(id, a).map(st =>
-                    RenditionRef(
-                      a,
-                      st,
-                      s"$baseUrl/api/v1/revisions/$id/renditions/$a/header",
-                      s"$baseUrl/api/v1/revisions/$id/renditions/$a/payload"
+    if !Ids.valid(id) then IO.pure(Left(err("not_found", s"revision $id does not exist")))
+    else
+      revisions.revision(id).flatMap {
+        case None => IO.pure(Left(err("not_found", s"revision $id does not exist")))
+        case Some(rec) =>
+          objects.get(Sha256.unsafe(rec.manifestDigest)).flatMap {
+            case None => IO.pure(Left(err("not_found", "manifest bytes missing")))
+            case Some(bytes) =>
+              IO.fromEither(Manifest.parse(bytes).leftMap(IllegalStateException(_))).flatMap {
+                (_, m) =>
+                  m.volumeAssetIds.traverse(a =>
+                    ingestion.status(id, a).map(st =>
+                      RenditionRef(
+                        a,
+                        st,
+                        s"$baseUrl/api/v1/revisions/$id/renditions/$a/header",
+                        s"$baseUrl/api/v1/revisions/$id/renditions/$a/payload"
+                      )
                     )
-                  )
-                ).map { rends =>
-                  Right(RevisionDetail(
-                    rec.id,
-                    rec.workspace,
-                    rec.project,
-                    rec.parent,
-                    rec.manifestDigest,
-                    rec.message,
-                    rec.committedAt,
-                    m.raw,
-                    rends
-                  ))
-                }
-            }
-        }
-    }
+                  ).map { rends =>
+                    Right(RevisionDetail(
+                      rec.id,
+                      rec.workspace,
+                      rec.project,
+                      rec.parent,
+                      rec.manifestDigest,
+                      rec.message,
+                      rec.committedAt,
+                      m.raw,
+                      rends
+                    ))
+                  }
+              }
+          }
+      }

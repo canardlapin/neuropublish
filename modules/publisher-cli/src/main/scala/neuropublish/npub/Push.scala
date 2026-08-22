@@ -22,7 +22,8 @@ object Push:
   ): IO[ExitCode] =
     val out = (s: String) => IO.println(s)
     EmberClientBuilder.default[IO].build.use { client =>
-      val base = Some(Uri.unsafeFromString(server))
+      val base =
+        Some(Uri.fromString(server).getOrElse(throw PushError(s"--server is not a URL: $server")))
       val interp = Http4sClientInterpreter[IO]()
       def call[S, I, E, O](
           ep: sttp.tapir.Endpoint[S, I, E, O, Any],
@@ -41,9 +42,9 @@ object Push:
         _ <- out(
           f"validating  manifest.json  ok  core ${manifest.core}  ${manifest.assets.length} assets"
         )
-        files <- Files[IO].walk(dir / "assets").filter(p =>
-          !p.fileName.toString.startsWith(".")
-        ).evalFilter(Files[IO].isRegularFile(_)).compile.toList
+        files <- Files[IO].walk(dir / "assets")
+          .filter(p => !p.toString.split('/').exists(_.startsWith(".")))
+          .evalFilter(p => Files[IO].isRegularFile(p, false)).compile.toList
         hashed <- files.traverse(p =>
           Files[IO].readAll(p).compile.to(Array).map(b => Sha256.of(b).render -> (p, b))
         )
@@ -94,6 +95,10 @@ object Push:
       yield code
     }.handleErrorWith {
       case PushError(m) => IO.println(s"error       $m").as(ExitCode.Error)
+      case e: java.net.ConnectException =>
+        IO.println(s"error       cannot reach $server (${e.getMessage})").as(ExitCode.Error)
+      case e =>
+        IO.println(s"error       ${e.getClass.getSimpleName}: ${e.getMessage}").as(ExitCode.Error)
     }
 
 final case class PushError(message: String) extends RuntimeException(message)

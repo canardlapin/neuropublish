@@ -1,7 +1,7 @@
 package neuropublish.frontend
 
 import com.raquo.laminar.api.L.*
-import intaglio.{ColorRamp, DeviceContext, DisplayWindow, Rgba32, ScalarColorizer}
+import intaglio.{ColorRamp, DeviceContext, DisplayThreshold, DisplayWindow, Rgba32, ScalarColorizer}
 import neuropublish.api.*
 import neuropublish.protocol.json.Manifest
 import neuropublish.rendition.VolumeRendition
@@ -14,8 +14,8 @@ import scalafim.image.*
 import scalafim.image.view.*
 
 /** Stage 1: the latest revision of one project, rendered as underlay + overlays through the
-  * ScalaFIM volume host. Plain DOM; layer visibility, order and opacity only. No visual system yet
-  * (plan: design cadence).
+  * ScalaFIM volume host. Plain DOM; layer visibility and opacity only (reordering needs a model
+  * rebuild and lands with the Stage 3 controls). No visual system yet (plan: design cadence).
   */
 object RevisionPage:
   final case class Loaded(
@@ -57,19 +57,48 @@ object RevisionPage:
     )
     val space = VolumeSpace(underlayVol.space)
 
-    def scalarLayer(id: String, vol: NeuroVol[Double], lo: Double, hi: Double, ramp: ColorRamp) =
+    /** Published recommendation (plan: "published recommendation versus current view"); Stage 1 has
+      * no overrides yet.
+      */
+    def published(f: neuropublish.protocol.json.ResultField): (Double, Double, DisplayThreshold) =
+      val c = f.publishedDisplay.map(_.hcursor)
+      val lo = c.flatMap(_.downField("window").downField("min").as[Double].toOption).getOrElse(-8.0)
+      val hi = c.flatMap(_.downField("window").downField("max").as[Double].toOption).getOrElse(8.0)
+      val thr = c.flatMap(_.downField("threshold").downField("min").as[Double].toOption)
+        .flatMap(m => DisplayThreshold.transparentBand(-m, m).toOption).getOrElse(
+          DisplayThreshold.Disabled
+        )
+      (lo, hi, thr)
+
+    def dataRange(vol: NeuroVol[Double]): (Double, Double) =
+      var lo = Double.PositiveInfinity; var hi = Double.NegativeInfinity
+      val n = vol.space.spatialDims.product; var i = 0
+      while i < n do { val x = vol.linear(i); if x < lo then lo = x; if x > hi then hi = x; i += 1 }
+      if lo < hi then (lo, hi) else (0.0, 1.0)
+
+    def scalarLayer(
+        id: String,
+        vol: NeuroVol[Double],
+        lo: Double,
+        hi: Double,
+        ramp: ColorRamp,
+        threshold: DisplayThreshold = DisplayThreshold.Disabled
+    ) =
       SliceLayer(
         LayerId.unsafe(id),
         vol,
         SliceSampling.Nearest(0.0),
-        ScalarColorizer(DisplayWindow.unsafe(lo, hi), ramp)
+        ScalarColorizer(DisplayWindow.unsafe(lo, hi), ramp, threshold = threshold)
       )
 
-    val underlayLayer =
-      scalarLayer(underlay.get.asset, underlayVol, 0.0, 100.0, ColorRamp.Grayscale)
+    val (ulo, uhi) = dataRange(underlayVol)
+    val underlayLayer = scalarLayer(underlay.get.asset, underlayVol, ulo, uhi, ColorRamp.Grayscale)
     val overlayLayers = overlayFields.flatMap(f =>
-      f.representations.find(_.kind == "volume").flatMap(r => loaded.volumes.get(r.asset)).map(v =>
-        f -> scalarLayer(f.id, v, -8.0, 8.0, ColorRamp(cold, hot))
+      f.representations.find(_.kind == "volume").flatMap(r => loaded.volumes.get(r.asset)).map(
+        v => {
+          val (lo, hi, thr) = published(f);
+          f -> scalarLayer(f.id, v, lo, hi, ColorRamp(cold, hot), thr)
+        }
       )
     )
     val model = ViewerModel.unsafe(space, (underlayLayer +: overlayLayers.map(_._2)).toVector)
@@ -80,7 +109,6 @@ object RevisionPage:
     ).map(_.id).toSet
     val visibility = Var(overlayFields.map(f => f.id -> initiallyVisible.contains(f.id)).toMap)
     val opacity = Var(overlayFields.map(f => f.id -> 0.85).toMap)
-    val order = Var(overlayFields.map(_.id))
     val probe = new LifecycleProbe
     val host = new VolumeHost(
       model,
@@ -93,7 +121,7 @@ object RevisionPage:
       h.renderer.controller.dispatch(a).left.foreach(e => dom.console.error(e.toString))
       host.requestRender(h.renderer)
     }
-    def sync(): Unit =
+    def syncAll(): Unit =
       visibility.now().foreach((id, v) =>
         dispatch(ViewerAction.SetVisibility(LayerId.unsafe(id), v))
       )
@@ -109,7 +137,10 @@ object RevisionPage:
           typ := "checkbox",
           controlled(
             checked <-- visibility.signal.map(_(f.id)),
-            onClick.mapToChecked --> { v => visibility.update(_ + (f.id -> v)); sync() }
+            onClick.mapToChecked --> { v =>
+              visibility.update(_ + (f.id -> v));
+              dispatch(ViewerAction.SetVisibility(LayerId.unsafe(f.id), v))
+            }
           )
         ),
         span(
@@ -123,16 +154,11 @@ object RevisionPage:
           stepAttr := "1",
           controlled(
             value <-- opacity.signal.map(o => (o(f.id) * 100).toInt.toString),
-            onInput.mapToValue --> { v => opacity.update(_ + (f.id -> v.toDouble / 100)); sync() }
+            onInput.mapToValue --> { v =>
+              val o = v.toDouble / 100; opacity.update(_ + (f.id -> o));
+              dispatch(ViewerAction.SetOpacity(LayerId.unsafe(f.id), LayerOpacity.unsafe(o)))
+            }
           )
-        ),
-        button(
-          "↑",
-          onClick --> { _ =>
-            order.update(o => {
-              val i = o.indexOf(f.id); if i > 0 then o.patch(i - 1, List(f.id, o(i - 1)), 2) else o
-            })
-          }
         )
       )
 
@@ -148,13 +174,12 @@ object RevisionPage:
         div(
           cls := "navigator",
           h2("Layers"),
-          children <--
-            order.signal.map(ids => ids.flatMap(id => overlayFields.find(_.id == id)).map(layerRow))
+          overlayFields.map(layerRow)
         ),
         div(
           cls := "canvas-host",
           idAttr := "volume",
-          RendererHost.pane(host, h => { handle = Some(h); sync() })
+          RendererHost.pane(host, h => { handle = Some(h); syncAll() })
         )
       ),
       m.warnings.headOption.map(w =>

@@ -38,10 +38,19 @@ final class Routes(pub: Publication, ingestion: Ingestion, token: String):
   private val project = Protocol.project.serverLogic((ws, p) => pub.project(ProjectKey(ws, p)))
   private val revision = Protocol.revision.serverLogic(pub.revision)
   private val header = Protocol.renditionHeader.serverLogic((r, a) =>
-    readIf(ingestion.headerPath(r, a)).map(_.map(b => new String(b, "UTF-8")))
+    readIf(r, a, ingestion.headerPath).map(_.map(b => new String(b, "UTF-8")))
   )
   private val payload =
-    Protocol.renditionPayload.serverLogic((r, a) => readIf(ingestion.payloadPath(r, a)))
+    Protocol.renditionPayload.serverLogic((r, a) => readIf(r, a, ingestion.payloadPath))
+
+  private def readIf(
+      rev: String,
+      asset: String,
+      path: (String, String) => Path
+  ): IO[Either[ApiError, Array[Byte]]] =
+    if !Ids.valid(rev) || !Ids.valid(asset) then
+      IO.pure(Left(ApiError("not_found", "no such rendition")))
+    else readIf(path(rev, asset))
 
   private def readIf(p: Path): IO[Either[ApiError, Array[Byte]]] =
     Files[IO].exists(p).flatMap {

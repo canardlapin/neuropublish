@@ -144,6 +144,31 @@ class RoutesSuite extends CatsEffectSuite:
     yield assertEquals(p.status, Status.Ok)
   }
 
+  server.test("a substituted object is rejected at upload and the head never moves") { app =>
+    for
+      c <- push(app, None, substitute = Some("t1" -> Array.fill[Byte](54112)(7)))
+      _ = assertEquals(c.status, Status.BadRequest)
+      proj <- app.run(Request[IO](
+        Method.GET,
+        uri"/api/v1/workspaces/rotman/projects/sherlock"
+      )).flatMap(_.as[io.circe.Json]).map(_.as[ProjectSummary].toOption.get)
+    yield assertEquals(proj.head, None)
+  }
+
+  server.test("path parameters that are not ids never reach the filesystem") { app =>
+    for
+      r1 <- app.run(Request[IO](
+        Method.GET,
+        Uri.unsafeFromString("/api/v1/revisions/..%2Fprojects%2Frotman/renditions/sherlock/header")
+      ))
+      _ = assertEquals(r1.status, Status.NotFound)
+      r2 <- app.run(Request[IO](
+        Method.GET,
+        Uri.unsafeFromString("/api/v1/revisions/..%2F..%2Fetc%2Fpasswd")
+      ))
+    yield assertEquals(r2.status, Status.NotFound)
+  }
+
   test("OpenAPI document lists the publication endpoints") {
     assert(Routes.openApiYaml.contains("/upload-sessions"))
     assert(Routes.openApiYaml.contains("/revisions/{revision}"))

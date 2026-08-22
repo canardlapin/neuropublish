@@ -63,17 +63,25 @@ object RevisionStore:
             IO.fromEither(_root_.io.circe.parser.decode[ProjectFile](s)).map(Some(_))
           )
       }
+
+    /** Write via a unique temp file and atomic move so a crash never leaves invalid JSON. */
+    private def atomicWrite(target: Path, text: String): IO[Unit] =
+      val tmp = target.parent.get /
+        s"${target.fileName}.${java.util.UUID.randomUUID().toString.take(8)}.part"
+      Files[IO].createDirectories(target.parent.get) *>
+        fs2.Stream.emit(text).through(Files[IO].writeUtf8(tmp)).compile.drain *>
+        Files[IO].move(tmp, target, fs2.io.file.CopyFlags(fs2.io.file.CopyFlag.ReplaceExisting))
     private def write(k: ProjectKey, p: ProjectFile): IO[Unit] =
-      Files[IO].createDirectories(file(k).parent.get) *>
-        fs2.Stream.emit(p.asJson.spaces2).through(Files[IO].writeUtf8(file(k))).compile.drain
+      atomicWrite(file(k), p.asJson.spaces2)
 
     def createProject(key: ProjectKey): IO[Unit] = mutex.lock.surround {
       read(key).flatMap(p => if p.isDefined then IO.unit else write(key, ProjectFile(None, Nil)))
     }
     def projectExists(key: ProjectKey): IO[Boolean] = Files[IO].exists(file(key))
-    def head(key: ProjectKey): IO[Option[String]] = read(key).map(_.flatMap(_.head))
+    def head(key: ProjectKey): IO[Option[String]] =
+      mutex.lock.surround(read(key).map(_.flatMap(_.head)))
     def revisions(key: ProjectKey): IO[List[RevisionRecord]] =
-      read(key).map(_.map(_.revisions).getOrElse(Nil))
+      mutex.lock.surround(read(key).map(_.map(_.revisions).getOrElse(Nil)))
     def revision(id: String): IO[Option[RevisionRecord]] =
       Files[IO].exists(revFile(id)).flatMap {
         case false => IO.none
@@ -103,11 +111,12 @@ object RevisionStore:
               message,
               committedAt
             )
-            Files[IO].createDirectories(revFile(id).parent.get) *>
-              fs2.Stream.emit(
-                rec.asJson.spaces2
-              ).through(Files[IO].writeUtf8(revFile(id))).compile.drain *>
-              write(key, ProjectFile(Some(id), p.revisions :+ rec)).as(Right(rec))
+            Files[IO].exists(revFile(id)).flatMap {
+              case true => IO.raiseError(IllegalStateException(s"revision id collision: $id"))
+              case false =>
+                atomicWrite(revFile(id), rec.asJson.spaces2) *>
+                  write(key, ProjectFile(Some(id), p.revisions :+ rec)).as(Right(rec))
+            }
         }
       }
 

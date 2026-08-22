@@ -26,9 +26,17 @@ object ObjectStore:
           Files[IO].exists(p).flatMap {
             case true => IO.pure(Right(()))
             case false =>
-              val tmp = p.parent.get / (p.fileName.toString + ".part")
-              fs2.Stream.emits(bytes).through(Files[IO].writeAll(tmp)).compile.drain *>
-                Files[IO].move(tmp, p).as(Right(()))
+              val tmp = p.parent.get /
+                s"${p.fileName}.${java.util.UUID.randomUUID().toString.take(8)}.part"
+              (fs2.Stream.emits(bytes).through(Files[IO].writeAll(tmp)).compile.drain *>
+                Files[IO].exists(p).flatMap {
+                  case true =>
+                    Files[IO].delete(tmp) // a concurrent put won; content is identical by digest
+                  case false => Files[IO].move(tmp, p)
+                }).as(Right(())).handleErrorWith(_ =>
+                Files[IO].deleteIfExists(tmp) *>
+                  Files[IO].exists(p).map(if _ then Right(()) else Left("write failed"))
+              )
           }
     def exists(digest: Sha256): IO[Boolean] = Files[IO].exists(path(digest))
     def size(digest: Sha256): IO[Option[Long]] =

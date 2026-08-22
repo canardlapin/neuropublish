@@ -285,7 +285,7 @@ intentionally provisional except the bundle layout and the revision model.
   revision record, and runs the ingestion worker to derive renditions;
 - a single route that opens the latest revision and renders the anatomical
   underlay plus two statistical overlays through the ScalaFIM volume host;
-- layer visibility, order, and opacity only; no inspector, no saved views.
+- layer visibility and opacity only; no inspector, no saved views.
 
 ### Exit criteria
 
@@ -305,8 +305,9 @@ backend's in-process suite. Provisional choices, to be replaced in Stage 2:
 objects flow through the control plane rather than signed object-store URLs;
 the revision store and object store are local-filesystem implementations of
 the algebras; ingestion runs in-process immediately after commit; identity is
-one static token; the viewer has visibility/order/opacity controls only and
-no visual system. The surface (GIFTI) rendition check is still open and moves
+one static token; the viewer has visibility and opacity controls only (layer
+reordering needs a model rebuild and lands with the Stage 3 controls) and no
+visual system. The surface (GIFTI) rendition check is still open and moves
 to Stage 3 alongside the surface pane, since Stage 2 has no browser work.
 
 ## Stage 2 — language-neutral protocol and publication spine

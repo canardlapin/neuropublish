@@ -26,7 +26,10 @@ object Main:
 
     def open(ws: String, p: String, rev: Option[String]): Unit =
       RevisionPage.load(api, ws, p, rev).onComplete {
-        case Success(l) => content.set(Some(RevisionPage.render(l))); status.set("ready")
+        case Success(l) =>
+          scala.util.Try(RevisionPage.render(l)) match
+            case Success(el) => content.set(Some(el)); status.set("ready")
+            case Failure(e) => status.set(s"error: ${e.getMessage}")
         case Failure(e) => status.set(s"error: ${e.getMessage}")
       }
 
