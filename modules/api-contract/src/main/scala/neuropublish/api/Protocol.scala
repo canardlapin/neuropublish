@@ -96,6 +96,7 @@ object Protocol:
     }
   private val errors = oneOf[ApiError](
     variant(StatusCode.Unauthorized, "unauthorized", "missing or invalid token"),
+    variant(StatusCode.Forbidden, "forbidden", "principal is not allowed to do this here"),
     variant(StatusCode.NotFound, "not_found", "unknown project, session, or revision"),
     variant(
       StatusCode.Conflict,
@@ -107,7 +108,7 @@ object Protocol:
       StatusCode.BadRequest
     ).and(jsonBody[ApiError].description("invalid request or manifest")))
   )
-  private val secured = base.securityIn(auth.bearer[String]()).errorOut(errors)
+  private val secured = base.securityIn(auth.bearer[Option[String]]()).securityIn(cookie[Option[String]]("np_session")).errorOut(errors)
 
   val createUploadSession = secured.post
     .in("workspaces" / path[String]("workspace") / "projects" / path[String]("project") /
@@ -136,24 +137,24 @@ object Protocol:
     .in(jsonBody[CommitRequest])
     .out(statusCode(StatusCode.Created).and(jsonBody[CommitResult]))
 
-  val project = base.get
+  val project = secured.get
     .in("workspaces" / path[String]("workspace") / "projects" / path[String]("project"))
-    .errorOut(errors)
+    
     .out(jsonBody[ProjectSummary])
 
-  val revision = base.get
+  val revision = secured.get
     .in("revisions" / path[String]("revision"))
-    .errorOut(errors)
+    
     .out(jsonBody[RevisionDetail])
 
-  val renditionHeader = base.get
+  val renditionHeader = secured.get
     .in("revisions" / path[String]("revision") / "renditions" / path[String]("asset") / "header")
-    .errorOut(errors)
+    
     .out(stringBody)
 
-  val renditionPayload = base.get
+  val renditionPayload = secured.get
     .in("revisions" / path[String]("revision") / "renditions" / path[String]("asset") / "payload")
-    .errorOut(errors)
+    
     .out(byteArrayBody)
 
   val all: List[AnyEndpoint] = List(
