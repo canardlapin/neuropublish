@@ -8,7 +8,7 @@ import munit.FunSuite
 import scala.jdk.CollectionConverters.*
 import neuropublish.protocol.Sha256
 import neuropublish.protocol.json.*
-import neuropublish.rendition.VolumeRendition
+import neuropublish.rendition.{SurfaceRendition, VertexFieldRendition, VolumeRendition}
 import neuropublish.viewer.{Workspace, WorkspaceLayout, WorkspaceState}
 
 /** The golden bundles: reference, valid, invalid, old-version, new-extension, and
@@ -76,6 +76,88 @@ class FixtureSuite extends FunSuite:
     assertEquals(
       m.orderedFields("speech").map(_.id),
       List("speech-effect", "speech-se", "speech-t", "speech-z")
+    )
+    // Stage 5: two hemispheres, each a trusted surface-vertices domain realized by one surface
+    assertEquals(how("/domains/1/descriptor"), "Understood")
+    assertEquals(how("/domains/2/descriptor"), "Understood")
+    assertEquals(
+      m.surfaces.map(s => (s.id, s.hemisphere, s.domain, s.kind)),
+      List(
+        ("lh-pial", "left", "ico3-lh", "pial"),
+        ("rh-pial", "right", "ico3-rh", "pial")
+      )
+    )
+    assertEquals(
+      m.orderedFields("speech").find(_.id == "speech-t").get.representations.map(r =>
+        (r.kind, r.asset, r.surface, r.hemisphere, r.derivation)
+      ),
+      List(
+        ("volume", "speech-t", None, None, None),
+        ("surface", "speech-t-lh", Some("lh-pial"), Some("left"), Some("project-to-surface")),
+        ("surface", "speech-t-rh", Some("rh-pial"), Some("right"), Some("project-to-surface"))
+      )
+    )
+    assertEquals(
+      m.renditionTargets.map(t => (t.assetId, t.kind, t.surface)),
+      List(
+        ("t1", "volume", None),
+        ("speech-effect", "volume", None),
+        ("speech-se", "volume", None),
+        ("speech-t", "volume", None),
+        ("speech-z", "volume", None),
+        ("lh-pial", "surface-mesh", None),
+        ("rh-pial", "surface-mesh", None),
+        ("speech-t-lh", "vertex-field", Some("lh-pial")),
+        ("speech-t-rh", "vertex-field", Some("rh-pial")),
+        ("speech-z-lh", "vertex-field", Some("lh-pial")),
+        ("speech-z-rh", "vertex-field", Some("rh-pial"))
+      )
+    )
+  }
+
+  test(
+    "reference surface domains: key.size is the vertex count; the fingerprint is not recomputable here"
+  ) {
+    // what admission can verify without the GIFTI bytes (SPEC §6, admission split); the
+    // fingerprint itself is proven by GiftiToRenditionSuite (rendition) and at ingestion
+    val (_, m) =
+      Manifest.parse(read("reference/manifest.json")).fold(ps => fail(Problem.render(ps)), identity)
+    List("ico3-lh" -> "left", "ico3-rh" -> "right").foreach { (id, hemisphere) =>
+      val p = ManifestChecks.surfaceDomain(m, id).getOrElse(fail(s"$id is not a surface domain"))
+      assertEquals(
+        (p.space, p.hemisphere, p.vertexCount, p.faceCount),
+        ("synthetic-ico3", hemisphere, 642, 1280)
+      )
+      assertEquals(p.topology, s"${id.drop(5)}-pial")
+      val key = m.domains.find(_.id == id).flatMap(_.key).get.hcursor
+      assertEquals(key.get[Long]("size"), Right(642L))
+      val oracle =
+        parse(new String(read("reference/assets/oracle.json"), StandardCharsets.UTF_8)).toOption.get
+      val declared = oracle.hcursor.downField("surfaces").values.get
+        .find(_.hcursor.get[String]("id").toOption.contains(p.topology)).get
+        .hcursor.get[String]("structuralFingerprint").toOption.get
+      assertEquals(key.get[String]("structuralFingerprint"), Right(declared))
+    }
+    // the fingerprint preimage spelled out independently (ADR 0005 §1 words) on a tiny mesh
+    val faces = Array(0, 1, 2, 0, 2, 3)
+    val p = SurfaceVertices.Payload("s", "left", 4, 2, "t")
+    val strings = Vector("org.neuropublish.domain/surface-vertices", "1.0", "s", "left")
+      .map(_.getBytes(StandardCharsets.UTF_8))
+    val buffer =
+      java.nio.ByteBuffer.allocate(8 + strings.map(4 + _.length).sum + 16 + faces.length * 4)
+        .order(java.nio.ByteOrder.LITTLE_ENDIAN)
+    buffer.put("NPUDOM1\u0000".getBytes(StandardCharsets.US_ASCII))
+    strings.foreach(s => { buffer.putInt(s.length); buffer.put(s) })
+    buffer.putLong(4L); buffer.putLong(2L)
+    faces.foreach(buffer.putInt)
+    assertEquals(
+      SurfaceVertices.fingerprint(
+        "org.neuropublish.domain/surface-vertices",
+        "1.0",
+        p,
+        faces
+      ).render,
+      Sha256.of(buffer.array()).render
     )
   }
 
@@ -159,6 +241,19 @@ class FixtureSuite extends FunSuite:
     )
   }
 
+  test("the trusted surface-vertices schema is the one under protocol/schemas/records") {
+    val protocolCopy =
+      Files.readAllBytes(schemas.resolve("records/surface-vertices-v1.schema.json"))
+    assert(java.util.Arrays.equals(
+      protocolCopy,
+      read("reference/schemas/surface-vertices-v1.schema.json")
+    ))
+    assertEquals(
+      TrustedSchemas.SurfaceVerticesV1.digest.map(_.render),
+      Some(Sha256.of(protocolCopy).render)
+    )
+  }
+
   test("every valid fixture is admitted") {
     val all = cases("valid")
     assert(all.nonEmpty)
@@ -174,7 +269,7 @@ class FixtureSuite extends FunSuite:
 
   test("every invalid fixture is rejected with exactly the problems its .expect lists") {
     val all = cases("invalid")
-    assert(all.length >= 27, all.length)
+    assert(all.length >= 34, all.length)
     all.foreach { p =>
       val expected = expectedProblems(p)
       assert(expected.nonEmpty, s"${p.getFileName}: empty .expect")
@@ -264,6 +359,20 @@ class FixtureSuite extends FunSuite:
       val json = parse(text).toOption.get
       assertEquals(SchemaCheck.renditionHeader(json), Nil, id)
       assert(VolumeRendition.decodeHeader(text).isRight)
+    for id <- List("lh-pial", "rh-pial") do
+      val text = new String(read(s"reference/renditions/$id.json"), StandardCharsets.UTF_8)
+      assertEquals(SchemaCheck.renditionHeader(parse(text).toOption.get), Nil, id)
+      assert(SurfaceRendition.decodeHeader(text).isRight)
+    for id <- List("speech-t-lh", "speech-z-rh") do
+      val text = new String(read(s"reference/renditions/$id.json"), StandardCharsets.UTF_8)
+      assertEquals(SchemaCheck.renditionHeader(parse(text).toOption.get), Nil, id)
+      assert(VertexFieldRendition.decodeHeader(text).isRight)
+    val badSurface = parse(
+      """{"profile":"org.neuropublish.rendition/surface-mesh@0","hemisphere":"both","kind":"pial",
+      "vertexCount":4,"faceCount":2,"surfaceToWorld":[],"coordinateSystem":"RAS+","topologyIdentity":"x"}"""
+    ).toOption.get
+    assert(SchemaCheck.renditionHeader(badSurface).nonEmpty)
+    assert(SurfaceRendition.decodeHeader(badSurface.noSpaces).isLeft)
     val bad =
       parse("""{"profile":"org.neuropublish.rendition/volume-f32@0","shape":[1,2],"affine":[],
       "dtype":"float64","byteOrder":"little","order":"x-fastest","missing":"nan"}""").toOption.get
@@ -292,10 +401,16 @@ class FixtureSuite extends FunSuite:
       List("speech-effect", "speech-t", "speech-z", "t1")
     )
     manifest.assets.foreach { a =>
-      val file = Files.readAllBytes(fixtures.resolve(s"julia/assets/${a.id}.nii"))
+      val name =
+        if a.mediaType == "application/x-nifti" then s"${a.id}.nii"
+        else if manifest.surfaceAssetIds.contains(a.id) then s"${a.id}.surf.gii"
+        else s"${a.id}.func.gii"
+      val file = Files.readAllBytes(fixtures.resolve(s"julia/assets/$name"))
       assertEquals(Sha256.of(file).render, a.digest.render, a.id)
       assertEquals(file.length.toLong, a.size, a.id)
     }
+    assertEquals(manifest.surfaces.map(_.id), List("lh-pial", "rh-pial"))
+    assertEquals(manifest.renditionTargets.length, 10)
     val raw = manifest.raw.hcursor
     assertEquals(raw.downField("x-julia-producer").downField("version").as[String], Right("0.1"))
     // deterministic output: nothing in the bundle names the Julia that wrote it

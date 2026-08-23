@@ -82,11 +82,11 @@ abstract class Stage4Spec(factory: ServerFactory) extends CatsEffectSuite:
       parent: Option[String]
   ) =
     for
-      assets <- List("t1", "speech-effect", "speech-se", "speech-t", "speech-z").traverse(id =>
-        bytes(s"reference/assets/$id.nii").map(id -> _)
+      assets <- ReferenceBundle.assets.traverse((id, file, _) =>
+        bytes(s"reference/assets/$file").map(id -> _)
       )
-      inv = assets.map((_, b) =>
-        AssetInventory(Sha256.of(b).render, b.length.toLong, "application/x-nifti")
+      inv = assets.zip(ReferenceBundle.assets).map((e, a) =>
+        AssetInventory(Sha256.of(e._2).render, e._2.length.toLong, a._3)
       )
       created <- post(
         app,
@@ -759,7 +759,7 @@ abstract class Stage4Spec(factory: ServerFactory) extends CatsEffectSuite:
         _ = assertEquals(byId("raw-bids").kind, "entity")
         _ = assertEquals(byId("raw-bids").hosted, Some(false))
         _ = assertEquals(byId("speech-t").kind, "asset")
-        _ = assertEquals(prov.edges.length, 6)
+        _ = assertEquals(prov.edges.length, 9) // 6 volume-era edges + 3 through project-to-surface
         again <- get(app, s"/api/v1/revisions/${r.revisionId}/provenance", cookie(c)).flatMap(
           decode[Provenance]
         )

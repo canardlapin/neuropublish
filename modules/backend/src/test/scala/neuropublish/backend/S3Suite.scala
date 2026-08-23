@@ -102,7 +102,6 @@ class S3Suite extends CatsEffectSuite:
       r.cookies.find(_.name == "np_session").get.content
     )
   private def bytes(p: String) = Files[IO].readAll(fixtures / p).compile.to(Array)
-  private val assetIds = List("t1", "speech-effect", "speech-se", "speech-t", "speech-z")
 
   /** Follows one instruction with the plain client, exactly as `npub` does. */
   private def follow(http: Client[IO], m: UploadInstruction, body: Array[Byte]): IO[Status] =
@@ -120,9 +119,11 @@ class S3Suite extends CatsEffectSuite:
       project: ProjectKey = key
   ) =
     for
-      assets <- assetIds.traverse(id => bytes(s"reference/assets/$id.nii").map(id -> _))
-      inv = assets.map((_, b) =>
-        AssetInventory(Sha256.of(b).render, b.length.toLong, "application/x-nifti")
+      assets <- ReferenceBundle.assets.traverse((id, file, _) =>
+        bytes(s"reference/assets/$file").map(id -> _)
+      )
+      inv = assets.zip(ReferenceBundle.assets).map((e, a) =>
+        AssetInventory(Sha256.of(e._2).render, e._2.length.toLong, a._3)
       )
       created <- post(
         env.app,

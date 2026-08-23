@@ -72,6 +72,8 @@ lazy val scalafimImageJS = ProjectRef(scalafimBuild, "imageJS")
 lazy val scalafimImageViewJVM = ProjectRef(scalafimBuild, "imageViewJVM")
 lazy val scalafimImageViewJS = ProjectRef(scalafimBuild, "imageViewJS")
 lazy val scalafimImageViewCanvasJS = ProjectRef(scalafimBuild, "imageViewCanvasJS")
+lazy val scalafimSurfaceJVM = ProjectRef(scalafimBuild, "surfaceJVM")
+lazy val scalafimSurfaceJS = ProjectRef(scalafimBuild, "surfaceJS")
 lazy val scalafimSurfaceViewJVM = ProjectRef(scalafimBuild, "surfaceViewJVM")
 lazy val scalafimSurfaceViewJS = ProjectRef(scalafimBuild, "surfaceViewJS")
 lazy val scalafimSurfaceViewThreeJS = ProjectRef(scalafimBuild, "surfaceViewThreeJS")
@@ -155,8 +157,9 @@ lazy val viewerState = crossProject(JSPlatform, JVMPlatform)
     )
   )
 
-// Browser-ready typed-binary volume rendition: JVM encodes from canonical
-// assets (ingestion), JVM and JS decode into ScalaFIM volumes (Spike A).
+// Browser-ready typed-binary renditions: JVM encodes from canonical assets
+// (ingestion), JVM and JS decode into ScalaFIM volumes (Spike A) and surface
+// geometries / vertex fields (Stage 5).
 lazy val rendition = crossProject(JSPlatform, JVMPlatform)
   .crossType(CrossType.Full)
   .withoutSuffixFor(JVMPlatform)
@@ -164,8 +167,8 @@ lazy val rendition = crossProject(JSPlatform, JVMPlatform)
   .settings(crossSettings("rendition"))
   .jsSettings(jsSettings)
   .dependsOn(protocolJson)
-  .jvmConfigure(_.dependsOn(scalafimImageJVM, scalafimImageViewJVM % "test"))
-  .jsConfigure(_.dependsOn(scalafimImageJS, scalafimImageViewJS % "test"))
+  .jvmConfigure(_.dependsOn(scalafimImageJVM, scalafimSurfaceJVM, scalafimImageViewJVM % "test"))
+  .jsConfigure(_.dependsOn(scalafimImageJS, scalafimSurfaceJS, scalafimImageViewJS % "test"))
 
 // Tapir endpoints shared by server and browser client; OpenAPI source.
 lazy val apiContract = crossProject(JSPlatform, JVMPlatform)

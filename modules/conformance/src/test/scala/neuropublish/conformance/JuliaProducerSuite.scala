@@ -30,6 +30,12 @@ import scala.sys.process.*
   * compares byte for byte, so the producer cannot drift silently on another Julia.
   */
 class JuliaProducerSuite extends CatsEffectSuite:
+  /** The publish test runs the producer three times (push, stale re-push, child push), each writing
+    * four volumes, two surfaces, and four vertex fields: Julia start-up alone is most of the 30 s
+    * default.
+    */
+  override def munitIOTimeout: scala.concurrent.duration.Duration =
+    scala.concurrent.duration.Duration(3, "min")
   private val scripts = List("julia", "modules/conformance/julia").map(Path(_))
     .find(p => java.nio.file.Files.isDirectory(p.toNioPath))
     .getOrElse(fail("julia directory not found from " + Path("").absolute))
@@ -110,8 +116,10 @@ class JuliaProducerSuite extends CatsEffectSuite:
         )
         assertUnknownFieldsPresent(manifest.raw)
         // asset digests and sizes are over the files the producer wrote
+        assertEquals(manifest.surfaces.map(_.id), List("lh-pial", "rh-pial"))
         manifest.assets.foreach { a =>
-          val file = java.nio.file.Files.readAllBytes((dir / "assets" / s"${a.id}.nii").toNioPath)
+          val file =
+            java.nio.file.Files.readAllBytes((dir / "assets" / fileOf(manifest, a)).toNioPath)
           assertEquals(Sha256.of(file).render, a.digest.render, a.id)
           assertEquals(file.length.toLong, a.size, a.id)
         }
@@ -195,7 +203,27 @@ class JuliaProducerSuite extends CatsEffectSuite:
           _ = assertEquals(d.message, Some("julia neutrality proof"))
           _ = assertEquals(
             d.renditions.map(_.assetId).sorted,
-            List("speech-effect", "speech-t", "speech-z", "t1")
+            List(
+              "lh-pial",
+              "rh-pial",
+              "speech-effect",
+              "speech-t",
+              "speech-t-lh",
+              "speech-t-rh",
+              "speech-z",
+              "speech-z-lh",
+              "speech-z-rh",
+              "t1"
+            )
+          )
+          _ = assertEquals(
+            d.renditions.map(r => (r.kind, r.surface)).distinct.sorted,
+            List(
+              ("surface-mesh", None),
+              ("vertex-field", Some("lh-pial")),
+              ("vertex-field", Some("rh-pial")),
+              ("volume", None)
+            )
           )
           _ = assert(d.renditions.forall(_.status == "ready"), d.renditions.toString)
           _ = assertUnknownFieldsPresent(d.manifest)
@@ -259,6 +287,12 @@ class JuliaProducerSuite extends CatsEffectSuite:
         // and Scala still admits the R spelling as a manifest
         Manifest.parse(rewritten).fold(m => fail(s"R output rejected: $m"), _ => ())
   }
+
+  /** The producer's file for an asset: NIfTI volumes, GIFTI surfaces and vertex fields. */
+  private def fileOf(m: Manifest, a: neuropublish.protocol.json.ManifestAsset): String =
+    if a.mediaType == "application/x-nifti" then s"${a.id}.nii"
+    else if m.surfaceAssetIds.contains(a.id) then s"${a.id}.surf.gii"
+    else s"${a.id}.func.gii"
 
   /** The unknown top-level field and the unknown field inside a known record (assets[0]). */
   private def assertUnknownFieldsPresent(raw: Json): Unit =

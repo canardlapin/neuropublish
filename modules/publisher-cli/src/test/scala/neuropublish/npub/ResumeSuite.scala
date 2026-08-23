@@ -79,7 +79,7 @@ class ResumeSuite extends CatsEffectSuite:
       )
       lines1 <- out1.get
       _ = assertEquals(code1, ExitCode.Error)
-      _ = assertEquals(missingLine(lines1), 5)
+      _ = assertEquals(missingLine(lines1), 11)
       done <- first.get
       _ =
         assert(done.nonEmpty, "at least one object must have been uploaded before the interruption")

@@ -40,11 +40,11 @@ abstract class RoutesSpec(factory: ServerFactory) extends CatsEffectSuite:
   ) =
     for
       manifest <- bytes("reference/manifest.json")
-      assets <- List("t1", "speech-effect", "speech-se", "speech-t", "speech-z").traverse(id =>
-        bytes(s"reference/assets/$id.nii").map(id -> _)
+      assets <- ReferenceBundle.assets.traverse((id, file, _) =>
+        bytes(s"reference/assets/$file").map(id -> _)
       )
-      inv = assets.map((_, b) =>
-        AssetInventory(Sha256.of(b).render, b.length.toLong, "application/x-nifti")
+      inv = assets.zip(ReferenceBundle.assets).map((e, a) =>
+        AssetInventory(Sha256.of(e._2).render, e._2.length.toLong, a._3)
       )
       created <- app.run(auth(Request[IO](
         Method.POST,
@@ -93,9 +93,17 @@ abstract class RoutesSpec(factory: ServerFactory) extends CatsEffectSuite:
           IO.fromEither(io.circe.parser.decode[RevisionDetail](b))
         )
         _ = assertEquals(detail.renditions.map(_.status).distinct, List("ready"))
+        _ = assertEquals(detail.renditions.map(_.assetId).sorted, ReferenceBundle.ids.sorted)
         _ = assertEquals(
-          detail.renditions.map(_.assetId).sorted,
-          List("speech-effect", "speech-se", "speech-t", "speech-z", "t1")
+          detail.renditions.map(r => (r.assetId, r.kind, r.surface)).filter(_._2 != "volume"),
+          List(
+            ("lh-pial", "surface-mesh", None),
+            ("rh-pial", "surface-mesh", None),
+            ("speech-t-lh", "vertex-field", Some("lh-pial")),
+            ("speech-t-rh", "vertex-field", Some("rh-pial")),
+            ("speech-z-lh", "vertex-field", Some("lh-pial")),
+            ("speech-z-rh", "vertex-field", Some("rh-pial"))
+          )
         )
         hdr <- app.run(auth(Request[IO](
           Method.GET,

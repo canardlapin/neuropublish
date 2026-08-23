@@ -528,7 +528,10 @@ The first implementation must not assume capabilities that are not present:
    typed-binary browser rendition. The Stage 0 spike confirmed this for
    volumes (`modules/rendition`: JSON header + little-endian float32, decoded
    on Scala.js into `NeuroVol`/`ViewerModel` with exact affine and values);
-   the surface rendition is proven with the surface pane in Stage 1.
+   Stage 5 did the same for surfaces (`surface-mesh@0`: float32 positions +
+   int32 faces decoded into `SurfaceGeometry`; `vertex-field-f32@0` into
+   `SurfaceField`), with the ADR 0005 surface-vertices key proven at
+   ingestion from the GIFTI triangles (SPEC §6, "admission split").
 2. `DisplayThreshold` currently supports disabled and one transparent finite
    band. Positive, negative, bounded interval, and optional outer two-sided
    policies need a shared typed extension.

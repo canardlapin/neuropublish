@@ -11,14 +11,20 @@ julia producer.jl --out DIR --server URL --project WS/PROJ --token T \
                   [--parent REVISION] [--message TEXT]        # bundle, then publish
 ```
 
-It writes `manifest.json`, `manifest.sha256`, `assets/<id>.nii`, and
-`oracle.json` (shape, spacing, origin, affine, and the values at five probe
-voxels of every volume, for an independent reader to verify; it is not part
-of the bundle) and prints `digest sha256:<hex>`; with `--server` it also
-prints `revision`, `server-digest`, `viewUrl`, one `rendition <asset>
-<status>` line per volume, and exits non-zero with `error: ...` if anything
-fails, including a server digest that differs from its own. Dependencies:
-Julia 1.12 stdlib (`SHA`, `Downloads`) plus `JSON3`. The output is
+It writes `manifest.json`, `manifest.sha256`, `assets/<id>.nii`, two GIFTI
+surfaces (`assets/{lh,rh}-pial.surf.gii`: an icosahedron subdivided three
+times, 642 vertices and 1280 faces, radius 25 mm, offset ∓30 mm in x, RAS+)
+with t and z vertex fields on each (`assets/speech-{t,z}-{lh,rh}.func.gii`:
+`t = 6z/30`, `z = 5.5(y+5)/25`, clipped, as float32), and `oracle.json`
+(shape, spacing, origin, affine, the values at five probe voxels of every
+volume, and per surface the coordinates of four probe vertices, the first and
+last face, and the field values and sums, for an independent reader to
+verify; it is not part of the bundle) and prints `digest sha256:<hex>`; with
+`--server` it also prints `revision`, `server-digest`, `viewUrl`, one
+`rendition <asset> <status>` line per derived asset, and exits non-zero with
+`error: ...` if anything fails, including a server digest that differs from
+its own. Dependencies: Julia 1.12 stdlib (`SHA`, `Downloads`, `Base64`) plus
+`JSON3`. The output is
 deterministic: nothing in it names the Julia that wrote it, so
 `fixtures/julia` regenerated on another Julia must be byte-identical
 (`JuliaProducerSuite` checks this).
@@ -40,7 +46,9 @@ Everything the script needs is documented outside the Scala modules:
 | Manifest vocabulary (core 0.1: title, sensitivity, axes, domains, assets, analyses, result fields, `publishedDisplay`, underlays, provenance) | `fixtures/reference/manifest.json` and the JSON Schema; `docs/architecture.md` "Portable bundle" |
 | Byte profile (UTF-8, no BOM, one root object, no duplicate keys, finite numbers) | ADR 0001 |
 | Manifest digest = SHA-256 over the exact bytes of `manifest.json` as written; asset identity = `sha256:` of the file bytes | ADR 0001; `docs/architecture.md` "Identity and hashing" |
-| Domain envelope: exact `key` plus open `{schema, payload}` descriptor; the `volume-grid/v1` structural fingerprint preimage (`NPUDOM1\0`, six length-prefixed strings, three Int32, sixteen Float64, little-endian) | ADR 0005, `fixtures/reference/schemas/volume-grid-v1.schema.json` |
+| Domain envelope: exact `key` plus open `{schema, payload}` descriptor; the `volume-grid/v1` structural fingerprint preimage (`NPUDOM1\0`, six length-prefixed strings, three Int32, sixteen Float64, little-endian) and the `surface-vertices/v1` preimage (`NPUDOM1\0`, four length-prefixed strings, two UInt64 counts, every triangle as three UInt32 ordinals) | ADR 0005, `fixtures/reference/schemas/{volume-grid,surface-vertices}-v1.schema.json`, SPEC §6 |
+| GIFTI 1.0 (`POINTSET` float32 + `TRIANGLE` int32 for a surface; one `NIFTI_INTENT_NONE` float32 array per vertex for a field; `Base64Binary`, `LittleEndian`, `RowMajorOrder`) | the GIFTI specification; this is what the server's reader expects |
+| Surface vocabulary: `surfaces[]`, surface representations with `surface`/`hemisphere`/`derivation` | SPEC §5 "Surfaces", `fixtures/reference/manifest.json` |
 | NIfTI-1 (348-byte header + 4-byte extension flag, datatype 16, `vox_offset` 352, `qform_code` = `sform_code` = 1) | the NIfTI-1 standard; this is what the server's reader expects |
 | Upload protocol: `POST .../workspaces/{ws}/projects/{p}/upload-sessions` with the inventory; one `PUT` per returned `missing` instruction (its `method`, `url`, `headers` are followed as given); `PUT` the manifest to `manifestUrl`; `POST .../commit`; `GET /revisions/{id}` for rendition status | `docs/architecture.md` "Upload and commit protocol"; the OpenAPI document generated from `modules/api-contract` |
 | Authentication: a bearer token (a publisher credential, or the deprecated `NP_LEGACY_TOKEN` in tests) | `docs/architecture.md` |
@@ -56,6 +64,11 @@ a body or a bearer to a host the server did not name.
 - one underlay and three overlay volumes (effect, t, z) written by the script;
 - a volume-grid domain whose `structuralFingerprint` Scala recomputes from the
   ADR 0005 preimage;
+- two surface-vertices domains (left and right icosphere hemispheres) whose
+  fingerprints the server recomputes from the GIFTI triangles at ingestion, two
+  surfaces, and left/right t and z vertex fields on the `speech-t` and
+  `speech-z` result fields with `project-to-surface` as their derivation
+  receipt;
 - two provenance receipts differing on one facet (`temporalNoise` AR(1) vs
   AR(2)) and one unknown activity record, `org.example.julia/denoise@0.1`;
 - one unknown top-level field (`x-julia-producer`) and one unknown field

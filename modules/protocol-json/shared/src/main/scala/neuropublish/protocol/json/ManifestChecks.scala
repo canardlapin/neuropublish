@@ -9,7 +9,8 @@ object ManifestChecks:
 
   def all(m: Manifest): List[Problem] =
     uniqueIds(m) ++ referenceClosure(m) ++ estimandClosure(m) ++ orders(m) ++ measures(m) ++
-      sensitivity(m) ++ warningScopes(m) ++ openRecords(m) ++ domains(m) ++ provenanceEdges(m)
+      sensitivity(m) ++ warningScopes(m) ++ openRecords(m) ++ domains(m) ++ surfaces(m) ++
+      provenanceEdges(m)
 
   private def dupes(pointer: Int => String, ids: List[String], what: String): List[Problem] =
     ids.zipWithIndex.groupBy(_._1).toList.filter(_._2.size > 1).flatMap { (id, occ) =>
@@ -24,6 +25,7 @@ object ManifestChecks:
       ) ++
       dupes(i => s"/resultFields/$i/id", m.resultFields.map(_.id), "result field") ++
       dupes(i => s"/domains/$i/id", m.domains.map(_.id), "domain") ++
+      dupes(i => s"/surfaces/$i/id", m.surfaces.map(_.id), "surface") ++
       dupes(i => s"/warnings/$i/id", m.warnings.map(_.id), "warning") ++
       dupes(
         i => s"/provenance/entities/$i/id",
@@ -40,7 +42,7 @@ object ManifestChecks:
     m.raw.hcursor.downField("provenance").downField(kind).as[List[io.circe.Json]].toOption
       .getOrElse(Nil).flatMap(_.hcursor.get[String]("id").toOption)
 
-  /** Representations, underlays, and fields reference declared assets and domains. */
+  /** Representations, underlays, surfaces, and fields reference declared assets and domains. */
   def referenceClosure(m: Manifest): List[Problem] =
     val assets = m.assets.map(_.id).toSet
     val domains = m.domains.map(_.id).toSet
@@ -70,7 +72,17 @@ object ManifestChecks:
         )
       ).flatten
     )
-    reps ++ fieldDomains ++ under
+    val surf = m.surfaces.zipWithIndex.flatMap((s, si) =>
+      List(
+        Option.when(!assets(s.asset))(
+          Problem(s"/surfaces/$si/asset", s"surface references undeclared asset '${s.asset}'")
+        ),
+        Option.when(!domains(s.domain))(
+          Problem(s"/surfaces/$si/domain", s"surface references undeclared domain '${s.domain}'")
+        )
+      ).flatten
+    )
+    reps ++ fieldDomains ++ under ++ surf
 
   /** Every result field's estimand is declared by some analysis. */
   def estimandClosure(m: Manifest): List[Problem] =
@@ -183,8 +195,91 @@ object ManifestChecks:
       TrustedSchemas.interpret(s"$at/descriptor", d.descriptor) match
         case Interpretation.Understood(r, _) if r.schema.id == TrustedSchemas.VolumeGridV1.id =>
           VolumeGrid.check(at, r, d.key)
+        case Interpretation.Understood(r, _)
+            if r.schema.id == TrustedSchemas.SurfaceVerticesV1.id =>
+          val onDomain = m.surfaces.filter(_.domain == d.id).map(s => (s.asset, s.hemisphere))
+          SurfaceVertices.check(at, r, d.key, onDomain)
         case _ => Nil
     }
+
+  /** The trusted surface-vertices payload of domain `id`, when it is one and reads. */
+  def surfaceDomain(m: Manifest, id: String): Option[SurfaceVertices.Payload] =
+    m.domains.zipWithIndex.collectFirst {
+      case (d, i) if d.id == id =>
+        TrustedSchemas.interpret(s"/domains/$i/descriptor", d.descriptor) match
+          case Interpretation.Understood(r, _)
+              if r.schema.id == TrustedSchemas.SurfaceVerticesV1.id =>
+            SurfaceVertices.readPayload("", r.payload).toOption
+          case _ => None
+    }.flatten
+
+  /** Surfaces sit on a surface-vertices domain of their hemisphere; a surface representation names
+    * a declared surface of its hemisphere, and its `derivation`, when present, a provenance
+    * activity. What needs the asset bytes — the field's vertex count equals the surface's, the
+    * surface's triangles realize the domain's key — is verified at ingestion (SPEC §6).
+    */
+  def surfaces(m: Manifest): List[Problem] =
+    val declared = m.domains.map(_.id).toSet
+    val activities = provenanceIds(m, "activities").toSet
+    val onSurfaces = m.surfaces.zipWithIndex.flatMap { (s, si) =>
+      val at = s"/surfaces/$si"
+      val validHemisphere = SurfaceVertices.Hemispheres(s.hemisphere)
+      val hemisphere = Option.when(!validHemisphere)(
+        Problem(s"$at/hemisphere", s"hemisphere must be 'left' or 'right', not '${s.hemisphere}'")
+      )
+      val domain = surfaceDomain(m, s.domain) match
+        case Some(p) if p.hemisphere != s.hemisphere && validHemisphere =>
+          Some(Problem(
+            s"$at/domain",
+            s"surface is the ${s.hemisphere} hemisphere but domain '${s.domain}' is ${p.hemisphere}"
+          ))
+        case Some(_) => None
+        case None if declared(s.domain) =>
+          Some(Problem(
+            s"$at/domain",
+            s"domain '${s.domain}' is not a trusted surface-vertices domain"
+          ))
+        case None => None // undeclared: reported by the reference closure
+      List(hemisphere, domain).flatten
+    }
+    val onReps = m.resultFields.zipWithIndex.flatMap((f, fi) =>
+      f.representations.zipWithIndex.flatMap { (r, ri) =>
+        val at = s"/resultFields/$fi/representations/$ri"
+        if r.kind != "surface" then
+          List(
+            r.surface.map(_ =>
+              Problem(s"$at/surface", "only a surface representation names a surface")
+            ),
+            r.hemisphere.map(_ =>
+              Problem(s"$at/hemisphere", "only a surface representation names a hemisphere")
+            )
+          ).flatten
+        else
+          val surface = (r.surface, r.hemisphere) match
+            case (None, _) =>
+              Some(Problem(s"$at/surface", "a surface representation must name its surface"))
+            case (_, None) =>
+              Some(Problem(s"$at/hemisphere", "a surface representation must name its hemisphere"))
+            case (Some(sid), Some(h)) =>
+              m.surface(sid) match
+                case None =>
+                  Some(Problem(
+                    s"$at/surface",
+                    s"representation references undeclared surface '$sid'"
+                  ))
+                case Some(s) if s.hemisphere != h =>
+                  Some(Problem(
+                    s"$at/hemisphere",
+                    s"representation is the $h hemisphere but surface '$sid' is ${s.hemisphere}"
+                  ))
+                case _ => None
+          val derivation = r.derivation.filterNot(activities).map(d =>
+            Problem(s"$at/derivation", s"derivation references unknown provenance activity '$d'")
+          )
+          List(surface, derivation).flatten
+      }
+    )
+    onSurfaces ++ onReps
 
   /** Provenance edges connect entities, activities, assets, or result fields. */
   def provenanceEdges(m: Manifest): List[Problem] =
