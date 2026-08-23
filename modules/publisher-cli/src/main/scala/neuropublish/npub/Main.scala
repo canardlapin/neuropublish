@@ -95,8 +95,11 @@ object Main extends CommandIOApp("npub", "Neuropublish publisher", version = "0.
     }
 
   private val logout =
-    Opts.subcommand("logout", "Forget the stored token for a server") {
-      server.map(srv => Login.logout(srv, Credentials.configDir(), out))
+    Opts.subcommand("logout", "Revoke and forget the stored token for a server") {
+      server.map { srv =>
+        Api.ember(srv).use(api => Login.logout(api, Credentials.configDir(), out))
+          .handleErrorWith(e => out(s"error  ${Api.describe(srv)(e)}").as(ExitCode.Error))
+      }
     }
 
   private val whoami =

@@ -19,8 +19,9 @@ final case class CredentialsFile(servers: Map[String, ServerEntry] = Map.empty):
     copy(servers = servers.removed(Credentials.key(server)))
 
 /** The credentials file lives at `$NPUB_CONFIG_DIR/credentials.json`, or
-  * `~/.config/npub/credentials.json` when the variable is unset. It is written with mode 0600 and
-  * its token is never printed.
+  * `~/.config/npub/credentials.json` when the variable is unset. It is created with mode 0600 (the
+  * mode is an attribute of the create, never a chmod after the bytes are on disk) and its token is
+  * never printed.
   */
 object Credentials:
   given Codec[ServerEntry] = deriveCodec
@@ -50,19 +51,24 @@ object Credentials:
         }
     }
 
-  /** Writes atomically-enough (temp then move) and enforces 0600 on the result. */
+  /** Temp file created `rw-------` in one step, written, then renamed over the target (the rename
+    * keeps the mode). On a file system without POSIX permissions the create falls back to the
+    * platform default.
+    */
   def save(dir: Path, c: CredentialsFile): IO[Unit] =
     val f = file(dir)
     val tmp = dir / s".$fileName.tmp"
     val ownerRw = PosixPermissions.fromString("rw-------").get
     val ownerDir = PosixPermissions.fromString("rwx------").get
+    def posixOr(withPerms: IO[Unit], plain: IO[Unit]): IO[Unit] =
+      withPerms.recoverWith { case _: UnsupportedOperationException => plain }
     for
-      _ <- Files[IO].createDirectories(dir)
-      _ <- Files[IO].setPosixPermissions(dir, ownerDir).attempt.void
+      _ <-
+        posixOr(Files[IO].createDirectories(dir, Some(ownerDir)), Files[IO].createDirectories(dir))
+      _ <- Files[IO].deleteIfExists(tmp)
+      _ <- posixOr(Files[IO].createFile(tmp, Some(ownerRw)), Files[IO].createFile(tmp))
       _ <- fs2.Stream.emit(c.asJson.spaces2).through(Files[IO].writeUtf8(tmp)).compile.drain
-      _ <- Files[IO].setPosixPermissions(tmp, ownerRw)
       _ <- Files[IO].move(tmp, f, fs2.io.file.CopyFlags(fs2.io.file.CopyFlag.ReplaceExisting))
-      _ <- Files[IO].setPosixPermissions(f, ownerRw)
     yield ()
 
   def update(dir: Path)(f: CredentialsFile => CredentialsFile): IO[Unit] =
