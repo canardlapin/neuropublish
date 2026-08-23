@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://neuropublish.org/schema/0.1/records/surface-vertices-v1.schema.json",
+  "title": "Neuropublish surface-vertices domain descriptor version 1.0",
+  "description": "An ordered cortical vertex domain (ADR 0005 §1): the vertices of one hemisphere's triangle mesh in published order. The exact key's structural fingerprint is recomputed from the face indices of the `topology` asset (a GIFTI surface declared in `surfaces[]`), never from vertex coordinates, so white, pial, and inflated geometries realize the same domain.",
+  "type": "object",
+  "unevaluatedProperties": true,
+  "required": ["space", "hemisphere", "vertexCount", "faceCount", "topology"],
+  "properties": {
+    "space": {
+      "description": "Surface-space identifier (for example fsaverage5, fsLR-32k, or a synthetic id).",
+      "type": "string",
+      "minLength": 1
+    },
+    "hemisphere": {
+      "type": "string",
+      "enum": ["left", "right"]
+    },
+    "vertexCount": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "faceCount": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "topology": {
+      "description": "Manifest-local id of the surface asset whose triangle array defines the domain's topology; it must be one of the `surfaces[]` entries on this domain.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    }
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "profile" : "org.neuropublish.rendition/surface-mesh@0",
+  "hemisphere" : "left",
+  "kind" : "pial",
+  "vertexCount" : 642,
+  "faceCount" : 1280,
+  "surfaceToWorld" : [
+    [
+      1.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      1.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0,
+      1.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "coordinateSystem" : "RAS+",
+  "topologyIdentity" : "171662359971510d",
+  "source" : "assets/lh-pial.surf.gii"
+}

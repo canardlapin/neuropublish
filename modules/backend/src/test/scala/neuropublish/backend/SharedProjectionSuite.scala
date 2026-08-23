@@ -51,6 +51,7 @@ class SharedProjectionSuite extends FunSuite:
         "warnings",
         "resultFields",
         "underlays",
+        "surfaces",
         "domains",
         "analyses",
         "assets"
@@ -65,7 +66,8 @@ class SharedProjectionSuite extends FunSuite:
       c.downField("assets").downArray.keys.map(_.toSet),
       Some(Set("id", "digest", "size", "mediaType"))
     )
-    assertEquals(c.downField("assets").as[List[Json]].map(_.length), Right(5))
+    assertEquals(c.downField("assets").as[List[Json]].map(_.length), Right(11))
+    assertEquals(c.downField("surfaces").as[List[Json]].map(_.length), Right(2))
     val m = shared.as[Manifest].fold(e => fail(e.getMessage), identity)
     assertEquals(
       m.resultFields.map(_.id),

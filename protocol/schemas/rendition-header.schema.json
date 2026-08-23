@@ -1,20 +1,16 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://neuropublish.org/schema/0.1/rendition-header.schema.json",
-  "title": "Volume rendition header: org.neuropublish.rendition/volume-f32@0",
-  "description": "Header of a server-derived, browser-ready scalar volume rendition (modules/rendition VolumeRenditionHeader). The payload is little-endian float32 in x-fastest order with NaN for missing values. Derived representations live outside the manifest digest (ADR 0001); the canonical asset remains the record.",
-  "type": "object",
-  "required": ["profile", "shape", "affine", "dtype", "byteOrder", "order", "missing"],
-  "properties": {
-    "profile": { "const": "org.neuropublish.rendition/volume-f32@0" },
-    "shape": {
-      "type": "array",
-      "minItems": 3,
-      "maxItems": 3,
-      "items": { "type": "integer", "minimum": 1 }
-    },
+  "title": "Rendition headers: volume-f32@0, surface-mesh@0, vertex-field-f32@0",
+  "description": "Header of a server-derived, browser-ready rendition (modules/rendition). The profile selects the payload layout: `volume-f32` is little-endian float32 in x-fastest order with NaN for missing values; `surface-mesh` is float32 vertex positions (x, y, z per vertex) followed by int32 triangle vertex ordinals (three per face); `vertex-field-f32` is one little-endian float32 per vertex of the named surface. Derived representations live outside the manifest digest (ADR 0001); the canonical asset remains the record.",
+  "oneOf": [
+    { "$ref": "#/$defs/volumeHeader" },
+    { "$ref": "#/$defs/surfaceMeshHeader" },
+    { "$ref": "#/$defs/vertexFieldHeader" }
+  ],
+  "$defs": {
     "affine": {
-      "description": "4x4 voxel-to-world (RAS+ mm) transform, row-major rows.",
+      "description": "4x4 transform to world (RAS+ mm), row-major rows.",
       "type": "array",
       "minItems": 4,
       "maxItems": 4,
@@ -25,20 +21,74 @@
         "items": { "type": "number" }
       }
     },
-    "dtype": { "const": "float32" },
-    "byteOrder": { "const": "little" },
-    "order": { "const": "x-fastest" },
-    "missing": { "const": "nan" },
     "source": {
-      "description": "Bundle-relative path or asset id the rendition was derived from; null when unknown.",
+      "description": "Bundle-relative path, asset id, or asset digest the rendition was derived from; null when unknown.",
       "type": ["string", "null"]
     },
-    "summary": {
-      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/scalarSummary" }]
-    }
-  },
-  "additionalProperties": false,
-  "$defs": {
+    "volumeHeader": {
+      "type": "object",
+      "required": ["profile", "shape", "affine", "dtype", "byteOrder", "order", "missing"],
+      "properties": {
+        "profile": { "const": "org.neuropublish.rendition/volume-f32@0" },
+        "shape": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": { "type": "integer", "minimum": 1 }
+        },
+        "affine": { "$ref": "#/$defs/affine" },
+        "dtype": { "const": "float32" },
+        "byteOrder": { "const": "little" },
+        "order": { "const": "x-fastest" },
+        "missing": { "const": "nan" },
+        "source": { "$ref": "#/$defs/source" },
+        "summary": {
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/scalarSummary" }]
+        }
+      },
+      "additionalProperties": false
+    },
+    "surfaceMeshHeader": {
+      "description": "One hemisphere's triangle mesh. `topologyIdentity` is ScalaFIM's stable key of the ordered faces (16 lowercase hex); a decoder proves it rebuilt the same topology. The protocol-level domain key (ADR 0005 surface-vertices/v1) is verified at ingestion, not carried here.",
+      "type": "object",
+      "required": [
+        "profile",
+        "hemisphere",
+        "kind",
+        "vertexCount",
+        "faceCount",
+        "surfaceToWorld",
+        "coordinateSystem",
+        "topologyIdentity"
+      ],
+      "properties": {
+        "profile": { "const": "org.neuropublish.rendition/surface-mesh@0" },
+        "hemisphere": { "type": "string", "enum": ["left", "right"] },
+        "kind": { "type": "string", "minLength": 1 },
+        "vertexCount": { "type": "integer", "minimum": 1 },
+        "faceCount": { "type": "integer", "minimum": 1 },
+        "surfaceToWorld": { "$ref": "#/$defs/affine" },
+        "coordinateSystem": { "const": "RAS+" },
+        "topologyIdentity": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+        "source": { "$ref": "#/$defs/source" }
+      },
+      "additionalProperties": false
+    },
+    "vertexFieldHeader": {
+      "description": "One scalar per vertex of the surface asset `surface` (a `surfaces[].id`), in vertex order.",
+      "type": "object",
+      "required": ["profile", "surface", "vertexCount"],
+      "properties": {
+        "profile": { "const": "org.neuropublish.rendition/vertex-field-f32@0" },
+        "surface": { "type": "string", "minLength": 1 },
+        "vertexCount": { "type": "integer", "minimum": 1 },
+        "summary": {
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/scalarSummary" }]
+        },
+        "source": { "$ref": "#/$defs/source" }
+      },
+      "additionalProperties": false
+    },
     "scalarSummary": {
       "description": "Descriptive summary over finite values; never part of the snapshot digest.",
       "type": "object",

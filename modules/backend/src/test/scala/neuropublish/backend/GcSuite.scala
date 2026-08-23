@@ -57,11 +57,12 @@ class GcSuite extends CatsEffectSuite:
   private def push(app: HttpApp[IO]): IO[CommitResult] =
     for
       manifest <- bytes("reference/manifest.json")
-      assets <- List("t1", "speech-effect", "speech-se", "speech-t", "speech-z").traverse(id =>
-        bytes(s"reference/assets/$id.nii")
+      assets <- ReferenceBundle.assets.traverse((id, file, _) =>
+        bytes(s"reference/assets/$file")
       )
-      inv =
-        assets.map(b => AssetInventory(Sha256.of(b).render, b.length.toLong, "application/x-nifti"))
+      inv = assets.zip(ReferenceBundle.assets).map((b, a) =>
+        AssetInventory(Sha256.of(b).render, b.length.toLong, a._3)
+      )
       s <- app.run(auth(Request[IO](
         Method.POST,
         uri"/api/v1/workspaces/rotman/projects/sherlock/upload-sessions"
@@ -123,7 +124,7 @@ class GcSuite extends CatsEffectSuite:
       _ <- e.stores.objects.put(od, orphan).map(x => assert(x.isRight))
       _ <- e.stores.assets.register("rotman", od, 1000)
       before <- e.stores.objects.list.compile.toList
-      _ = assertEquals(before.length, 7) // 5 assets + manifest + orphan
+      _ = assertEquals(before.length, 13) // 11 assets + manifest + orphan
       tomorrow <- IO.realTimeInstant.map(_.plusSeconds(2 * 86400))
       dry <- gc(e, dryRun = true, tomorrow)
       _ = assertEquals(dry.deleted.map(_.hex), List(od.hex))
@@ -136,12 +137,12 @@ class GcSuite extends CatsEffectSuite:
       _ <- e.stores.objects.exists(od).map(assert(_, "a young object is protected"))
       real <- gc(e, dryRun = false, tomorrow)
       _ = assertEquals(real.deleted.map(_.hex), List(od.hex))
-      _ = assertEquals(real.referenced, 6)
+      _ = assertEquals(real.referenced, 12) // 11 assets + manifest
       _ <- e.stores.objects.exists(od).map(x => assert(!x, "orphan must be deleted"))
       _ <- e.stores.assets.has("rotman", od).map(x => assert(!x, "deleted digest is unregistered"))
       _ <- e.stores.objects.exists(Sha256.unsafe(r.digest.stripPrefix("sha256:"))).map(assert(_))
       after <- e.stores.objects.list.compile.toList
-      _ = assertEquals(after.length, 6)
+      _ = assertEquals(after.length, 12)
       audit <- LocalAudit(e.data).flatMap(_.list("rotman"))
     yield assert(audit.exists(_.action == "gc"), audit.map(_.action))
   }

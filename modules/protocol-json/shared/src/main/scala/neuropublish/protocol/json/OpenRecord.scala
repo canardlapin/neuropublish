@@ -87,7 +87,14 @@ object TrustedSchemas:
     Some(Sha256.unsafe("69c25b8868349828e41cd6d610ac619af118fb7b807b7306f706b727ed23dfb7"))
   )
 
-  val all: List[SchemaRefWire] = List(VolumeGridV1)
+  /** `protocol/schemas/records/surface-vertices-v1.schema.json` (ADR 0005 surface-vertices/v1). */
+  val SurfaceVerticesV1 = SchemaRefWire(
+    "org.neuropublish.domain/surface-vertices",
+    "1.0",
+    Some(Sha256.unsafe("686d9b2e17090e776c3a876f470e83dc874638c10b3dc67a4e4fad27a31c9232"))
+  )
+
+  val all: List[SchemaRefWire] = List(VolumeGridV1, SurfaceVerticesV1)
   private val byId: Map[String, List[SchemaRefWire]] = all.groupBy(_.id)
 
   def isTrustedNamespace(id: String): Boolean =
@@ -130,4 +137,6 @@ object TrustedSchemas:
 
   private def describe(t: SchemaRefWire): String =
     if t == VolumeGridV1 then "volume grid descriptor (shape, affine, space); renderable"
+    else if t == SurfaceVerticesV1 then
+      "surface vertex domain (hemisphere, counts, topology asset); renderable on its surfaces"
     else "record"

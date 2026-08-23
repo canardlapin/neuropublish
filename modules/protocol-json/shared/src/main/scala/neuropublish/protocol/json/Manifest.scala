@@ -19,7 +19,16 @@ final case class ManifestAsset(
     catalog: Option[String]
 )
 
-final case class Representation(kind: String, asset: String)
+/** `surface`/`hemisphere` are present on `kind = "surface"` (the surface the per-vertex asset is
+  * displayed on); `derivation` optionally names the provenance activity that produced the values.
+  */
+final case class Representation(
+    kind: String,
+    asset: String,
+    surface: Option[String] = None,
+    hemisphere: Option[String] = None,
+    derivation: Option[String] = None
+)
 
 final case class ResultField(
     id: String,
@@ -33,6 +42,22 @@ final case class ResultField(
 )
 
 final case class Underlay(asset: String, domain: String, label: String)
+
+/** One hemisphere's GIFTI geometry on a surface-vertices domain (SPEC §5, "Surfaces"). */
+final case class Surface(
+    id: String,
+    asset: String,
+    domain: String,
+    hemisphere: String,
+    kind: String,
+    label: String
+)
+
+/** What the server derives for one asset: `volume` (NIfTI → `volume-f32`), `surface-mesh` (GIFTI
+  * geometry → `surface-mesh`), or `vertex-field` (GIFTI scalars → `vertex-field-f32`, on
+  * `surface`).
+  */
+final case class RenditionTarget(assetId: String, kind: String, surface: Option[String] = None)
 
 final case class Estimand(id: String, label: String, order: Option[Int])
 final case class Analysis(
@@ -56,6 +81,7 @@ final case class Manifest(
     assets: List[ManifestAsset],
     resultFields: List[ResultField],
     underlays: List[Underlay],
+    surfaces: List[Surface],
     analyses: List[Analysis],
     domains: List[Domain],
     warnings: List[Warning],
@@ -68,6 +94,28 @@ final case class Manifest(
   def volumeAssetIds: List[String] =
     (underlays.map(_.asset) ++
       resultFields.flatMap(_.representations.filter(_.kind == "volume").map(_.asset))).distinct
+
+  def surface(id: String): Option[Surface] = surfaces.find(_.id == id)
+
+  /** Surface-geometry assets, in `surfaces[]` order. */
+  def surfaceAssetIds: List[String] = surfaces.map(_.asset).distinct
+
+  /** Every asset the server derives a rendition for, in derivation order: volumes, then surface
+    * geometries, then vertex fields (which need their surface's geometry first). One target per
+    * asset; an asset presented twice keeps its first target.
+    */
+  def renditionTargets: List[RenditionTarget] =
+    val volumes = volumeAssetIds.map(RenditionTarget(_, "volume"))
+    val meshes = surfaceAssetIds.map(RenditionTarget(_, "surface-mesh"))
+    val fields = resultFields.flatMap(_.representations.collect {
+      case r if r.kind == "surface" && r.surface.isDefined =>
+        RenditionTarget(r.asset, "vertex-field", r.surface)
+    })
+    (volumes ++ meshes ++ fields).foldLeft(List.empty[RenditionTarget]) { (acc, t) =>
+      if acc.exists(_.assetId == t.assetId) then acc else acc :+ t
+    }
+
+  def renditionAssetIds: List[String] = renditionTargets.map(_.assetId)
 
   /** Every open record with its pointer, as the reference implementation reads it. */
   def openRecords: List[(String, OpenRecord, Interpretation)] =
@@ -98,7 +146,10 @@ object Manifest:
       catalog <- c.get[Option[String]]("catalog")
     yield ManifestAsset(id, digest, size, mediaType, catalog)
   }
-  given Decoder[Representation] = Decoder.forProduct2("kind", "asset")(Representation.apply)
+  given Decoder[Representation] =
+    Decoder.forProduct5("kind", "asset", "surface", "hemisphere", "derivation")(
+      Representation.apply
+    )
   given Decoder[ResultField] = Decoder.forProduct8(
     "id",
     "estimand",
@@ -110,6 +161,8 @@ object Manifest:
     "publishedDisplay"
   )(ResultField.apply)
   given Decoder[Underlay] = Decoder.forProduct3("asset", "domain", "label")(Underlay.apply)
+  given Decoder[Surface] =
+    Decoder.forProduct6("id", "asset", "domain", "hemisphere", "kind", "label")(Surface.apply)
   given Decoder[Estimand] = Decoder.forProduct3("id", "label", "order")(Estimand.apply)
   given Decoder[Analysis] = Decoder.instance { c =>
     for
@@ -134,6 +187,7 @@ object Manifest:
       assets <- c.downField("assets").as[List[ManifestAsset]]
       fields <- list[ResultField]("resultFields")
       underlays <- list[Underlay]("underlays")
+      surfaces <- list[Surface]("surfaces")
       analyses <- list[Analysis]("analyses")
       domains <- list[Domain]("domains")
       warnings <- list[Warning]("warnings")
@@ -146,6 +200,7 @@ object Manifest:
       assets,
       fields,
       underlays,
+      surfaces,
       analyses,
       domains,
       warnings,
@@ -189,7 +244,7 @@ object Manifest:
             val all = (early ++ ManifestChecks.all(m).filterNot(p => reported(p.pointer))).distinct
             if all.isEmpty then Right(m) else Left(all)
 
-  /** Every representation and underlay must reference a declared asset. */
+  /** Every representation, underlay, and surface must reference a declared asset. */
   def referenceClosure(m: Manifest): Either[String, Unit] =
     val ps = ManifestChecks.referenceClosure(m)
     if ps.isEmpty then Right(()) else Left(Problem.render(ps))

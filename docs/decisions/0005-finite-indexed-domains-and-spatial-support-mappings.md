@@ -87,13 +87,15 @@ for the common structural cases:
 ```text
 org.neuropublish.domain/finite-indexed    (defined; not yet trusted in code — Stage 5b)
 org.neuropublish.domain/volume-grid       (trusted: records/volume-grid-v1.schema.json)
-org.neuropublish.domain/surface-vertices  (defined; not yet trusted in code — Stage 5b)
+org.neuropublish.domain/surface-vertices  (trusted: records/surface-vertices-v1.schema.json, Stage 5)
 ```
 
-Only `volume-grid@1.0` is in the implementation's trusted list today; a record
-naming `finite-indexed` or `surface-vertices` is in the trusted namespace
+`volume-grid@1.0` and `surface-vertices@1.0` are in the implementation's
+trusted list; a record naming `finite-indexed` is in the trusted namespace
 without a known schema and is rejected, not silently admitted, until the
-Stage 5b module lands with its schema digest.
+Stage 5b module lands with its schema digest. The surface-vertices key
+depends on the topology asset's bytes, so it is recomputed at ingestion rather
+than at admission (SPEC §6, "admission split").
 
 An unknown descriptor is preserved. It is usable for download and generic
 inspection, but it does not gain rendering or alignment behavior until a

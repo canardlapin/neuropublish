@@ -5,42 +5,221 @@ import cats.syntax.all.*
 import fs2.io.file.Files
 import neuropublish.api.IngestionStatus
 import neuropublish.protocol.Sha256
-import neuropublish.protocol.json.{Manifest, ManifestAsset}
-import neuropublish.rendition.VolumeRendition
+import neuropublish.protocol.json.{
+  Manifest,
+  ManifestAsset,
+  ManifestChecks,
+  Surface,
+  SurfaceVertices,
+  TrustedSchemas
+}
+import neuropublish.rendition.{SurfaceRendition, VertexFieldRendition, VolumeRendition}
 import scalafim.image.io.Nifti
+import scalafim.surface.{Hemisphere, SurfaceGeometry, SurfaceKind}
+import scalafim.surface.io.{GiftiReader, GiftiSurfaceReader}
 
 /** Rendition derivation shared by the inline path ([[Ingestion]]) and the worker
-  * (`neuropublish.ingestion.Worker`): canonical volume asset → browser rendition (plan decision 2).
+  * (`neuropublish.ingestion.Worker`): canonical asset → browser rendition (plan decision 2).
+  * Volumes (NIfTI → `volume-f32`), surface geometries (GIFTI → `surface-mesh`), and per-vertex
+  * fields (GIFTI → `vertex-field-f32`), in `Manifest.renditionTargets` order so a field finds its
+  * surface's geometry already read. Ingestion is also where the surface-vertices domain key is
+  * proven (SPEC §6, admission split): a surface whose triangles do not hash to its domain's
+  * `structuralFingerprint`, or a field whose vertex count is not its surface's, fails the revision
+  * with a message naming the asset.
   */
 object Derivation:
-  final case class Derived(assetId: String, header: String, payload: Array[Byte])
+  final case class Derived(
+      assetId: String,
+      kind: String, // "volume" | "surface-mesh" | "vertex-field"
+      surface: Option[String], // vertex-field: the `surfaces[].id` the values are defined on
+      header: String,
+      payload: Array[Byte]
+  )
 
-  /** Left = why this asset cannot render (missing bytes, unreadable NIfTI). The object is streamed
-    * to a temp file, never held in memory as a whole.
-    */
+  /** The object streamed to a temp file (never held whole in memory), handed to `read`. */
+  private def withAsset[A](
+      objects: ObjectStore,
+      assetId: String,
+      asset: ManifestAsset,
+      suffix: String
+  )(read: java.nio.file.Path => Either[String, A]): IO[Either[String, A]] =
+    Files[IO].tempFile(None, "np-", suffix, None).use { tmp =>
+      objects.getToFile(asset.digest, tmp).flatMap {
+        case false => IO.pure(Left(s"asset $assetId (${asset.digest.render}) was not uploaded"))
+        case true => IO.blocking(read(tmp.toNioPath))
+      }
+    }
+
+  /** Left = why this asset cannot render (missing bytes, unreadable NIfTI). */
   def derive(
       objects: ObjectStore,
       assetId: String,
       asset: ManifestAsset
   ): IO[Either[String, Derived]] =
-    Files[IO].tempFile(None, "np-", ".nii", None).use { tmp =>
-      objects.getToFile(asset.digest, tmp).flatMap {
-        case false => IO.pure(Left(s"asset $assetId (${asset.digest.render}) was not uploaded"))
-        case true =>
-          IO.blocking(Nifti.readVol(tmp.toNioPath)).attempt.map {
-            case Left(e) =>
-              Left(s"asset $assetId is not a readable NIfTI volume: ${e.getMessage}")
-            case Right(vol) =>
-              val r = VolumeRendition.encode(vol, Some(asset.digest.render))
-              Right(Derived(assetId, VolumeRendition.headerJson(r.header), r.payload))
-          }
+    withAsset(objects, assetId, asset, ".nii") { path =>
+      scala.util.Try(Nifti.readVol(path)).toEither.left.map(e =>
+        s"asset $assetId is not a readable NIfTI volume: ${e.getMessage}"
+      ).map { vol =>
+        val r = VolumeRendition.encode(vol, Some(asset.digest.render))
+        Derived(assetId, "volume", None, VolumeRendition.headerJson(r.header), r.payload)
       }
     }
 
-  /** Every volume asset of the manifest; stops at the first failure. */
+  /** The geometry of one declared surface, proven against its domain: counts and the ADR 0005
+    * `surface-vertices/v1` fingerprint recomputed from the GIFTI's triangles.
+    */
+  def readSurface(
+      objects: ObjectStore,
+      manifest: Manifest,
+      surface: Surface
+  ): IO[Either[String, SurfaceGeometry]] =
+    manifest.asset(surface.asset) match
+      case None => IO.pure(Left(s"surface ${surface.id} names undeclared asset ${surface.asset}"))
+      case Some(asset) =>
+        withAsset(objects, surface.asset, asset, ".surf.gii") { path =>
+          val hemisphere = Hemisphere.fromString(surface.hemisphere)
+          GiftiSurfaceReader.readEither(path, hemisphere, SurfaceKind.fromString(surface.kind))
+            .left.map(e =>
+              s"asset ${surface.asset} (surface ${surface.id}) is not a readable GIFTI surface: ${e.message}"
+            ).flatMap(g => proveDomain(manifest, surface, g).map(_ => g))
+        }
+
+  private def proveDomain(
+      manifest: Manifest,
+      surface: Surface,
+      g: SurfaceGeometry
+  ): Either[String, Unit] =
+    val who = s"surface ${surface.id} (asset ${surface.asset})"
+    for
+      p <- ManifestChecks.surfaceDomain(manifest, surface.domain).toRight(
+        s"$who: domain '${surface.domain}' is not a trusted surface-vertices domain"
+      )
+      _ <- Either.cond(
+        g.vertexCount == p.vertexCount && g.faceCount == p.faceCount,
+        (),
+        s"$who has ${g.vertexCount} vertices and ${g.faceCount} faces; domain '${surface.domain}' declares ${p.vertexCount} and ${p.faceCount}"
+      )
+      declared <- manifest.domains.find(_.id == surface.domain).flatMap(_.key)
+        .flatMap(_.hcursor.get[String]("structuralFingerprint").toOption)
+        .toRight(s"$who: domain '${surface.domain}' has no structuralFingerprint")
+      schema = TrustedSchemas.SurfaceVerticesV1
+      actual = SurfaceVertices.fingerprint(schema.id, schema.version, p, g.mesh.faceIndices).render
+      _ <- Either.cond(
+        actual == declared,
+        (),
+        s"$who: its triangles hash to $actual, but domain '${surface.domain}' declares $declared; the GIFTI does not realize the declared topology"
+      )
+    yield ()
+
+  /** One scalar per vertex of `surface` from a GIFTI data array (the first array that is not the
+    * geometry: NIFTI_INTENT_NONE, SHAPE, or similar), narrowed to float32.
+    */
+  def readField(
+      objects: ObjectStore,
+      assetId: String,
+      asset: ManifestAsset,
+      surface: Surface,
+      geometry: SurfaceGeometry
+  ): IO[Either[String, Derived]] =
+    withAsset(objects, assetId, asset, ".func.gii") { path =>
+      GiftiReader.read(path).left.map(e =>
+        s"asset $assetId is not a readable GIFTI file: ${e.message}"
+      ).flatMap { doc =>
+        doc.dataArrays.find(a => !a.isPointSet && !a.isTriangle).toRight(
+          s"asset $assetId has no per-vertex data array"
+        ).flatMap(array =>
+          GiftiReader.doubleData(array).left.map(e =>
+            s"asset $assetId: ${e.message}"
+          ).flatMap { values =>
+            Either.cond(
+              values.length == geometry.vertexCount, {
+                val r = VertexFieldRendition.encode(surface.id, values, Some(asset.digest.render))
+                Derived(
+                  assetId,
+                  "vertex-field",
+                  Some(surface.id),
+                  VertexFieldRendition.headerJson(r.header),
+                  r.payload
+                )
+              },
+              s"asset $assetId has ${values.length} vertex values but surface ${surface.id} has ${geometry.vertexCount} vertices"
+            )
+          }
+        )
+      }
+    }
+
+  /** Derive every rendition of the manifest in target order, handing each to `sink` as it is made;
+    * stops at the first failure. Surface geometries are read once and kept for their fields.
+    */
+  def deriveEach(
+      objects: ObjectStore,
+      manifest: Manifest
+  )(sink: Derived => IO[Unit]): IO[Either[String, Unit]] =
+    def geometryOf(
+        cache: Map[String, SurfaceGeometry],
+        surfaceId: String
+    ): IO[Either[String, (Map[String, SurfaceGeometry], SurfaceGeometry)]] =
+      cache.get(surfaceId) match
+        case Some(g) => IO.pure(Right((cache, g)))
+        case None =>
+          manifest.surface(surfaceId) match
+            case None => IO.pure(Left(s"undeclared surface $surfaceId"))
+            case Some(s) =>
+              readSurface(objects, manifest, s).map(_.map(g => (cache + (s.id -> g), g)))
+    manifest.renditionTargets
+      .foldLeftM[IO, Either[String, Map[String, SurfaceGeometry]]](Right(Map.empty)) {
+        case (l @ Left(_), _) => IO.pure(l)
+        case (Right(cache), t) =>
+          val asset = manifest.asset(t.assetId)
+          t.kind match
+            case "volume" =>
+              derive(objects, t.assetId, asset.get).flatMap {
+                case Left(m) => IO.pure(Left(m))
+                case Right(d) => sink(d).as(Right(cache))
+              }
+            case "surface-mesh" =>
+              // every surface on this asset is proven; the rendition is encoded once
+              val on = manifest.surfaces.filter(_.asset == t.assetId)
+              on.foldLeftM[IO, Either[String, Map[String, SurfaceGeometry]]](Right(cache)) {
+                case (l @ Left(_), _) => IO.pure(l)
+                case (Right(c), s) => geometryOf(c, s.id).map(_.map(_._1))
+              }.flatMap {
+                case Left(m) => IO.pure(Left(m))
+                case Right(c) =>
+                  val g = c(on.head.id)
+                  SurfaceRendition.encode(g, Some(asset.get.digest.render)) match
+                    case Left(m) => IO.pure(Left(s"asset ${t.assetId}: $m"))
+                    case Right(r) =>
+                      sink(Derived(
+                        t.assetId,
+                        "surface-mesh",
+                        None,
+                        SurfaceRendition.headerJson(r.header),
+                        r.payload
+                      )).as(Right(c))
+              }
+            case "vertex-field" =>
+              geometryOf(cache, t.surface.get).flatMap {
+                case Left(m) => IO.pure(Left(m))
+                case Right((c, g)) =>
+                  readField(objects, t.assetId, asset.get, manifest.surface(t.surface.get).get, g)
+                    .flatMap {
+                      case Left(m) => IO.pure(Left(m))
+                      case Right(d) => sink(d).as(Right(c))
+                    }
+              }
+            case other => IO.pure(Left(s"asset ${t.assetId}: unknown rendition kind $other"))
+      }.map(_.map(_ => ()))
+
+  /** Every rendition of the manifest; stops at the first failure. */
   def deriveAll(objects: ObjectStore, manifest: Manifest): IO[Either[String, List[Derived]]] =
-    manifest.volumeAssetIds.traverse(id => derive(objects, id, manifest.asset(id).get))
-      .map(_.sequence)
+    cats.effect.Ref.of[IO, List[Derived]](Nil).flatMap { acc =>
+      deriveEach(objects, manifest)(d => acc.update(d :: _)).flatMap {
+        case Left(m) => IO.pure(Left(m))
+        case Right(()) => acc.get.map(ds => Right(ds.reverse))
+      }
+    }
 
   /** Derive and store every rendition of `revisionId` (the worker's unit of work). */
   def ingest(
@@ -49,14 +228,7 @@ object Derivation:
       revisionId: String,
       manifest: Manifest
   ): IO[Either[String, Unit]] =
-    manifest.volumeAssetIds.foldLeftM(Either.right[String, Unit](())) {
-      case (l @ Left(_), _) => IO.pure(l)
-      case (Right(()), id) =>
-        derive(objects, id, manifest.asset(id).get).flatMap {
-          case Left(m) => IO.pure(Left(m))
-          case Right(d) => renditions.write(revisionId, id, d.header, d.payload).as(Right(()))
-        }
-    }
+    deriveEach(objects, manifest)(d => renditions.write(revisionId, d.assetId, d.header, d.payload))
 
   /** The stored manifest of a revision, parsed — and refused ([[IntegrityError]]) when its bytes no
     * longer hash to the digest the record names: a tampered object is never used silently.
@@ -118,7 +290,7 @@ final class Ingestion(
       manifest: Manifest,
       job: Option[IngestionJob]
   ): IO[IngestionStatus] =
-    manifest.volumeAssetIds.forallM(renditions.ready(revisionId, _)).map {
+    manifest.renditionAssetIds.forallM(renditions.ready(revisionId, _)).map {
       case true =>
         job.map(_.api).filter(_.status == "ready")
           .getOrElse(IngestionStatus("ready", job.map(_.updatedAt).getOrElse(committedAt)))

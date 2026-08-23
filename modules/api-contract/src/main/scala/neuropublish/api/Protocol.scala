@@ -60,7 +60,9 @@ final case class RenditionRef(
     assetId: String,
     status: String,
     headerUrl: String,
-    payloadUrl: String
+    payloadUrl: String,
+    kind: String = "volume", // "volume" | "surface-mesh" | "vertex-field"
+    surface: Option[String] = None // for vertex fields: the surface asset id they are defined on
 )
 
 /** Ingestion state of a revision: "pending" | "running" | "ready" | "failed"; `error` only when

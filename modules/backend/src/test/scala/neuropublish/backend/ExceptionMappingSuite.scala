@@ -67,11 +67,12 @@ class ExceptionMappingSuite extends CatsEffectSuite:
   private def push(app: HttpApp[IO]): IO[CommitResult] =
     for
       manifest <- bytes("reference/manifest.json")
-      assets <- List("t1", "speech-effect", "speech-se", "speech-t", "speech-z").traverse(id =>
-        bytes(s"reference/assets/$id.nii")
+      assets <- ReferenceBundle.assets.traverse((id, file, _) =>
+        bytes(s"reference/assets/$file")
       )
-      inv =
-        assets.map(b => AssetInventory(Sha256.of(b).render, b.length.toLong, "application/x-nifti"))
+      inv = assets.zip(ReferenceBundle.assets).map((b, a) =>
+        AssetInventory(Sha256.of(b).render, b.length.toLong, a._3)
+      )
       s <- app.run(auth(Request[IO](
         Method.POST,
         uri"/api/v1/workspaces/rotman/projects/sherlock/upload-sessions"
