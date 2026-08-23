@@ -8,10 +8,22 @@ import neuropublish.protocol.json.Manifest
   * definition).
   */
 object ProjectPage:
-  def render(summary: ProjectSummary, head: Option[(RevisionDetail, Manifest)]): HtmlElement =
+  def render(
+      summary: ProjectSummary,
+      head: Option[(RevisionDetail, Manifest)],
+      account: HtmlElement
+  ): HtmlElement =
     val base = s"/w/${summary.workspace}/p/${summary.project}"
     div(
       cls := "page project",
+      headerTag(
+        cls := "topbar",
+        span(cls := "crumb muted", summary.workspace),
+        span(cls := "crumb muted", "/"),
+        span(cls := "crumb", summary.project),
+        div(cls := "spacer"),
+        account
+      ),
       headerTag(
         cls := "page-header",
         h1(head.map(_._2.title).getOrElse(summary.project)),

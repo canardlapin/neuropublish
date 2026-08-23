@@ -1,71 +1,151 @@
 package neuropublish.frontend
 
 import com.raquo.laminar.api.L.*
+import neuropublish.api.SavedViewDetail
 import neuropublish.protocol.json.Manifest
-import neuropublish.viewer.ViewUrl
+import neuropublish.viewer.{ViewUrl, Workspace, WorkspaceState}
 import org.scalajs.dom
 import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.Future
 import scala.scalajs.js
 import scala.util.{Failure, Success, Try}
 
 object Main:
-  /** Route scheme (plan, Stage 2): /w/{ws}/p/{project} and
-    * /w/{ws}/p/{project}/r/{rev}[/view][?view-state]
+  /** Route scheme (plan, Stages 2 and 4):
+    *   - `/login`, `/device`
+    *   - `/w/{ws}/p/{project}` overview
+    *   - `/w/{ws}/p/{project}/r/{rev}[/view][?view-state]` explore
+    *   - `/w/{ws}/p/{project}/v/{viewId}` explore, opened on a saved view's latest version
+    *   - `/s/{secret}` presentation (read-only, no account)
     */
   private val Project = """/w/([^/]+)/p/([^/]+)/?""".r
   private val Revision = """/w/([^/]+)/p/([^/]+)/r/([^/]+)(?:/view)?/?""".r
+  private val View = """/w/([^/]+)/p/([^/]+)/v/([^/]+)/?""".r
+  private val Share = """/s/([^/]+)/?""".r
+  private val Login = """/login/?""".r
+  private val Device = """/device/?""".r
 
   def main(args: Array[String]): Unit =
     val apiBase = dom.window.asInstanceOf[js.Dynamic].__NP_API.asInstanceOf[js.UndefOr[String]]
       .getOrElse(if dom.window.location.port == "5173" then "http://127.0.0.1:8080" else "")
     val api = Api(apiBase)
+    val session = Session(api)
     val status = Var[String]("loading")
     val content = Var[Option[HtmlElement]](None)
-    def fail(e: Throwable) = status.set(s"error: ${e.getMessage}")
+    val path = dom.window.location.pathname
 
-    dom.window.location.pathname match
+    def here = path + dom.window.location.search
+    def toLogin(): Unit =
+      dom.window.location.assign(s"/login?next=${js.URIUtils.encodeURIComponent(here)}")
+
+    /** Member routes: a 401 on a private project goes to sign-in; everything else is shown. */
+    def fail(e: Throwable): Unit = e match
+      case ApiFailure(401, _, _) => toLogin()
+      case _ => status.set(s"error: ${e.getMessage}")
+
+    def show(el: HtmlElement): Unit = { content.set(Some(el)); status.set("ready") }
+
+    /** Explore page over a loaded revision with `initial` already applied to the store. */
+    def explore(l: Loaded, initial: Workspace, saved: Option[SavedViewDetail]): Try[HtmlElement] =
+      Try {
+        val store = WorkspaceStore(l, initial) // the host's first model already reflects the state
+        var pending: Option[Int] = None
+        WorkspacePage.render(
+          store,
+          w => {
+            // coalesce slider ticks; browsers rate-limit replaceState
+            pending.foreach(dom.window.clearTimeout)
+            pending = Some(dom.window.setTimeout(
+              () => {
+                pending = None
+                dom.window.history.replaceState(
+                  null,
+                  "",
+                  s"${dom.window.location.pathname}?${ViewUrl.encode(w)}"
+                )
+              },
+              250
+            ))
+          },
+          PageMode.Explore(session, saved)
+        )
+      }
+
+    path match
+      case Login() =>
+        session.refresh()
+        show(AuthPages.login(session, AuthPages.safeNext(AuthPages.query("next"))))
+      case Device() =>
+        session.refresh().foreach {
+          case Some(_) => show(AuthPages.device(session, AuthPages.query("code")))
+          case None => toLogin()
+        }
+      case Share(secret) =>
+        api.openShare(secret).flatMap { shared =>
+          val rev = shared.revision
+          Future.fromTry(WorkspaceState.decode(shared.version.state).left.map(m =>
+            RuntimeException(s"This saved view cannot be read by this viewer: $m")
+          ).toTry).flatMap(saved =>
+            Loaded.fromDetail(
+              rev.workspace,
+              rev.project,
+              rev,
+              r => api.shareRendition(secret, r.assetId)
+            ).map(l => (shared, saved, l))
+          )
+        }.onComplete {
+          case Success((shared, saved, l)) =>
+            Try {
+              val state = WorkspaceState.apply(saved, l.initialWorkspace)
+              val store = WorkspaceStore(l, state)
+              WorkspacePage.render(store, _ => (), PageMode.Presentation(shared, state))
+            } match
+              case Success(el) => show(el)
+              case Failure(e) => status.set(s"error: ${e.getMessage}")
+          case Failure(ApiFailure(410, _, _)) => status.set("revoked")
+          case Failure(ApiFailure(404, _, _)) => status.set("revoked")
+          case Failure(e) => status.set(s"error: ${e.getMessage}")
+        }
+      case View(ws, p, viewId) =>
+        session.refresh()
+        api.getView(viewId).flatMap { v =>
+          val latest = v.versions.find(_.version == v.latest).orElse(v.versions.lastOption)
+            .getOrElse(throw RuntimeException("This saved view has no versions."))
+          val saved = WorkspaceState.decode(latest.state).fold(
+            m => throw RuntimeException(s"This saved view cannot be read by this viewer: $m"),
+            identity
+          )
+          Loaded.load(api, ws, p, Some(v.revision)).map(l => (v, saved, l))
+        }.onComplete {
+          case Success((v, saved, l)) =>
+            // same path as the URL: saved state applied onto the revision's recommendations
+            explore(l, WorkspaceState.apply(saved, l.initialWorkspace), Some(v)) match
+              case Success(el) => show(el)
+              case Failure(e) => fail(e)
+          case Failure(e) => fail(e)
+        }
       case Revision(ws, p, rev) =>
+        session.refresh()
         Loaded.load(api, ws, p, Some(rev)).onComplete {
           case Success(l) =>
-            Try {
-              val fromUrl = ViewUrl(dom.window.location.search, l.initialWorkspace)
-              val store =
-                WorkspaceStore(l, fromUrl) // the host's first model already reflects the URL
-              var pending: Option[Int] = None
-              WorkspacePage.render(
-                store,
-                w => {
-                  // coalesce slider ticks; browsers rate-limit replaceState
-                  pending.foreach(dom.window.clearTimeout)
-                  pending = Some(dom.window.setTimeout(
-                    () => {
-                      pending = None
-                      dom.window.history.replaceState(
-                        null,
-                        "",
-                        s"${dom.window.location.pathname}?${ViewUrl.encode(w)}"
-                      )
-                    },
-                    250
-                  ))
-                }
-              )
-            } match
-              case Success(el) => content.set(Some(el)); status.set("ready")
+            explore(l, ViewUrl(dom.window.location.search, l.initialWorkspace), None) match
+              case Success(el) => show(el)
               case Failure(e) => fail(e)
           case Failure(e) => fail(e)
         }
       case Project(ws, p) =>
+        session.refresh()
         api.project(ws, p).flatMap { s =>
-          s.head.fold(scala.concurrent.Future.successful((s, None)))(id =>
+          s.head.fold(Future.successful((s, None)))(id =>
             api.revision(id).map(d => (s, d.manifest.as[Manifest].toOption.map(m => (d, m))))
           )
         }.onComplete {
-          case Success((s, head)) =>
-            content.set(Some(ProjectPage.render(s, head))); status.set("ready")
+          case Success((s, head)) => show(ProjectPage.render(s, head, session.account))
           case Failure(e) => fail(e)
         }
-      case _ => status.set("Open a project: /w/{workspace}/p/{project}")
+      case _ =>
+        session.refresh()
+        status.set("Open a project: /w/{workspace}/p/{project}")
 
     val app = div(
       idAttr := "np-app",
@@ -75,8 +155,20 @@ object Main:
         Option.when(s != "ready")(
           div(
             cls := "state",
-            if s == "loading" then div(cls := "skeleton", "Loading revision…")
-            else div(cls := "error", s, " ", a(href := "/w/rotman/p/sherlock", "Back to project"))
+            s match
+              case "loading" => div(cls := "skeleton", "Loading revision…")
+              case "revoked" =>
+                div(
+                  cls := "revoked",
+                  dataAttr("testid") := "link-revoked",
+                  h1("This link was revoked or has expired."),
+                  p(
+                    cls := "muted",
+                    "Read-only links point at one saved-view version and can be withdrawn by the project at any time. Ask the person who shared it for a new link."
+                  )
+                )
+              case _ =>
+                div(cls := "error", s, " ", a(href := AuthPages.DefaultNext, "Back to project"))
           )
         )
       )
