@@ -33,8 +33,8 @@ test_that("builders serialize to the schema's records", {
 })
 
 test_that("np_write_bundle writes a staging bundle with copied assets and relative paths", {
-  staging <- withr::local_tempdir()
-  out <- withr::local_tempdir()
+  staging <- np_tempdir()
+  out <- np_tempdir()
   m <- np_julia_like_manifest(staging)
   expect_true(all(file.exists(vapply(m$assets, `[[`, character(1), "path"))))
   written <- np_write_bundle(m, out)
@@ -53,7 +53,7 @@ test_that("np_write_bundle writes a staging bundle with copied assets and relati
 })
 
 test_that("the manifest digest equals shasum's / the bytes are UTF-8 without BOM", {
-  out <- withr::local_tempdir()
+  out <- np_tempdir()
   m <- np_manifest("Dígest — ünïcode", "S")
   m$`x-note` <- "é中"
   np_write_bundle(m, out)
@@ -73,7 +73,7 @@ test_that("the manifest digest equals shasum's / the bytes are UTF-8 without BOM
 })
 
 test_that("unknown fields added by the user survive writing (value-level)", {
-  out <- withr::local_tempdir()
+  out <- np_tempdir()
   m <- np_manifest("T", "S")
   m$`x-lab-producer` <- list(
     version = "0.1",
@@ -92,7 +92,7 @@ test_that("unknown fields added by the user survive writing (value-level)", {
 })
 
 test_that("NaN, NA and infinite numbers are refused with a pointer", {
-  out <- withr::local_tempdir()
+  out <- np_tempdir()
   m <- np_manifest("T", "S")
   m$`x-bad` <- list(value = NaN)
   expect_error(np_write_bundle(m, out), "non-finite.*`/x-bad/value`")
@@ -107,7 +107,7 @@ test_that("NaN, NA and infinite numbers are refused with a pointer", {
 })
 
 test_that("as_neuropublish() reference implementation builds a complete result", {
-  staging <- withr::local_tempdir()
+  staging <- np_tempdir()
   vols <- np_synthetic_volumes()
   r <- as_neuropublish(vols,
     title = "Synthetic", synopsis = "Four volumes.",

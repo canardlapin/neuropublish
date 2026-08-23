@@ -25,7 +25,45 @@ np_fixture <- function(...) {
   if (file.exists(p)) p else NULL
 }
 
+# A temporary directory for one test. Base R only (withr is a Suggests): the
+# session's tempdir() is removed when R exits, so nothing is left behind.
+np_tempdir <- function() {
+  d <- tempfile("np-")
+  dir.create(d, recursive = TRUE)
+  normalizePath(d, winslash = "/")
+}
+
+# Run `code` with environment variables set, restoring them afterwards. `NA`
+# unsets. The base equivalent of withr::local_envvar().
+np_with_envvar <- function(vars, code) {
+  keys <- names(vars)
+  old <- Sys.getenv(keys, unset = NA, names = TRUE)
+  set <- vars[!is.na(vars)]
+  if (length(set)) do.call(Sys.setenv, as.list(set))
+  if (any(is.na(vars))) Sys.unsetenv(keys[is.na(vars)])
+  on.exit({
+    keep <- old[!is.na(old)]
+    if (length(keep)) do.call(Sys.setenv, as.list(keep))
+    gone <- names(old)[is.na(old)]
+    if (length(gone)) Sys.unsetenv(gone)
+  }, add = TRUE)
+  force(code)
+}
+
+# The tests that run the `npub` CLI are integration tests: they need a built
+# CLI (through `scripts/npub`, a working sbt and a JVM) and take minutes on a
+# cold cache, so they are opt-in. They run when NPUB_TESTS=1, or under the
+# NOT_CRAN=true that devtools::test() and testthat::test_local() set, and only
+# when `npub` is actually resolvable. `R CMD check --as-cran` on a tarball
+# leaves both unset, so the check is hermetic wherever it is run.
+np_run_cli_tests <- function() {
+  nzchar(Sys.getenv("NPUB_TESTS")) || identical(tolower(Sys.getenv("NOT_CRAN")), "true")
+}
+
 skip_without_npub <- function() {
+  if (!np_run_cli_tests()) {
+    skip("CLI integration tests are opt-in: set NPUB_TESTS=1 (or NOT_CRAN=true)")
+  }
   if (!np_has_npub()) skip("npub not found (set NPUB_BIN or run inside the Neuropublish checkout)")
 }
 

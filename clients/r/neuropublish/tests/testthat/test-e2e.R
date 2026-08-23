@@ -21,7 +21,7 @@ test_that("np_publish publishes, and a stale parent is reported with the current
   parent <- Sys.getenv("NPUB_PARENT", "")
   if (!nzchar(parent)) parent <- NULL
 
-  work <- withr::local_tempdir()
+  work <- np_tempdir()
   vols <- np_synthetic_volumes()
   first <- np_publish(vols, project,
     server = server, message = "R client e2e: first", parent = parent, dir = file.path(work, "one"),
