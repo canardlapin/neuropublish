@@ -2,7 +2,7 @@ package neuropublish.backend
 
 import cats.effect.IO
 import cats.syntax.all.*
-import fs2.io.file.{Files, Path}
+import fs2.io.file.Path
 import io.circe.Json
 import java.time.Instant
 import neuropublish.api.*
@@ -118,15 +118,17 @@ final class Routes(
   private def uploadKey(p: Principal, session: String): Res[ProjectKey] = authed(p):
     pub.sessionKey(session).map(_.toRight(notFound(s"upload session $session does not exist")))
 
-  private def readIf(rev: String, asset: String, path: (String, String) => Path): Res[Array[Byte]] =
+  private def readIf(
+      rev: String,
+      asset: String,
+      read: (String, String) => IO[Option[Array[Byte]]]
+  ): Res[Array[Byte]] =
     if !Ids.valid(rev) || !Ids.valid(asset) then IO.pure(Left(notFound("no such rendition")))
-    else
-      Files[IO].exists(path(rev, asset)).flatMap {
-        case false => IO.pure(Left(notFound("rendition not ready")))
-        case true => Files[IO].readAll(path(rev, asset)).compile.to(Array).map(Right(_))
-      }
+    else read(rev, asset).map(_.toRight(notFound("rendition not ready")))
   private def header(rev: String, asset: String): Res[String] =
-    readIf(rev, asset, ingestion.headerPath).map(_.map(b => new String(b, "UTF-8")))
+    readIf(rev, asset, ingestion.renditions.header).map(_.map(b => new String(b, "UTF-8")))
+  private def payload(rev: String, asset: String): Res[Array[Byte]] =
+    readIf(rev, asset, ingestion.renditions.payload)
 
   /** Audit rows are per workspace; a user-level event lands in every workspace the user belongs to.
     */
@@ -203,7 +205,7 @@ final class Routes(
     )
   private val renditionPayload =
     Protocol.renditionPayload.serverSecurityLogic[Principal, IO](resolve).serverLogic(p =>
-      (r, a) => rendition(p, r, readIf(r, a, ingestion.payloadPath))
+      (r, a) => rendition(p, r, payload(r, a))
     )
 
   // ------------------------------------------------------------------ identity
@@ -524,36 +526,42 @@ final class Routes(
       v.version(l.version) match
         case None => IO.pure(Left(notFound("the shared view version no longer exists")))
         case Some(ver) =>
-          pub.revision(v.revision).map(_.map { rd =>
-            // link viewers fetch renditions through the share routes, never the member routes
-            val rends = rd.renditions.map(r =>
-              r.copy(
-                headerUrl = s"$baseUrl/api/v1/share/$secret/renditions/${r.assetId}/header",
-                payloadUrl = s"$baseUrl/api/v1/share/$secret/renditions/${r.assetId}/payload"
+          withE(pub.revision(v.revision)) { rd =>
+            // link viewers fetch renditions through the share routes, never the member routes;
+            // in direct (S3) mode a ready rendition is a short-lived signed GET instead
+            rd.renditions.traverse(r =>
+              pub.signedRendition(v.revision, r.assetId).map {
+                case Some((h, p)) => r.copy(headerUrl = h, payloadUrl = p)
+                case None =>
+                  r.copy(
+                    headerUrl = s"$baseUrl/api/v1/share/$secret/renditions/${r.assetId}/header",
+                    payloadUrl = s"$baseUrl/api/v1/share/$secret/renditions/${r.assetId}/payload"
+                  )
+              }
+            ).map { rends =>
+              // the presentation subset: what the page renders, nothing of the record behind it
+              val presentation = rd.copy(
+                parent = None,
+                message = None,
+                committedAt = rd.committedAt.take(10),
+                manifest = SharedProjection.of(rd.manifest),
+                renditions = rends
               )
-            )
-            // the presentation subset: what the page renders, nothing of the record behind it
-            val presentation = rd.copy(
-              parent = None,
-              message = None,
-              committedAt = rd.committedAt.take(10),
-              manifest = SharedProjection.of(rd.manifest),
-              renditions = rends
-            )
-            SharedView(
-              SharedViewRef(v.id, v.name, v.revision, v.project),
-              SharedVersion(ver.version, ver.state, ver.savedAt),
-              presentation,
-              l.expiresAt
-            )
-          })
+              Right(SharedView(
+                SharedViewRef(v.id, v.name, v.revision, v.project),
+                SharedVersion(ver.version, ver.state, ver.savedAt),
+                presentation,
+                l.expiresAt
+              ))
+            }
+          }
     }
   }
   private val shareHeader = Stage4.shareRenditionHeader.serverLogic[IO]((secret, asset) =>
     withE(liveLink(secret))((_, v) => header(v.revision, asset))
   )
   private val sharePayload = Stage4.shareRenditionPayload.serverLogic[IO]((secret, asset) =>
-    withE(liveLink(secret))((_, v) => readIf(v.revision, asset, ingestion.payloadPath))
+    withE(liveLink(secret))((_, v) => payload(v.revision, asset))
   )
 
   // ------------------------------------------------------------------ provenance and audit
@@ -575,7 +583,54 @@ final class Routes(
     ws => withE(authz.requireAdmin(p, ws))(_ => audit.list(ws).map(Right(_)))
   )
 
-  val routes: HttpRoutes[IO] = Http4sServerInterpreter[IO]().toRoutes(
+  /** Direct (S3) mode: the control plane never streams rendition bytes. Member and share rendition
+    * GETs become 307 redirects to a short-lived signed GET once the rendition is ready; share
+    * routes authorize by link secret, member routes by the usual principal.
+    */
+  private val signedRenditions: HttpRoutes[IO] =
+    import org.http4s.{Response, Status, Uri}
+    import org.http4s.dsl.io.*
+    import org.http4s.headers.Location
+    def redirect(
+        r: IO[Either[ApiError, Option[(String, String)]]],
+        pick: ((String, String)) => String
+    ) =
+      r.flatMap {
+        case Right(Some(urls)) =>
+          IO.pure(Response[IO](Status.TemporaryRedirect).putHeaders(
+            Location(Uri.unsafeFromString(pick(urls)))
+          ))
+        case Right(None) => NotFound()
+        case Left(e) if e.code == "unauthorized" => IO.pure(Response[IO](Status.Unauthorized))
+        case Left(e) if e.code == "revoked" => IO.pure(Response[IO](Status.Gone))
+        case Left(_) => NotFound()
+      }
+    def principal(req: org.http4s.Request[IO]): IO[Either[ApiError, Principal]] =
+      val bearer = req.headers.get[org.http4s.headers.Authorization].map(_.credentials).collect {
+        case org.http4s.Credentials.Token(org.http4s.AuthScheme.Bearer, t) => t
+      }
+      val cookie = req.cookies.find(_.name == "np_session").map(_.content)
+      authz.resolve(bearer, cookie)
+    if !pub.direct then HttpRoutes.empty[IO]
+    else
+      HttpRoutes.of[IO] {
+        case GET -> Root / "api" / "v1" / "share" / secret / "renditions" / asset / which
+            if which == "header" || which == "payload" =>
+          redirect(
+            withE(liveLink(secret))((_, v) => pub.signedRendition(v.revision, asset).map(Right(_))),
+            if which == "header" then _._1 else _._2
+          )
+        case req @ GET -> Root / "api" / "v1" / "revisions" / rev / "renditions" / asset / which
+            if which == "header" || which == "payload" =>
+          redirect(
+            withE(principal(req))(p =>
+              rendition(p, rev, pub.signedRendition(rev, asset).map(Right(_)))
+            ),
+            if which == "header" then _._1 else _._2
+          )
+      }
+
+  val routes: HttpRoutes[IO] = signedRenditions <+> Http4sServerInterpreter[IO]().toRoutes(
     List(
       health,
       create,

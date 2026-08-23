@@ -208,6 +208,7 @@ lazy val backend = project
     libraryDependencies ++= Seq(
       "org.typelevel" %% "cats-effect" % Versions.catsEffect,
       "org.http4s" %% "http4s-ember-server" % Versions.http4s,
+      "org.http4s" %% "http4s-dsl" % Versions.http4s,
       "org.http4s" %% "http4s-ember-client" % Versions.http4s % Test,
       "org.http4s" %% "http4s-circe" % Versions.http4s % Test,
       "com.softwaremill.sttp.tapir" %% "tapir-http4s-server" % Versions.tapir,
@@ -215,6 +216,25 @@ lazy val backend = project
       "co.fs2" %% "fs2-io" % Versions.fs2,
       "com.softwaremill.sttp.tapir" %% "tapir-openapi-docs" % Versions.tapir,
       "com.softwaremill.sttp.apispec" %% "openapi-circe-yaml" % Versions.apispec,
+      // S3-compatible object store (Stage 2): async client + presigner
+      "software.amazon.awssdk" % "s3" % Versions.awsSdk,
+      "software.amazon.awssdk" % "netty-nio-client" % Versions.awsSdk,
+      "org.typelevel" %% "munit-cats-effect" % Versions.munitCatsEffect % Test,
+      "com.dimafeng" %% "testcontainers-scala-munit" % Versions.testcontainers % Test
+    )
+  )
+
+// Rendition derivation worker, a separate process from the control plane (Stage 2): claims
+// ingestion jobs from the queue, derives renditions, writes them to the configured store.
+lazy val ingestion = project
+  .in(file("modules/ingestion"))
+  .dependsOn(backend, rendition.jvm)
+  .settings(commonSettings)
+  .settings(
+    name := "neuropublish-ingestion",
+    libraryDependencies ++= Seq(
+      "org.typelevel" %% "cats-effect" % Versions.catsEffect,
+      "org.http4s" %% "http4s-circe" % Versions.http4s % Test,
       "org.typelevel" %% "munit-cats-effect" % Versions.munitCatsEffect % Test
     )
   )
@@ -222,7 +242,7 @@ lazy val backend = project
 // `npub`: validate, inspect, pack, login, push.
 lazy val publisherCli = project
   .in(file("modules/publisher-cli"))
-  .dependsOn(apiContract.jvm)
+  .dependsOn(apiContract.jvm, backend % "test->compile")
   .settings(commonSettings)
   .settings(
     name := "neuropublish-publisher-cli",
@@ -274,6 +294,7 @@ lazy val root = project
     viewerLaminar,
     frontend,
     backend,
+    ingestion,
     publisherCli,
     conformance
   )

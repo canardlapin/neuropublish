@@ -280,7 +280,10 @@ class FixtureSuite extends FunSuite:
     val (digest, manifest) = Manifest.parse(jbytes).fold(ps => fail(ps.mkString("; ")), identity)
     assertEquals(digest.hex, Files.readString(fixtures.resolve("julia/manifest.sha256")).trim)
     assertEquals(manifest.core, "0.1")
-    assertEquals(manifest.volumeAssetIds.sorted, List("speech-effect", "speech-t", "speech-z", "t1"))
+    assertEquals(
+      manifest.volumeAssetIds.sorted,
+      List("speech-effect", "speech-t", "speech-z", "t1")
+    )
     manifest.assets.foreach { a =>
       val file = Files.readAllBytes(fixtures.resolve(s"julia/assets/${a.id}.nii"))
       assertEquals(Sha256.of(file).render, a.digest.render, a.id)

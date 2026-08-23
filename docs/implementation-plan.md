@@ -372,6 +372,17 @@ to close before the freeze:
   resumption, commit, and URL output;
 - credentials outside manifests and command-line arguments.
 
+Status (2026-08-23), `push`: done. Each missing object follows its
+`UploadInstruction` verbatim (method, URL, signed headers), so the same flow
+serves the control-plane PUT (local mode) and a presigned object-store PUT (S3
+mode); the bearer is sent only to the control plane. Four objects in flight,
+three attempts per object with back off, one progress line per object.
+Resumption is a protocol property: a rerun negotiates a new session whose
+`missing` list excludes objects the workspace already holds (`ResumeSuite`:
+interrupted after ≥1 object, the second session's list is shorter by exactly
+the objects that landed). Commit rejections print `ApiError.problems` one per
+line.
+
 ### Backend and persistence
 
 - upload-session create, status, and commit endpoints with declared limits on
@@ -383,6 +394,33 @@ to close before the freeze:
 - ingestion worker as a separate process with its own queue, retry, and
   failure state visible on the revision;
 - audit events and delayed orphan cleanup.
+
+Status (2026-08-23), object store / ingestion / cleanup: done on the local
+read model; the PostgreSQL repositories are the persistence track.
+
+- `ObjectStore.S3` (AWS SDK v2 async client, `NP_S3_*`) keys objects
+  `sha256/<2>/<64>`; upload sessions return presigned PUTs whose signature
+  covers `Content-Length`, `Content-Type` and `x-amz-checksum-sha256`, plus a
+  presigned manifest PUT. Commit verifies every object by HEAD size and by the
+  provider checksum when reported, else by streaming the object once; a
+  mismatch rejects the commit and deletes nothing. Renditions live in the
+  bucket under `renditions/<rev>/` and are served as 15-minute presigned GETs
+  (`RevisionDetail.renditions[]`, the share response, and 307 redirects from
+  the member and share rendition routes); the control plane never streams
+  rendition bytes in S3 mode. Per ADR 0004 the session response gates
+  "missing" on `workspace-assets` membership, so another tenant's identical
+  bytes are still reported missing (`S3Suite`, MinIO via Testcontainers).
+- Ingestion: `IngestionQueue` (local-fs `<data>/queue/`, the PostgreSQL
+  `ingestion_jobs` adapter point is marked) and `modules/ingestion`
+  (`neuropublish.ingestion.Main`, `scripts/worker.sh`). `NP_INGESTION=worker`
+  makes commit enqueue and return; the revision reports
+  `ingestion.status = pending` until the worker derives, with three attempts,
+  exponential back off and the error recorded on the job (`WorkerSuite`).
+  `inline` (default) keeps the Stage 1 fail-before-commit behaviour.
+- `neuropublish.backend.Main gc --older-than 24h [--dry-run]` deletes objects
+  referenced by no committed manifest and no young unfinished session, and
+  rendition sets of vanished revisions; every run writes an audit event
+  (`GcSuite`).
 
 ### Neutrality proof
 
