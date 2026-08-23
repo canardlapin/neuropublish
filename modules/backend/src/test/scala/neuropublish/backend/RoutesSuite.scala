@@ -85,10 +85,10 @@ class RoutesSuite extends CatsEffectSuite:
         _ = assertEquals(c.status, Status.Created)
         r <- c.as[io.circe.Json].map(_.as[CommitResult].toOption.get)
         _ = assertEquals(r.digest, Sha256.of(manifest).render)
-        detail <- app.run(Request[IO](
+        detail <- app.run(auth(Request[IO](
           Method.GET,
           Uri.unsafeFromString(s"/api/v1/revisions/${r.revisionId}")
-        )).flatMap(_.as[String]).flatMap(b =>
+        ))).flatMap(_.as[String]).flatMap(b =>
           IO.fromEither(io.circe.parser.decode[RevisionDetail](b))
         )
         _ = assertEquals(detail.renditions.map(_.status).distinct, List("ready"))
@@ -96,15 +96,15 @@ class RoutesSuite extends CatsEffectSuite:
           detail.renditions.map(_.assetId).sorted,
           List("speech-effect", "speech-se", "speech-t", "speech-z", "t1")
         )
-        hdr <- app.run(Request[IO](
+        hdr <- app.run(auth(Request[IO](
           Method.GET,
           Uri.unsafeFromString(s"/api/v1/revisions/${r.revisionId}/renditions/speech-t/header")
-        )).flatMap(_.as[String])
+        ))).flatMap(_.as[String])
         _ = assert(hdr.contains("volume-f32"))
-        proj <- app.run(Request[IO](
+        proj <- app.run(auth(Request[IO](
           Method.GET,
           uri"/api/v1/workspaces/rotman/projects/sherlock"
-        )).flatMap(_.as[io.circe.Json]).map(_.as[ProjectSummary].toOption.get)
+        ))).flatMap(_.as[io.circe.Json]).map(_.as[ProjectSummary].toOption.get)
       yield assertEquals(proj.head, Some(r.revisionId))
   }
 
@@ -132,40 +132,46 @@ class RoutesSuite extends CatsEffectSuite:
     )
   }
 
-  server.test("unauthenticated mutation is refused; reads are open") { app =>
-    for
-      r <- app.run(Request[IO](
-        Method.POST,
-        uri"/api/v1/workspaces/rotman/projects/sherlock/upload-sessions"
-      )
-        .withEntity(CreateUploadSession("sha256:" + "0" * 64, 1, None, Nil).asJson))
-      _ = assertEquals(r.status, Status.Unauthorized)
-      p <- app.run(Request[IO](Method.GET, uri"/api/v1/workspaces/rotman/projects/sherlock"))
-    yield assertEquals(p.status, Status.Ok)
+  server.test("unauthenticated mutation and reads are refused (projects are private, Stage 4)") {
+    app =>
+      for
+        r <- app.run(Request[IO](
+          Method.POST,
+          uri"/api/v1/workspaces/rotman/projects/sherlock/upload-sessions"
+        )
+          .withEntity(CreateUploadSession("sha256:" + "0" * 64, 1, None, Nil).asJson))
+        _ = assertEquals(r.status, Status.Unauthorized)
+        p <- app.run(Request[IO](Method.GET, uri"/api/v1/workspaces/rotman/projects/sherlock"))
+        _ = assertEquals(p.status, Status.Unauthorized)
+        legacy <- app.run(auth(Request[IO](
+          Method.GET,
+          uri"/api/v1/workspaces/rotman/projects/sherlock"
+        )))
+      yield assertEquals(legacy.status, Status.Ok)
   }
 
   server.test("a substituted object is rejected at upload and the head never moves") { app =>
     for
       c <- push(app, None, substitute = Some("t1" -> Array.fill[Byte](54112)(7)))
       _ = assertEquals(c.status, Status.BadRequest)
-      proj <- app.run(Request[IO](
+      proj <- app.run(auth(Request[IO](
         Method.GET,
         uri"/api/v1/workspaces/rotman/projects/sherlock"
-      )).flatMap(_.as[io.circe.Json]).map(_.as[ProjectSummary].toOption.get)
+      ))).flatMap(_.as[io.circe.Json]).map(_.as[ProjectSummary].toOption.get)
     yield assertEquals(proj.head, None)
   }
 
   server.test("path parameters that are not ids never reach the filesystem") { app =>
     for
-      r1 <- app.run(Request[IO](
+      r1 <- app.run(auth(Request[IO](
         Method.GET,
         Uri.unsafeFromString("/api/v1/revisions/..%2Fprojects%2Frotman/renditions/sherlock/header")
-      ))
+      )))
       _ = assertEquals(r1.status, Status.NotFound)
-      r2 <- app.run(Request[IO](
+      r2 <- app.run(auth(Request[IO](
         Method.GET,
         Uri.unsafeFromString("/api/v1/revisions/..%2F..%2Fetc%2Fpasswd")
-      ))
+      )))
     yield assertEquals(r2.status, Status.NotFound)
   }
 

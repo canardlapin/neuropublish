@@ -77,6 +77,10 @@ final class Publication(
               }
     }
 
+  /** The project an upload session publishes to, for authorization before any mutation. */
+  def sessionKey(id: String): IO[Option[ProjectKey]] =
+    if !Ids.valid(id) then IO.none else sessions.get.map(_.get(id).map(_.key))
+
   private def session(id: String): IO[Either[ApiError, UploadSession]] =
     if !Ids.valid(id) then IO.pure(Left(err("not_found", s"upload session $id does not exist")))
     else sessions.get.map(_.get(id).toRight(err("not_found", s"upload session $id does not exist")))
