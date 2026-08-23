@@ -12,6 +12,7 @@ object Versions {
   val flyway = "11.8.2"
   val testcontainers = "0.43.0"
   val decline = "2.5.0"
+  val awsSdk = "2.46.7"
   val laminar = "17.2.1"
   val waypoint = "9.0.0"
   val jsonSchemaValidator = "1.5.9"

@@ -52,6 +52,8 @@ expects.
 | `NP_WORKSPACE` / `NP_PROJECT` | `rotman` / `sherlock` | Bootstrap workspace and project (ADR 0004: one workspace in the alpha) |
 | `NP_OWNER_EMAIL` / `NP_OWNER_PASSWORD` | `owner@example.org` / `owner-dev-password` | Local identity-provider user created as `owner` of the bootstrap workspace on first start; `scripts/e2e.sh` signs in with these |
 | `NP_STATIC_DIR` | unset | Built frontend to serve with SPA fallback |
+| `NP_S3_BUCKET` | unset | S3 mode when set: objects and renditions live in this bucket, uploads and rendition reads are presigned. With `NP_S3_ENDPOINT` (MinIO or any S3-compatible service; unset = AWS), `NP_S3_REGION` (`us-east-1`), `NP_S3_ACCESS_KEY` / `NP_S3_SECRET_KEY` (unset = SDK default chain), `NP_S3_PATH_STYLE=true` (MinIO). Unset = objects under `<data>/objects`, proxied through the control plane. |
+| `NP_INGESTION` | `inline` | `inline` derives renditions inside the commit (an unreadable asset fails the push); `worker` enqueues and returns — run `scripts/worker.sh` beside the backend, the revision shows `ingestion.status` pending/running/ready/failed |
 | `NP_LEGACY_TOKEN` | unset | **Deprecated.** The Stage 1 static bearer token (server side; the CLI's `NP_TOKEN` is unrelated). When set it still publishes and reads everywhere with no identity; leave it unset except for legacy clients. Removed once every client uses `npub login` or a publisher credential. |
 
 Projects are private: every read needs a signed-in workspace member (session
@@ -125,6 +127,44 @@ record, secrets stored as SHA-256 only, passwords as salted PBKDF2-HMAC-SHA256:
 <data>/provenance/<rev>.json           cached provenance read model (a pure function of the manifest)
 <data>/audit/<ws>.jsonl                append-only audit log (login, publish, share, credential, device approve)
 ```
+
+### Object store, ingestion worker, and cleanup (Stage 2)
+
+Local MinIO:
+
+```
+docker run --rm -p 9000:9000 -e MINIO_ROOT_USER=minio -e MINIO_ROOT_PASSWORD=minio-secret minio/minio server /data
+export NP_S3_BUCKET=neuropublish NP_S3_ENDPOINT=http://127.0.0.1:9000 NP_S3_ACCESS_KEY=minio \
+       NP_S3_SECRET_KEY=minio-secret NP_S3_PATH_STYLE=true NP_INGESTION=worker
+sbt backend/run            # creates the bucket if absent; commit enqueues ingestion
+scripts/worker.sh          # = sbt ingestion/run; same NP_DATA_DIR and NP_S3_* as the backend
+scripts/worker.sh --once   # drain the queue and exit
+```
+
+`npub push` is unchanged: it follows the `UploadInstruction`s the session
+returns (presigned PUTs in S3 mode) and the presigned manifest URL, four
+objects at a time, three attempts each; rerunning an interrupted push never
+retransmits objects the server already holds. The viewer receives 15-minute
+presigned GETs for renditions; the control-plane rendition routes answer 307
+to the same URLs.
+
+Orphan cleanup, never automatic:
+
+```
+sbt "backend/run gc --older-than 24h --dry-run"   # list what would go
+sbt "backend/run gc --older-than 24h"             # delete; audit event per workspace
+```
+
+An object is removed only when no committed manifest references it, no
+unfinished upload session younger than the threshold declares it, and the
+object itself is older than the threshold.
+
+Tests: `S3Suite` runs MinIO through Testcontainers and is skipped when Docker
+is unavailable; `ingestion/test` and `GcSuite` use the local queue and store.
+
+Extra data-dir entries: `queue/<rev>.json` (ingestion jobs),
+`upload-sessions/<id>.json` (+ `.manifest` in local mode),
+`workspace-assets/<ws>/<hex>` (which workspace may see a digest as present).
 
 ## Upstream Scala libraries
 

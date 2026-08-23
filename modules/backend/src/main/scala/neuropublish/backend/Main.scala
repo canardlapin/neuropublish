@@ -1,6 +1,6 @@
 package neuropublish.backend
 
-import cats.effect.{ExitCode, IO, IOApp, Ref, Resource}
+import cats.effect.{ExitCode, IO, IOApp, Resource}
 import cats.syntax.all.*
 import cats.effect.std.UUIDGen
 import com.comcast.ip4s.*
@@ -17,8 +17,12 @@ import org.http4s.server.staticcontent.*
   *     optional)
   *   - NP_DATABASE_URL (+ NP_DATABASE_USER / NP_DATABASE_PASSWORD): when set, every record store is
   *     PostgreSQL (Flyway migrations run at start); unset, the local-fs JSON stores under
-  *     NP_DATA_DIR. Objects and renditions stay under NP_DATA_DIR either way (Stage 2 object
-  *     store).
+  *     NP_DATA_DIR.
+  *   - NP_S3_BUCKET (+ NP_S3_ENDPOINT, NP_S3_REGION, NP_S3_ACCESS_KEY, NP_S3_SECRET_KEY,
+  *     NP_S3_PATH_STYLE): S3-compatible object store with presigned transfers; unset, objects and
+  *     renditions under NP_DATA_DIR, proxied by the control plane ([[ObjectStore.S3Config]])
+  *   - NP_INGESTION=inline|worker (default inline): derive renditions in the commit, or enqueue for
+  *     `neuropublish.ingestion.Main` ([[IngestionMode]])
   *   - NP_BASE_URL (default http://127.0.0.1:$NP_PORT): the public origin — share URLs, device
   *     verification URIs, rendition URLs; an `https://` value marks cookies `Secure`
   *   - NP_WORKSPACE / NP_PROJECT (default rotman / sherlock — the bootstrap workspace and project)
@@ -30,7 +34,8 @@ import org.http4s.server.staticcontent.*
   *     publisher credential.
   *
   * Subcommands: none → serve; `reindex` → rebuild the PostgreSQL read model from the stored
-  * manifests and exit (requires NP_DATABASE_URL).
+  * manifests and exit (requires NP_DATABASE_URL); `gc --older-than 24h [--dry-run]` → delayed
+  * orphan cleanup ([[Gc]]).
   */
 object Main extends IOApp:
   def run(args: List[String]): IO[ExitCode] =
@@ -38,26 +43,56 @@ object Main extends IOApp:
     val data = Path(env.getOrElse("NP_DATA_DIR", "data"))
     val db = DbConfig.fromEnv(env)
     args match
-      case "reindex" :: Nil => reindex(data, db)
+      case "reindex" :: Nil => reindex(data, db, env)
+      case "gc" :: rest => gc(data, db, env, rest)
       case Nil => serve(env, data, db).as(ExitCode.Success)
       case other =>
-        IO.println(s"unknown arguments: ${other.mkString(" ")}; usage: [reindex]").as(ExitCode(2))
-
-  private def reindex(data: Path, db: Option[DbConfig]): IO[ExitCode] = db match
-    case None =>
-      IO.println("reindex needs NP_DATABASE_URL: the local-fs stores keep no read model")
-        .as(ExitCode(2))
-    case Some(cfg) =>
-      PgStores.resource(cfg).use { pg =>
-        val objects = Server.objects(data)
-        pg.reindex(objects.get).run.flatMap(r =>
-          IO.println(
-            s"reindex: ${r.scanned} revisions scanned, ${r.indexed} indexed" +
-              (if r.missing.isEmpty then ""
-               else s"; manifest missing for ${r.missing.mkString(", ")}")
-          ).as(if r.missing.isEmpty then ExitCode.Success else ExitCode(1))
+        IO.println(s"unknown arguments: ${other.mkString(" ")}; usage: [reindex | gc]").as(
+          ExitCode(2)
         )
-      }
+
+  private def reindex(data: Path, db: Option[DbConfig], env: Map[String, String]): IO[ExitCode] =
+    db match
+      case None =>
+        IO.println("reindex needs NP_DATABASE_URL: the local-fs stores keep no read model")
+          .as(ExitCode(2))
+      case Some(cfg) =>
+        (PgStores.resource(cfg), Server.storage(data, env)).tupled.use { (pg, st) =>
+          pg.reindex(st.objects.get).run.flatMap(r =>
+            IO.println(
+              s"reindex: ${r.scanned} revisions scanned, ${r.indexed} indexed" +
+                (if r.missing.isEmpty then ""
+                 else s"; manifest missing for ${r.missing.mkString(", ")}")
+            ).as(if r.missing.isEmpty then ExitCode.Success else ExitCode(1))
+          )
+        }
+
+  private def gc(
+      data: Path,
+      db: Option[DbConfig],
+      env: Map[String, String],
+      args: List[String]
+  ): IO[ExitCode] =
+    val dry = args.contains("--dry-run")
+    val older = args.sliding(2).collectFirst { case List("--older-than", v) => v }.getOrElse("24h")
+    Gc.parseDuration(older) match
+      case Left(m) => IO.println(s"error  $m").as(ExitCode(2))
+      case Right(d) =>
+        val stores = db.fold(Resource.eval(Server.Stores.localFs(data)))(Server.Stores.postgres)
+        (stores, Server.storage(data, env)).tupled.use { (rs, st) =>
+          for
+            now <- IO.realTimeInstant
+            r <- Gc.run(data, st.objects, st.renditions, st.sessions, rs.audit, d, dry, now)
+            _ <- IO.println(
+              s"gc${if dry then " (dry run)" else ""}  ${r.scanned} objects scanned, ${r.referenced} referenced, ${r.deleted.length} orphaned${
+                  if dry then "" else " and deleted"
+                }, ${r.renditionsDeleted.length} stale rendition sets"
+            )
+            _ <- r.deleted.traverse_(d =>
+              IO.println(s"  ${if dry then "would delete" else "deleted"}  ${d.render}")
+            )
+          yield ExitCode.Success
+        }
 
   private def serve(env: Map[String, String], data: Path, db: Option[DbConfig]): IO[Unit] =
     val legacy = env.get("NP_LEGACY_TOKEN").filter(_.nonEmpty)
@@ -70,19 +105,20 @@ object Main extends IOApp:
     val ownerEmail = env.getOrElse("NP_OWNER_EMAIL", Server.DefaultOwnerEmail)
     val ownerPassword = env.getOrElse("NP_OWNER_PASSWORD", Server.DefaultOwnerPassword)
     val stores = db.fold(Resource.eval(Server.Stores.localFs(data)))(Server.Stores.postgres)
-    stores.use { s =>
-      Server.build(s, data, key, base, ownerEmail, ownerPassword, legacy, Nil).flatMap { api =>
-        val app = static.fold(api)(dir => api <+> Server.spa(dir))
-        EmberServerBuilder.default[IO].withHost(host"127.0.0.1").withPort(port)
-          .withHttpApp(CORS.policy.withAllowOriginAll.withAllowCredentials(false)(app.orNotFound))
-          .build
-          .evalTap(srv =>
-            IO.println(
-              s"neuropublish backend on ${srv.address}; base $base; project ${key.render}; owner $ownerEmail; data $data; stores ${s.describe}" +
-                legacy.fold("")(_ => "; deprecated NP_LEGACY_TOKEN static token enabled")
+    (stores, Server.storage(data, env)).tupled.use { (s, st) =>
+      Server.build(s, data, key, base, ownerEmail, ownerPassword, legacy, Nil, Some(st)).flatMap {
+        api =>
+          val app = static.fold(api)(dir => api <+> Server.spa(dir))
+          EmberServerBuilder.default[IO].withHost(host"127.0.0.1").withPort(port)
+            .withHttpApp(CORS.policy.withAllowOriginAll.withAllowCredentials(false)(app.orNotFound))
+            .build
+            .evalTap(srv =>
+              IO.println(
+                s"neuropublish backend on ${srv.address}; base $base; project ${key.render}; owner $ownerEmail; data $data; stores ${s.describe}; objects ${st.describe}; ingestion ${st.mode.toString.toLowerCase}" +
+                  legacy.fold("")(_ => "; deprecated NP_LEGACY_TOKEN static token enabled")
+              )
             )
-          )
-          .useForever
+            .useForever
       }
     }
 
@@ -146,7 +182,50 @@ object Server:
         "postgresql"
       )
 
-  /** The content-addressed object store under `data` (manifests, assets). */
+  /** The byte side of the deployment: the object store (local or S3), where renditions go, the
+    * ingestion queue the control plane produces into and the worker consumes from, the persisted
+    * upload sessions, and the per-workspace digest registry. Built once per process from the
+    * environment by [[storage]].
+    */
+  final case class Storage(
+      objects: ObjectStore,
+      renditions: RenditionStore,
+      queue: IngestionQueue,
+      sessions: UploadSessions,
+      assets: WorkspaceAssets,
+      mode: IngestionMode,
+      describe: String
+  )
+
+  /** Local data-dir storage; the default for tests and `scripts/e2e.sh`. */
+  def localStorage(data: Path, mode: IngestionMode = IngestionMode.Inline): Storage =
+    Storage(
+      objects(data),
+      RenditionStore.LocalFs(data),
+      // adapter point: an IngestionQueue over persistence.IngestionJobs (`ingestion_jobs`) and an
+      // UploadSessions over `upload_sessions` when NP_DATABASE_URL is set
+      IngestionQueue.LocalFs(data / "queue"),
+      UploadSessions(data / "upload-sessions"),
+      WorkspaceAssets(data / "workspace-assets"),
+      mode,
+      s"local $data/objects"
+    )
+
+  /** S3 mode when NP_S3_BUCKET is set, else local; NP_INGESTION picks the ingestion mode. */
+  def storage(data: Path, env: Map[String, String]): Resource[IO, Storage] =
+    val mode = Ingestion.modeFromEnv(env)
+    ObjectStore.S3Config.fromEnv(env) match
+      case None => Resource.pure(localStorage(data, mode))
+      case Some(c) =>
+        ObjectStore.s3(c).evalTap(_.ensureBucket).map(s3 =>
+          localStorage(data, mode).copy(
+            objects = s3,
+            renditions = RenditionStore.of(s3, data),
+            describe = s"s3 ${c.endpoint.getOrElse("aws")}/${c.bucket}"
+          )
+        )
+
+  /** The content-addressed local object store under `data` (manifests, assets). */
   def objects(data: Path): ObjectStore = ObjectStore.LocalFs(data / "objects")
 
   /** Built frontend: real files from `dir`, everything else falls back to index.html. */
@@ -173,15 +252,16 @@ object Server:
       ownerEmail: String = DefaultOwnerEmail,
       ownerPassword: String = DefaultOwnerPassword,
       legacyToken: Option[String] = None,
-      extra: List[Bootstrap] = Nil
+      extra: List[Bootstrap] = Nil,
+      storage: Option[Storage] = None
   ): IO[HttpRoutes[IO]] =
     Stores.localFs(data).flatMap(
-      build(_, data, bootstrap, baseUrl, ownerEmail, ownerPassword, legacyToken, extra)
+      build(_, data, bootstrap, baseUrl, ownerEmail, ownerPassword, legacyToken, extra, storage)
     )
 
-  /** Wires the routes over `stores` (objects, renditions, and the provenance cache stay under
-    * `data`), creates the bootstrap project (and any `extra` ones), and ensures each owner user and
-    * membership exist. `legacyToken` enables the deprecated NP_TOKEN path.
+  /** Wires the routes over `stores` and `storage` (default: local under `data`; the provenance
+    * cache stays under `data`), creates the bootstrap project (and any `extra` ones), and ensures
+    * each owner user and membership exist. `legacyToken` enables the deprecated NP_TOKEN path.
     */
   def build(
       stores: Stores,
@@ -191,20 +271,21 @@ object Server:
       ownerEmail: String,
       ownerPassword: String,
       legacyToken: Option[String],
-      extra: List[Bootstrap]
+      extra: List[Bootstrap],
+      storage: Option[Storage]
   ): IO[HttpRoutes[IO]] =
     val all = Bootstrap(bootstrap, ownerEmail, ownerPassword) :: extra
     val revisions = stores.revisions
+    val st = storage.getOrElse(localStorage(data))
     for
       _ <- all.traverse_(b => revisions.createProject(b.key))
-      objs = objects(data)
-      ingestion = Ingestion(objs, data)
-      uploads <- Ref.of[IO, Map[String, UploadSession]](Map.empty)
+      ingestion = Ingestion(st.objects, st.renditions, st.queue, st.mode)
       pub = Publication(
-        objs,
+        st.objects,
         revisions,
         ingestion,
-        uploads,
+        st.assets,
+        st.sessions,
         baseUrl,
         UUIDGen[IO].randomUUID.map(_.toString.take(8))
       )

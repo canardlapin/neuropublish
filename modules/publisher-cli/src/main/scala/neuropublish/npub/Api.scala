@@ -13,6 +13,8 @@ import sttp.tapir.client.http4s.Http4sClientInterpreter
   * CLI uses Ember.
   */
 final class Api(client: Client[IO], val server: String):
+  /** The underlying client, for transfers that follow a server-issued URL (uploads). */
+  def raw: Client[IO] = client
   private val base = Some(Api.uri(server))
   private val interp = Http4sClientInterpreter[IO]()
 

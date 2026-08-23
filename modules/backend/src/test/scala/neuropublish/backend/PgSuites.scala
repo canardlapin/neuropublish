@@ -31,7 +31,8 @@ object PgServerFactory extends ServerFactory:
         ownerEmail,
         ownerPassword,
         legacyToken,
-        extra
+        extra,
+        None
       ))
     yield new TestServer:
       val app = routes.orNotFound

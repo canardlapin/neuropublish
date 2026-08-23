@@ -347,9 +347,12 @@ assets are a separate namespace.
 
 ### 3. Upload assets directly
 
-(Stage 1 provisionally routes object uploads through the control plane with
-the same session/URL shape; Stage 2 replaces the URLs with signed
-object-store targets without changing the CLI flow.)
+(Two transports behind one CLI flow. With an S3-compatible store configured,
+the session response carries presigned PUTs whose signature covers the size,
+media type and `x-amz-checksum-sha256`, and a presigned manifest PUT; the
+control plane verifies size and checksum at commit. Without one — tests and
+`scripts/e2e.sh` — the same URL shape points at the control plane, which
+proxies the bytes.)
 
 The CLI streams missing objects to S3-compatible storage with bounded FS2
 concurrency, checksums, resumable multipart upload where warranted, and clear
