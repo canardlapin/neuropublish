@@ -81,6 +81,7 @@ test("share link opens without an account, explores locally, and dies on revoke"
   await page.getByTestId("view-name").press("Enter");
   await page.waitForURL(/\/v\//);
   await page.getByTestId("share-view").click();
+  await page.getByTestId("create-link").click();
   const link = await page.getByTestId("share-link").inputValue();
   expect(link).toMatch(/\/s\/[A-Za-z0-9_-]{20,}/);
 
