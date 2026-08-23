@@ -1,7 +1,9 @@
 import { test, expect } from "@playwright/test";
 
 // Stage 5 exit criteria ("Surface and hybrid display"), end to end, against the backend started by
-// scripts/e2e.sh. Assumes the reference bundle carries left/right surfaces (`lh-pial` / `rh-pial`)
+// scripts/e2e.sh. Assumes the reference bundle carries left/right surfaces (ids
+// `lh-pial-surface` / `rh-pial-surface`, on the assets `lh-pial` / `rh-pial` — the two spellings
+// differ deliberately, so a check that confuses a surface id with its asset fails here)
 // and surface representations of the `speech-t` / `speech-z` fields; `speech-effect` and
 // `speech-se` stay volume-only (the honest empty state). Selectors are by stable test ids and
 // `data-*` attributes, not by text, except for the link-state messages the product definition names.

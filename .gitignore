@@ -24,6 +24,8 @@ local.sbt
 # R client build artifacts
 clients/r/*.Rcheck/
 clients/r/*.tar.gz
+clients/r/*/*.Rcheck/
+clients/r/*/*.tar.gz
 clients/r/neuropublish/doc/
 clients/r/neuropublish/Meta/
 
