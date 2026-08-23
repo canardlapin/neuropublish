@@ -87,9 +87,11 @@ lazy val protocolCore = crossProject(JSPlatform, JVMPlatform)
   .jsSettings(jsSettings)
   .settings(libraryDependencies += "org.typelevel" %%% "cats-core" % Versions.cats)
 
-// JSON codecs, byte-profile admission, manifest digest.
+// JSON codecs, byte-profile admission, manifest digest, semantic checks, migrations.
+// JVM only: JSON Schema 2020-12 validation against `protocol/schemas/` (served from the
+// classpath as `schemas/*.schema.json`, one source of truth). JS keeps the decoder path.
 lazy val protocolJson = crossProject(JSPlatform, JVMPlatform)
-  .crossType(CrossType.Pure)
+  .crossType(CrossType.Full)
   .withoutSuffixFor(JVMPlatform)
   .in(file("modules/protocol-json"))
   .settings(crossSettings("protocol-json"))
@@ -99,6 +101,13 @@ lazy val protocolJson = crossProject(JSPlatform, JVMPlatform)
     libraryDependencies ++= Seq(
       "io.circe" %%% "circe-core" % Versions.circe,
       "io.circe" %%% "circe-parser" % Versions.circe
+    )
+  )
+  .jvmSettings(
+    Compile / unmanagedResourceDirectories += (ThisBuild / baseDirectory).value / "protocol",
+    libraryDependencies ++= Seq(
+      "com.networknt" % "json-schema-validator" % Versions.jsonSchemaValidator,
+      "org.slf4j" % "slf4j-nop" % Versions.slf4j
     )
   )
 
@@ -231,7 +240,7 @@ lazy val publisherCli = project
 // Golden bundles and foreign-producer harnesses.
 lazy val conformance = project
   .in(file("modules/conformance"))
-  .dependsOn(protocolJson.jvm, publisherCli)
+  .dependsOn(protocolJson.jvm, publisherCli, viewerState.jvm, rendition.jvm)
   .settings(commonSettings)
   .settings(
     name := "neuropublish-conformance",

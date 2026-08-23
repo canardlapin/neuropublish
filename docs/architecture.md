@@ -38,16 +38,27 @@ bytes itself.
 
 ### Normative artifacts
 
-The protocol repository contains:
+The protocol lives under `protocol/` at the repository root:
 
 - JSON Schema 2020-12 documents for the core bundle and each built-in semantic
-  record;
+  record: `protocol/schemas/manifest.schema.json`,
+  `protocol/schemas/workspace-state.schema.json`,
+  `protocol/schemas/rendition-header.schema.json`, and
+  `protocol/schemas/records/volume-grid-v1.schema.json` (`$id`s under
+  `https://neuropublish.org/schema/0.1/`);
 - a human-readable specification with invariants not expressible in JSON
-  Schema;
-- canonical valid and invalid examples;
-- the snapshot digest procedure (SHA-256 over the manifest bytes as written);
-- an OpenAPI 3.1 document for the HTTP control plane;
-- cross-language conformance fixtures.
+  Schema, the admission pipeline, compatibility rules, and the route scheme:
+  `protocol/SPEC.md`;
+- canonical valid and invalid examples and cross-language conformance
+  fixtures: `modules/conformance/fixtures/`;
+- the snapshot digest procedure (SHA-256 over the manifest bytes as written,
+  `protocol/SPEC.md` §2);
+- an OpenAPI 3.1 document for the HTTP control plane, generated from
+  `modules/api-contract`.
+
+The JVM build validates every manifest against the schema documents (served
+from the classpath out of `protocol/`, so there is one copy); the Scala.js
+build keeps the decoder, closure, and semantic checks only.
 
 Scala case classes and Circe codecs implement the schemas. They do not define a
 Scala-specific wire format. In particular, the wire representation must not

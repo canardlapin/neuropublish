@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://neuropublish.org/schema/0.1/rendition-header.schema.json",
+  "title": "Volume rendition header: org.neuropublish.rendition/volume-f32@0",
+  "description": "Header of a server-derived, browser-ready scalar volume rendition (modules/rendition VolumeRenditionHeader). The payload is little-endian float32 in x-fastest order with NaN for missing values. Derived representations live outside the manifest digest (ADR 0001); the canonical asset remains the record.",
+  "type": "object",
+  "required": ["profile", "shape", "affine", "dtype", "byteOrder", "order", "missing"],
+  "properties": {
+    "profile": { "const": "org.neuropublish.rendition/volume-f32@0" },
+    "shape": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": { "type": "integer", "minimum": 1 }
+    },
+    "affine": {
+      "description": "4x4 voxel-to-world (RAS+ mm) transform, row-major rows.",
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "type": "array",
+        "minItems": 4,
+        "maxItems": 4,
+        "items": { "type": "number" }
+      }
+    },
+    "dtype": { "const": "float32" },
+    "byteOrder": { "const": "little" },
+    "order": { "const": "x-fastest" },
+    "missing": { "const": "nan" },
+    "source": {
+      "description": "Bundle-relative path or asset id the rendition was derived from; null when unknown.",
+      "type": ["string", "null"]
+    },
+    "summary": {
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/scalarSummary" }]
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "scalarSummary": {
+      "description": "Descriptive summary over finite values; never part of the snapshot digest.",
+      "type": "object",
+      "required": ["min", "max", "quantiles", "histogram", "finite", "missing", "zero"],
+      "properties": {
+        "min": { "type": "number" },
+        "max": { "type": "number" },
+        "quantiles": {
+          "description": "Values at the 1, 5, 25, 50, 75, 95, 99 % probabilities.",
+          "type": "array",
+          "minItems": 7,
+          "maxItems": 7,
+          "items": { "type": "number" }
+        },
+        "histogram": {
+          "description": "32 equal-width bins over [min, max].",
+          "type": "array",
+          "minItems": 32,
+          "maxItems": 32,
+          "items": { "type": "integer", "minimum": 0 }
+        },
+        "finite": { "type": "integer", "minimum": 0 },
+        "missing": { "type": "integer", "minimum": 0 },
+        "zero": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    }
+  }
+}
