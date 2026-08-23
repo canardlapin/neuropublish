@@ -356,7 +356,14 @@ function publish(opts, bundle_dir, manifest_bytes, manifest_digest, assets)
         200 <= status < 300 || fail("$method $(instr.url) returned HTTP $status: $(strip(text))")
         println("uploaded ", a.file, " ", a.digest)
     end
-    expect(204, "PUT", String(created.manifestUrl), [bearer, "Content-Type" => "application/json"], manifest_bytes)
+    # the manifest target may be the control plane (bearer, 204) or a presigned object-store URL
+    # (its own authorization in the query string; 200) — never send the bearer off the control plane
+    let murl = String(created.manifestUrl)
+        mheaders = Pair{String,String}["Content-Type" => "application/json"]
+        startswith(murl, server) && pushfirst!(mheaders, bearer)
+        status, text = request("PUT", murl, mheaders, manifest_bytes)
+        200 <= status < 300 || fail("PUT $murl returned HTTP $status: $(strip(text))")
+    end
     commit = JSON3.read(expect(201, "POST", "$server/api/v1/upload-sessions/$(created.sessionId)/commit",
         [bearer, json], Vector{UInt8}(JSON3.write((message = get(opts, "message", "julia producer"),)))))
     String(commit.digest) == manifest_digest ||
@@ -364,11 +371,20 @@ function publish(opts, bundle_dir, manifest_bytes, manifest_digest, assets)
     println("revision ", commit.revisionId)
     println("server-digest ", commit.digest)
     println("viewUrl ", commit.viewUrl)
-    detail = JSON3.read(expect(200, "GET", "$server/api/v1/revisions/$(commit.revisionId)", [bearer], nothing))
+    # renditions are derived by the server (inline, or by a worker after commit): wait, bounded
+    detail = nothing
+    for attempt in 1:90
+        detail = JSON3.read(expect(200, "GET", "$server/api/v1/revisions/$(commit.revisionId)", [bearer], nothing))
+        ing = get(detail, :ingestion, nothing)
+        ing !== nothing && String(get(ing, :status, "")) == "failed" &&
+            fail("ingestion failed: $(get(ing, :error, ""))")
+        all(r -> String(r.status) == "ready", detail.renditions) && break
+        sleep(1.0)
+    end
     for r in detail.renditions
         println("rendition ", r.assetId, " ", r.status)
     end
-    all(r -> String(r.status) == "ready", detail.renditions) || fail("not every rendition is ready")
+    all(r -> String(r.status) == "ready", detail.renditions) || fail("not every rendition is ready after 90 s")
 end
 
 # ---------------------------------------------------------------------------

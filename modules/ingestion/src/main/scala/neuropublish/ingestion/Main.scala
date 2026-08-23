@@ -1,8 +1,11 @@
 package neuropublish.ingestion
 
 import cats.effect.{ExitCode, IO, IOApp}
+import cats.syntax.all.*
 import fs2.io.file.Path
+import cats.effect.Resource
 import neuropublish.backend.{LocalRevisionStore, Server}
+import neuropublish.persistence.DbConfig
 import scala.concurrent.duration.*
 
 /** The ingestion worker process. Shares the control plane's storage configuration (NP_DATA_DIR and
@@ -15,8 +18,12 @@ object Main extends IOApp:
     val data = Path(env.getOrElse("NP_DATA_DIR", "data"))
     val poll = env.get("NP_WORKER_POLL").flatMap(_.toIntOption).getOrElse(2).seconds
     val once = args.contains("--once")
-    Server.storage(data, env).use { st =>
-      LocalRevisionStore(data).flatMap { revisions =>
+    // Same store selection as the control plane: PostgreSQL when NP_DATABASE_URL is set, else local-fs.
+    val revisionsR: Resource[IO, neuropublish.backend.RevisionStore] = DbConfig.fromEnv(env) match
+      case Some(cfg) => Server.Stores.postgres(cfg).map(_.revisions)
+      case None => Resource.eval(LocalRevisionStore(data))
+    (Server.storage(data, env), revisionsR).tupled.use { (st, revisions) =>
+      IO.unit.flatMap { _ =>
         val worker = Worker(st.objects, st.renditions, st.queue, revisions)
         IO.println(
           s"neuropublish ingestion worker; data $data; objects ${st.describe}; poll $poll"

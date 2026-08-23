@@ -14,12 +14,28 @@ cd "$ROOT"
 echo "== building frontend"
 (cd modules/frontend && npm run build --silent >/dev/null)
 
+MODE="${NP_E2E_MODE:-local}"   # local | full (PostgreSQL + MinIO + separate ingestion worker)
+if [ "$MODE" = "full" ]; then
+  command -v docker >/dev/null && docker info >/dev/null 2>&1 || { echo "full mode needs Docker"; exit 1; }
+  echo "== starting PostgreSQL and MinIO containers"
+  freeport() { python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()'; }
+  PG_PORT=$(freeport); MINIO_PORT=$(freeport)
+  PG_ID=$(docker run -d --rm -e POSTGRES_USER=np -e POSTGRES_PASSWORD=np -e POSTGRES_DB=neuropublish -p 127.0.0.1:$PG_PORT:5432 postgres:16-alpine)
+  MINIO_ID=$(docker run -d --rm -e MINIO_ROOT_USER=minio -e MINIO_ROOT_PASSWORD=minio-secret -p 127.0.0.1:$MINIO_PORT:9000 minio/minio server /data)
+  trap 'kill ${BACKEND_PID:-} ${WORKER_PID:-} 2>/dev/null || true; docker stop "$PG_ID" "$MINIO_ID" >/dev/null 2>&1 || true; [ -n "${NP_KEEP_DATA:-}" ] || rm -rf "$DATA"' EXIT
+  for i in $(seq 1 60); do docker exec "$PG_ID" pg_isready -U np >/dev/null 2>&1 && curl -fs http://127.0.0.1:$MINIO_PORT/minio/health/live >/dev/null 2>&1 && break; sleep 1; done
+  export NP_DATABASE_URL="jdbc:postgresql://127.0.0.1:$PG_PORT/neuropublish" NP_DATABASE_USER=np NP_DATABASE_PASSWORD=np
+  export NP_S3_BUCKET=neuropublish NP_S3_ENDPOINT=http://127.0.0.1:$MINIO_PORT NP_S3_REGION=us-east-1 \
+         NP_S3_ACCESS_KEY=minio NP_S3_SECRET_KEY=minio-secret NP_S3_PATH_STYLE=true NP_INGESTION=worker NP_WORKER_POLL=1
+fi
+
 echo "== staging backend classpath"
-sbt -batch "export backend/Runtime/fullClasspath" "export publisherCli/Runtime/fullClasspath" \
+sbt -batch "export backend/Runtime/fullClasspath" "export publisherCli/Runtime/fullClasspath" "export ingestion/Runtime/fullClasspath" \
   | sed 's/\x1b\[[0-9;]*m//g' | grep -v '^\[' | grep -E '(^|:)/.*\.jar' > "$DATA/cps.txt"
 sed -n 1p "$DATA/cps.txt" > "$DATA/cp.txt"
 sed -n 2p "$DATA/cps.txt" > "$DATA/cli-cp.txt"
-test -s "$DATA/cp.txt" && test -s "$DATA/cli-cp.txt"
+sed -n 3p "$DATA/cps.txt" > "$DATA/worker-cp.txt"
+test -s "$DATA/cp.txt" && test -s "$DATA/cli-cp.txt" && test -s "$DATA/worker-cp.txt"
 
 if curl -fs "http://127.0.0.1:$PORT/api/v1/health" >/dev/null 2>&1; then
   echo "port $PORT already serving something; set NP_PORT to a free port"; exit 1
@@ -29,7 +45,13 @@ NP_DATA_DIR="$DATA/data" NP_PORT="$PORT" NP_STATIC_DIR="$ROOT/modules/frontend/d
   NP_OWNER_EMAIL="$NP_OWNER_EMAIL" NP_OWNER_PASSWORD="$NP_OWNER_PASSWORD" \
   java -cp "$(cat "$DATA/cp.txt")" neuropublish.backend.Main > "$DATA/backend.log" 2>&1 &
 BACKEND_PID=$!
-trap 'kill $BACKEND_PID 2>/dev/null || true; [ -n "${NP_KEEP_DATA:-}" ] || rm -rf "$DATA"' EXIT
+if [ "$MODE" = "full" ]; then
+  echo "== starting ingestion worker"
+  NP_DATA_DIR="$DATA/data" java -cp "$(cat "$DATA/worker-cp.txt")" neuropublish.ingestion.Main > "$DATA/worker.log" 2>&1 &
+  WORKER_PID=$!
+else
+  trap 'kill $BACKEND_PID 2>/dev/null || true; [ -n "${NP_KEEP_DATA:-}" ] || rm -rf "$DATA"' EXIT
+fi
 for i in $(seq 1 60); do
   curl -fs "http://127.0.0.1:$PORT/api/v1/health" >/dev/null 2>&1 && break
   sleep 1
@@ -70,6 +92,16 @@ if $CLI push modules/conformance/fixtures/reference \
   echo "stale push unexpectedly succeeded"; cat "$DATA/push2.log"; exit 1
 fi
 grep -q "current head is" "$DATA/push2.log"
+
+echo "== wait for ingestion (worker mode reports pending until renditions exist)"
+REV=$(grep "^revision " "$DATA/push.log" | grep -oE '/r/[a-z0-9]+' | head -1 | cut -c4-)
+for i in $(seq 1 90); do
+  st=$(curl -fs -H "Authorization: Bearer $SECRET" "http://127.0.0.1:$PORT/api/v1/revisions/$REV" | python3 -c 'import sys,json; d=json.load(sys.stdin); print((d.get("ingestion") or {}).get("status","ready") if d.get("renditions") and all(r["status"]=="ready" for r in d["renditions"]) else (d.get("ingestion") or {}).get("status","pending"))' 2>/dev/null || echo pending)
+  [ "$st" = "ready" ] && break
+  [ "$st" = "failed" ] && { echo "ingestion failed"; cat "$DATA/worker.log" 2>/dev/null | tail -20; exit 1; }
+  sleep 1
+done
+[ "$st" = "ready" ] || { echo "renditions not ready after 90s (status $st)"; tail -20 "$DATA/worker.log" 2>/dev/null; exit 1; }
 
 echo "== digest equals sha256(manifest.json)"
 grep "^digest " "$DATA/push.log" | grep -q "$(shasum -a 256 modules/conformance/fixtures/reference/manifest.json | cut -d' ' -f1)"

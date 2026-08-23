@@ -492,6 +492,43 @@ runs the producer as a second push against the live server.
   stage on;
 - a successful push returns a durable project/revision URL.
 
+### Status (2026-08-23)
+
+Done after Stages 3–4 (deliberately), so the schemas froze against a working
+product. Verified by `sbt npCheck` (PostgreSQL and MinIO suites run when
+Docker is up, skip cleanly otherwise), `scripts/e2e.sh` in local mode, and
+`NP_E2E_MODE=full scripts/e2e.sh` (PostgreSQL + MinIO + the separate
+ingestion worker, presigned transfers, all eight browser scenarios, and the
+Julia second revision).
+
+| Criterion | Evidence |
+| --- | --- |
+| golden fixtures (valid, invalid, old-version, new-extension, schema-digest-mismatch) | `protocol/schemas/*.schema.json` + `protocol/SPEC.md`; JVM admission with JSON Pointer problems; 20+ invalid fixtures each pinned to a pointer; 0.0→0.1 migration keeping original bytes; unknown fields round-trip value-for-value; trusted-record digest mismatch rejected, unknown retained as unsupported |
+| same digest from Scala, Julia, R, `shasum` | `producer.jl` (no Neuropublish code) prints the digest the server then commits; R re-encoding changes bytes, not values |
+| Julia producer independently admitted | in-process suite and the live `e2e.sh` step, in both store modes |
+| resumable upload | `ResumeSuite`: interrupted after ≥1 object, re-negotiated session excludes completed objects; bounded concurrency and retries in `npub push` |
+| missing/substituted asset fails at commit | S3 mode verifies size and SHA-256 (provider checksum or a streamed pass); local mode unchanged |
+| concurrent same-parent commits | PostgreSQL row lock on the project: exactly one succeeds, one `StaleParent`, one pending job |
+| `reindex` reproduces the read model | `backend/run reindex` rebuilds analyses/result_fields/revision_assets from stored manifests (persistence test) |
+| two-workspace isolation | under PostgreSQL: composite FK rejects a cross-workspace revision; credentials, links, revisions never cross |
+| sensitivity and sharing policy enforced at commit | share creation refuses non-group-level manifests; sensitivity required by schema |
+| durable URL | unchanged from Stage 1 |
+
+Also landed: `domain` module holding the store algebras; `persistence`
+(Flyway V1–V7, Doobie stores, `ingestion_jobs`); S3-compatible object store
+with presigned PUT/GET and per-workspace asset registry (no cross-tenant
+existence oracle); `ingestion` worker process with retries and per-revision
+status; `gc --older-than`; `npub inspect`/`pack`.
+
+Carried / watch: `IngestionQueue` and upload sessions stay on local files even
+in PostgreSQL mode (adapter point marked; `gc` is local-read-model only);
+signed object GETs for *link* viewers are 307 redirects to 15-minute presigned
+URLs (bucket CORS still to be configured for a real deployment); an
+intermittent `500` on `GET /revisions/{id}` was seen twice under load in the
+browser suites and not reproduced in three subsequent full runs — server
+errors are now logged (`slf4j-simple`) so the next occurrence is diagnosable.
+The ScalaFIM `NArray` migration remains queued before Stage 5.
+
 ## Stage 3 — volume scientific workspace
 
 ### Product shell

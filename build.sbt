@@ -106,8 +106,7 @@ lazy val protocolJson = crossProject(JSPlatform, JVMPlatform)
   .jvmSettings(
     Compile / unmanagedResourceDirectories += (ThisBuild / baseDirectory).value / "protocol",
     libraryDependencies ++= Seq(
-      "com.networknt" % "json-schema-validator" % Versions.jsonSchemaValidator,
-      "org.slf4j" % "slf4j-nop" % Versions.slf4j
+      "com.networknt" % "json-schema-validator" % Versions.jsonSchemaValidator
     )
   )
 
@@ -243,6 +242,7 @@ lazy val backend = project
     name := "neuropublish-backend",
     libraryDependencies ++= Seq(
       "org.typelevel" %% "cats-effect" % Versions.catsEffect,
+      "org.slf4j" % "slf4j-simple" % "2.0.16",
       "org.http4s" %% "http4s-ember-server" % Versions.http4s,
       "org.http4s" %% "http4s-dsl" % Versions.http4s,
       "org.http4s" %% "http4s-ember-client" % Versions.http4s % Test,
