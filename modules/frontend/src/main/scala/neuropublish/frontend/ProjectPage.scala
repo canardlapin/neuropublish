@@ -48,7 +48,7 @@ object ProjectPage:
           div(
             cls := "callout warn",
             strong("Interpretation warning"),
-            p(w.hcursor.downField("message").as[String].getOrElse(""))
+            p(w.message)
           )
         )
       },

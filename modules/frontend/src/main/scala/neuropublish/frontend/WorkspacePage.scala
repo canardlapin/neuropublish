@@ -372,7 +372,7 @@ object WorkspacePage:
       div(cls := "workspace", navigator, canvasPane, inspector),
       status,
       m.warnings.headOption.map(w =>
-        div(cls := "callout warn", w.hcursor.downField("message").as[String].getOrElse(""))
+        div(cls := "callout warn", w.message)
       ),
       child.maybe <-- dialog.signal,
       ws --> onStateChange // subscription owned by the page; released on unmount

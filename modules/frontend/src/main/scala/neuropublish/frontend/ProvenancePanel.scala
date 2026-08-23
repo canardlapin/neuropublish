@@ -47,7 +47,7 @@ object ProvenancePanel:
         "Full provenance (operation graph, receipts, input compatibility) is available to project members. This link shows the published result and its presentation."
       ),
       L.manifest.warnings.map(w =>
-        div(cls := "callout warn", w.hcursor.downField("message").as[String].getOrElse(""))
+        div(cls := "callout warn", w.message)
       )
     )
 
