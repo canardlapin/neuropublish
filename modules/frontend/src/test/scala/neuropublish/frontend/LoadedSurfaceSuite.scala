@@ -82,7 +82,6 @@ class LoadedSurfaceSuite extends FunSuite:
       decoded: List[(String, SurfaceGeometry)],
       fieldAssets: List[String]
   ) =
-    val byId = m.surfaces.map(s => s.id -> s).toMap
     Loaded(
       "ws",
       "p",
