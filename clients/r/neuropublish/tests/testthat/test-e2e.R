@@ -1,5 +1,5 @@
-# End-to-end against a running server. Skipped unless NPUB_SERVER is set.
-#
+# End-to-end against a running server. Skipped unless NPUB_SERVER is set (and,
+# like every CLI test, NPUB_TESTS=1 — see skip_without_npub() in helper-repo.R).
 # To run it with the backend scripts/e2e.sh uses (local-fs stores, inline
 # ingestion), from the checkout root:
 #
@@ -7,7 +7,7 @@
 #   NPUB_CONFIG_DIR=$(mktemp -d) scripts/npub login --server http://127.0.0.1:8090
 #       # or: scripts/npub credential create --project rotman/sherlock --name r-e2e
 #       #     and export its secret as NP_TOKEN
-#   NPUB_SERVER=http://127.0.0.1:8090 NPUB_PROJECT=rotman/sherlock \
+#   NPUB_TESTS=1 NPUB_SERVER=http://127.0.0.1:8090 NPUB_PROJECT=rotman/sherlock \
 #     Rscript -e 'testthat::test_local("clients/r/neuropublish", filter = "e2e")'
 #
 # The test publishes a first revision (or builds on NPUB_PARENT when set),

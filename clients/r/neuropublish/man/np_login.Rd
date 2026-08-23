@@ -18,6 +18,11 @@ you approve it in any browser, and the user token is stored by the CLI
 (\verb{$NPUB_CONFIG_DIR/credentials.json}, keyed by server). Batch jobs should
 use a project-scoped publisher credential in \code{NP_TOKEN} instead.
 }
+\details{
+This is the one call whose output must appear \emph{while} the CLI runs — the
+code is useless after it exits — so the CLI's streams are connected to the
+console instead of captured.
+}
 \examples{
 \dontrun{
 np_login("http://127.0.0.1:8080")

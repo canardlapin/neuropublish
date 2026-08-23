@@ -84,12 +84,29 @@ an estimand of an \code{analyses[]} entry; every field and underlay names a
 declared domain and asset; the method and the provenance activities are
 open records (\code{\link[=np_record]{np_record()}}) from the package's own namespace. Nothing in
 the result may be a NaN or infinite number. \code{\link[=np_publish]{np_publish()}} does the rest.
-
-The reference implementation for a named list of \code{neuroim2::NeuroVol}s
-(\code{as_neuropublish.list}) shows the shape: one volume domain from the first
-volume's space, one asset per volume, one analysis with one estimand, and
-one result field per volume with the measure you name.
 }
+\section{The \code{list} method}{
+
+
+\code{as_neuropublish.list} is the reference implementation, and it is \emph{not} a
+fallback for arbitrary lists: it describes one specific input, a \strong{named
+list of \code{neuroim2::NeuroVol} objects that all live on the same grid} (same
+dimensions and same \code{neuroim2::trans()}). Each name is used as an asset id,
+as the id of the result field built from it, and as the key into \code{measures}
+(and \code{display}); a volume named by \code{underlay} becomes the anatomical
+underlay instead of a field, and every other volume needs an entry in
+\code{measures}. From that it builds one volume domain from the first volume's
+space, one asset per volume, one analysis with one estimand, and one result
+field per volume with the measure you named for it.
+
+A list holding anything else is an error naming the class that was found;
+that is not a defect to work around but the signal that the object needs its
+own method. Give the object a class and write \verb{as_neuropublish.<class>()}
+for it: whatever it holds (a fitted model, a searchlight result, a report),
+the method's job is to return the \code{np_result()} described above, and it may
+call this method for the volume part of the work.
+}
+
 \examples{
 sp <- neuroim2::NeuroSpace(c(8L, 8L, 6L), spacing = c(2, 2, 2), origin = c(-7, -7, -5))
 vols <- list(

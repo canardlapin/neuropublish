@@ -13,8 +13,9 @@ np_validate(dir)
 A data frame with one row per problem, columns \code{pointer} (JSON
 Pointer into the manifest, \code{""} for the whole document) and \code{message}.
 Zero rows means the bundle is admitted; the data frame then carries
-attributes \code{digest} (the manifest digest) and \code{assets} (the CLI's asset
-summary line).
+attributes \code{digest} (the manifest digest) and \code{assets} (\code{"N declared, M volume"}). A failure that is not an admission problem (the bundle has no
+\code{manifest.json}, \code{npub} cannot run) is an error of class \code{np_cli_error},
+never a problem row.
 }
 \description{
 Runs the server's admission on the bundle's \code{manifest.json} bytes (schema,

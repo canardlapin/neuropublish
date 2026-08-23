@@ -84,7 +84,7 @@ np_run <- function(args, echo = FALSE) {
   }
 }
 
-#' The `system2()` fallback for [np_run()]
+#' The `system2()` fallback for `np_run()`
 #'
 #' `system2(stdout = TRUE)` buffers the child's output and hands it back only
 #' when the child exits, which for `npub login` is *after* the user has
