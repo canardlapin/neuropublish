@@ -340,7 +340,8 @@ to Stage 3 alongside the surface pane, since Stage 2 has no browser work.
 - keep wire DTOs separate from validated Scala domain types;
 - return accumulated errors with JSON Pointer paths (`Manifest.parse` →
   `Either[List[Problem], …]`; `ApiError.problems`; `npub validate` /
-  `inspect` print `error  <pointer>: <message>`);
+  `inspect` print `error  <pointer>: <message>`; pointers come from the
+  decoder's cursor history, so keys containing `.` or `[` are exact);
 - create compatibility rules, migrations, and unknown-record preservation
   (`protocol/SPEC.md` §7–8; `Migrations` 0.0 → 0.1; `TrustedSchemas`);
 - specify the route scheme: project, revision, view, explore, and presentation
@@ -373,15 +374,36 @@ to close before the freeze:
 - credentials outside manifests and command-line arguments.
 
 Status (2026-08-23), `push`: done. Each missing object follows its
-`UploadInstruction` verbatim (method, URL, signed headers), so the same flow
-serves the control-plane PUT (local mode) and a presigned object-store PUT (S3
-mode); the bearer is sent only to the control plane. Four objects in flight,
-three attempts per object with back off, one progress line per object.
-Resumption is a protocol property: a rerun negotiates a new session whose
-`missing` list excludes objects the workspace already holds (`ResumeSuite`:
-interrupted after ≥1 object, the second session's list is shorter by exactly
-the objects that landed). Commit rejections print `ApiError.problems` one per
-line.
+`UploadInstruction` verbatim (method, URL, signed headers — validated against
+the HTTP token/CR-LF grammar), so the same flow serves the control-plane PUT
+(local mode) and a presigned object-store PUT (S3 mode); the bearer is sent
+only to URLs on the control plane's origin (scheme, host, port), and plain
+`http` to a non-loopback host prints a warning. Files are hashed and uploaded
+as streams with an explicit `Content-Length`; a declared `size` that disagrees
+with the file is refused before negotiation. Four objects in flight, three
+attempts per object with back off, one progress line per object. Resumption is
+a protocol property: a rerun negotiates a new session whose `missing` list
+excludes objects the workspace already holds (`ResumeSuite`: interrupted after
+≥1 object, the second session asks for exactly the objects the interruption
+left behind). A re-push of the bundle that is already the head prints
+`already published as <head>` and exits 0; any other stale parent advises
+`--parent`. Commit rejections print `ApiError.problems` one per line.
+`pack` copies digest-only assets from the staging layout, never overwrites a
+declared `digest`/`size`, refuses directory paths and non-array `assets`, and
+keeps an existing output unless `--force`. Credentials are keyed by normalized
+origin (case, default port).
+
+Protocol status (2026-08-23), edges closed: the server recomputes every
+trusted volume-grid key (`size`, `structuralFingerprint`, `key.descriptor ==
+descriptor.schema`) from the payload on JVM and JS and validates the payload
+against the records schema on the JVM; the decoder enforces the wire grammar
+the JS build would otherwise miss (`selection` required, `sha256:` prefix,
+schema `version` pattern, non-negative sizes; SPEC §3 "JS-lenient subset");
+`migratedFrom` written by a producer is refused and an unsupported major is
+named; each invalid fixture pins the exact problem list (`.expect`, one line
+per problem). The records schema `$id` moved under
+`https://neuropublish.org/schema/0.1/`, which changed its digest and every
+fixture that names it.
 
 ### Backend and persistence
 
@@ -414,9 +436,8 @@ composite FK rejects a cross-workspace revision; two concurrent commits with the
 same parent yield one head and one stale rejection; `reindex` on an emptied
 projection reproduces it row for row; two workspaces never cross at the store
 level, and `RoutesSuite`/`Stage4Suite` (including the two-workspace isolation
-test) run unchanged against the database-backed server. Not yet: durable
-`upload_sessions` (table exists; sessions are still in memory), the worker
-process itself, orphan cleanup, row-level security (deferred per ADR 0004).
+test) run unchanged against the database-backed server. Row-level security
+stays deferred per ADR 0004.
 
 Status (2026-08-23), object store / ingestion / cleanup: done. Upload
 sessions are now durable on the local fs (`<data>/upload-sessions/`); the
@@ -454,18 +475,24 @@ valid bundle and publish it through the documented HTTP or CLI boundary. The
 same fixture is decoded and re-encoded by Scala and R without losing unknown
 extension fields.
 
-Status (2026-08-22): done. `modules/conformance/julia/producer.jl` (Julia
+Status (2026-08-23): done. `modules/conformance/julia/producer.jl` (Julia
 stdlib `SHA`/`Downloads` plus `JSON3`, no Neuropublish code) writes four
-float32 NIfTI volumes and a core 0.1 manifest with the ADR 0005 domain
-envelope, an unknown activity record, an unknown top-level field and an
-unknown field inside a known record, then publishes it through the documented
-upload-session/object/manifest/commit endpoints. `JuliaProducerSuite` asserts
-the Scala digest equals Julia's, drives the script against an in-process
-backend (stale re-push rejected, `--parent` accepted, every rendition `ready`),
-and checks that `roundtrip.R` (jsonlite) re-encodes to a value-equal manifest
-with the unknown fields intact. The committed output lives in
-`modules/conformance/fixtures/julia/` for CI without Julia; `scripts/e2e.sh`
-runs the producer as a second push against the live server.
+float32 NIfTI volumes, a core 0.1 manifest with the ADR 0005 domain envelope,
+an unknown activity record, an unknown top-level field and an unknown field
+inside a known record, plus an `oracle.json` of what an independent reader
+must see, then publishes through the documented
+upload-session/object/manifest/commit endpoints (bearer only to the
+`--server` origin, libcurl redirects off). Its output is deterministic (no
+Julia version in the manifest), and `JuliaProducerSuite` regenerates it and
+compares byte for byte with the committed `modules/conformance/fixtures/julia/`.
+The suite also asserts the Scala digest equals Julia's, drives the script
+against an in-process backend (stale re-push rejected, `--parent` accepted,
+every rendition `ready`), checks that `roundtrip.R` (jsonlite) re-encodes to a
+value-equal manifest with the unknown fields intact, and that `nifti-check.R`
+(neuroim2) reads back every volume with the shape, affine, and probe voxel
+values the producer wrote. CI installs Julia 1.12 and R and sets
+`NP_TEST_REQUIRE_TOOLS=1`, so these suites fail rather than skip there;
+`scripts/e2e.sh` runs the producer as a second push against the live server.
 
 ### Exit criteria
 
@@ -495,23 +522,25 @@ runs the producer as a second push against the live server.
 ### Status (2026-08-23)
 
 Done after Stages 3–4 (deliberately), so the schemas froze against a working
-product. Verified by `sbt npCheck` (PostgreSQL and MinIO suites run when
-Docker is up, skip cleanly otherwise), `scripts/e2e.sh` in local mode, and
-`NP_E2E_MODE=full scripts/e2e.sh` (PostgreSQL + MinIO + the separate
-ingestion worker, presigned transfers, all eight browser scenarios, and the
-Julia second revision).
+product. CI runs `sbt npCheck` with Julia, R, and Docker required
+(`NP_TEST_REQUIRE_TOOLS=1`, `NP_TEST_REQUIRE_DOCKER=1`: the Julia/R and
+PostgreSQL/MinIO suites fail rather than skip there; locally they skip when a
+tool is absent). The end-to-end modes are run locally per stage:
+`scripts/e2e.sh` (local store) and `NP_E2E_MODE=full scripts/e2e.sh`
+(PostgreSQL + MinIO + the separate ingestion worker, presigned transfers, all
+eight browser scenarios, and the Julia second revision).
 
 | Criterion | Evidence |
 | --- | --- |
-| golden fixtures (valid, invalid, old-version, new-extension, schema-digest-mismatch) | `protocol/schemas/*.schema.json` + `protocol/SPEC.md`; JVM admission with JSON Pointer problems; 20+ invalid fixtures each pinned to a pointer; 0.0→0.1 migration keeping original bytes; unknown fields round-trip value-for-value; trusted-record digest mismatch rejected, unknown retained as unsupported |
+| golden fixtures (valid, invalid, old-version, new-extension, schema-digest-mismatch) | `protocol/schemas/*.schema.json` + `protocol/SPEC.md`; JVM admission with JSON Pointer problems; 27 invalid fixtures each pinned to its exact problem list; 0.0→0.1 migration keeping original bytes; unknown fields round-trip value-for-value; trusted-record digest mismatch rejected, unknown retained as unsupported; volume-grid keys recomputed |
 | same digest from Scala, Julia, R, `shasum` | `producer.jl` (no Neuropublish code) prints the digest the server then commits; R re-encoding changes bytes, not values |
-| Julia producer independently admitted | in-process suite and the live `e2e.sh` step, in both store modes |
+| Julia producer independently admitted | local store in `JuliaProducerSuite` (and the committed fixture in `FixtureSuite`); S3 mode via `NP_E2E_MODE=full scripts/e2e.sh` |
 | resumable upload | `ResumeSuite`: interrupted after ≥1 object, re-negotiated session excludes completed objects; bounded concurrency and retries in `npub push` |
 | missing/substituted asset fails at commit | S3 mode verifies size and SHA-256 (provider checksum or a streamed pass); local mode unchanged |
 | concurrent same-parent commits | PostgreSQL row lock on the project: exactly one succeeds, one `StaleParent`, one pending job |
 | `reindex` reproduces the read model | `backend/run reindex` rebuilds analyses/result_fields/revision_assets from stored manifests (persistence test) |
 | two-workspace isolation | under PostgreSQL: composite FK rejects a cross-workspace revision; credentials, links, revisions never cross |
-| sensitivity and sharing policy enforced at commit | share creation refuses non-group-level manifests; sensitivity required by schema |
+| sensitivity required at commit; group-level enforced at share creation | `sensitivity` is required by schema and decoder, so commit rejects a manifest without it; share-link creation refuses a non-`group-level` revision |
 | durable URL | unchanged from Stage 1 |
 
 Also landed: `domain` module holding the store algebras; `persistence`

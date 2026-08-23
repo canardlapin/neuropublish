@@ -76,9 +76,10 @@ object Main extends CommandIOApp("npub", "Neuropublish publisher", version = "0.
     Opts.subcommand("pack", "Hash a staging bundle's local files into a normalized bundle") {
       (
         Opts.argument[String]("staging-dir").map(Path(_)),
-        Opts.argument[String]("out.npub").map(Path(_))
+        Opts.argument[String]("out.npub").map(Path(_)),
+        Opts.flag("force", "replace an existing output bundle").orFalse
       )
-        .mapN((staging, dest) => Pack.run(staging, dest, out))
+        .mapN((staging, dest, force) => Pack.run(staging, dest, force, out))
     }
 
   private val push =

@@ -281,6 +281,17 @@ universe of scientific methods.
 4. **Publication policy:** sensitivity, subject identifiers, anatomical data,
    local paths, executable content, and project visibility.
 
+Level 1 is implemented in full (`protocol/SPEC.md` §2–4). Levels 2–4 are
+partially implemented: level 2 covers the volume-grid descriptor (shape,
+affine, exact-key recomputation), required axis selections, and
+representation/domain closure, but not axis-value validation of selections or
+topology identity for surfaces; level 3 covers measure ids, trusted-record
+digest pinning, ordering, warning scope, and the `0.0 → 0.1` migration, but no
+assay relations or inferential-field rules; level 4 covers the required
+`sensitivity`, the rejection of local paths, and the group-level gate on share
+links, but no subject-identifier, anatomical-data, or executable-content
+screening.
+
 Admission returns all useful errors with JSON Pointer paths. A successful
 receipt distinguishes fully understood, generically retained, and warning
 records.
@@ -319,14 +330,20 @@ so.
 
 ### 1. Build and validate locally
 
-The producer adapter creates a staging bundle. `npub pack`:
+The producer adapter creates a staging bundle. `npub pack` today:
 
-- validates core and known extension schemas;
-- applies privacy checks;
-- hashes assets;
-- resolves catalog references to digests;
-- writes the normalized manifest;
-- optionally precomputes renditions and summaries as untrusted hints.
+- hashes every local file (`assets[].path`, streamed) and copies digest-only
+  assets already staged under `assets/sha256/`;
+- fills `digest` and `size`, removes `path`, and refuses a declaration that
+  disagrees with the file, an escaping or non-file path, an unstaged
+  digest-only asset, or an unresolved catalog reference;
+- writes the normalized layout and manifest, then admits the written bytes
+  (byte profile, JSON Schema, closure, semantic checks) and prints the digest.
+
+Deferred to Stage 6 and the ingestion track: catalog resolution from a registry
+(today the producer supplies the file or the digest), privacy screening beyond
+the `sensitivity` field, and precomputed renditions and summaries as untrusted
+hints (the server derives every rendition itself).
 
 ### 2. Create an upload session
 

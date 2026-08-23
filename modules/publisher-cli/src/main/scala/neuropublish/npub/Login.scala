@@ -68,7 +68,7 @@ object Login:
               case Right(Left(err)) if err.code == "unauthorized" => "" // already dead
               case _ => " (could not revoke on the server; the token expires on its own)"
             Credentials.save(configDir, c.remove(server)) *>
-              out(s"Signed out ${e.user} from ${Credentials.key(server)}$note")
+              out(s"Signed out ${e.user} from ${server.trim.stripSuffix("/")}$note")
           }.as(ExitCode.Success)
     }
 

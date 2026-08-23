@@ -11,6 +11,8 @@
 #   julia producer.jl --out DIR --server URL --project WS/PROJ --token T \
 #                     [--parent REVISION] [--message TEXT]
 #
+# Writes `manifest.json`, `manifest.sha256`, `assets/<id>.nii`, and `oracle.json` (the shape,
+# affine, and probe voxel values an independent reader must see; not part of the bundle).
 # Prints `digest sha256:<hex>` for the bundle; with --server also prints
 # `revision <id>`, `viewUrl <url>`, `server-digest sha256:<hex>` and one
 # `rendition <asset> <status>` line per volume. Exits non-zero with a
@@ -58,6 +60,8 @@ end
 const SHAPE = (16, 16, 12)
 const SPACING = (2.0, 2.0, 2.0)
 const ORIGIN = (-15.0, -15.0, -11.0)
+# 1-based voxel indices whose values `oracle.json` records for an independent reader to verify
+const PROBE_VOXELS = ((8, 8, 6), (4, 12, 6), (1, 1, 1), (16, 16, 12), (5, 9, 3))
 
 function affine()
     [SPACING[1] 0.0 0.0 ORIGIN[1];
@@ -172,7 +176,7 @@ end
 const VOLUME_GRID_SCHEMA = (
     id = "org.neuropublish.domain/volume-grid",
     version = "1.0",
-    digest = "sha256:c1871091d7dc2bf6c5d3b1acafdf2d9c0d47e62d5a737a571ed7433ba778b7ac",
+    digest = "sha256:69c25b8868349828e41cd6d610ac619af118fb7b807b7306f706b727ed23dfb7",
 )
 const RECEIPT_SCHEMA = (
     id = "org.bbuchsbaum.fmrireg/analysis-receipt",
@@ -288,9 +292,10 @@ function manifest(assets)
             ],
         ),
         # Unknown top-level field: the server and every round trip must preserve it.
+        # No Julia version here: the bundle is deterministic, so `fixtures/julia` can be
+        # regenerated on any Julia and compared byte for byte.
         var"x-julia-producer" = (
             version = "0.1",
-            julia = "$(VERSION.major).$(VERSION.minor)",
             note = "unknown top-level extension; value preservation, not byte preservation",
             nested = (flags = [true, false], empty = Any[], ratio = 0.125),
         ),
@@ -301,6 +306,37 @@ end
 # HTTP (stdlib Downloads over libcurl; no HTTP.jl dependency)
 # ---------------------------------------------------------------------------
 
+# libcurl follows redirects by default; a redirected PUT would re-send the body (and any
+# bearer) to a host the server never named, so redirect-following is off for every request.
+const DOWNLOADER = Downloads.Downloader()
+DOWNLOADER.easy_hook = (easy, info) ->
+    Downloads.Curl.setopt(easy, Downloads.Curl.CURLOPT_FOLLOWLOCATION, 0)
+
+# `scheme://host:port` of a URL, lower-cased, with the scheme's default port filled in; the
+# bearer is sent only to URLs whose origin equals the --server origin.
+function origin(url::AbstractString)
+    m = match(r"^([A-Za-z][A-Za-z0-9+.-]*)://([^/?#]*)", url)
+    m === nothing && return nothing
+    scheme = lowercase(m.captures[1])
+    authority = m.captures[2]
+    occursin('@', authority) && (authority = split(authority, '@'; limit = 2)[2])
+    hostport = if startswith(authority, '[')
+        close = findfirst(']', authority)
+        close === nothing && return nothing
+        host = lowercase(authority[1:close])
+        rest = authority[close+1:end]
+        (host, startswith(rest, ':') ? rest[2:end] : "")
+    else
+        parts = split(authority, ':'; limit = 2)
+        (lowercase(parts[1]), length(parts) == 2 ? parts[2] : "")
+    end
+    host, port = hostport
+    isempty(port) && (port = scheme == "https" ? "443" : scheme == "http" ? "80" : "")
+    "$scheme://$host:$port"
+end
+
+same_origin(url, server) = origin(url) !== nothing && origin(url) == origin(server)
+
 function request(method, url, headers, body::Union{Nothing,Vector{UInt8}})
     out = IOBuffer()
     hs = [k => v for (k, v) in headers]
@@ -309,6 +345,7 @@ function request(method, url, headers, body::Union{Nothing,Vector{UInt8}})
         headers = hs,
         input = body === nothing ? nothing : IOBuffer(body),
         output = out,
+        downloader = DOWNLOADER,
         throw = false)
     r isa Downloads.Response || fail("$method $url: $(r.message)")
     r.status, String(take!(out))
@@ -341,9 +378,9 @@ function publish(opts, bundle_dir, manifest_bytes, manifest_digest, assets)
         a === nothing && fail("server asked for $(instr.digest), which is not in the inventory")
         method = haskey(instr, :method) ? String(instr.method) : "PUT"
         headers = Pair{String,String}[]
-        # the bearer only belongs on the control plane; a signed object-store URL
-        # carries its own authorization in `headers`
-        startswith(String(instr.url), server) && push!(headers, bearer)
+        # the bearer only belongs on the control plane (same scheme, host, and port as
+        # --server); a signed object-store URL carries its own authorization in `headers`
+        same_origin(String(instr.url), server) && push!(headers, bearer)
         if haskey(instr, :headers)
             for (k, v) in pairs(instr.headers)
                 push!(headers, String(k) => String(v))
@@ -360,7 +397,7 @@ function publish(opts, bundle_dir, manifest_bytes, manifest_digest, assets)
     # (its own authorization in the query string; 200) — never send the bearer off the control plane
     let murl = String(created.manifestUrl)
         mheaders = Pair{String,String}["Content-Type" => "application/json"]
-        startswith(murl, server) && pushfirst!(mheaders, bearer)
+        same_origin(murl, server) && pushfirst!(mheaders, bearer)
         status, text = request("PUT", murl, mheaders, manifest_bytes)
         200 <= status < 300 || fail("PUT $murl returned HTTP $status: $(strip(text))")
     end
@@ -396,12 +433,32 @@ function main()
     out = opts["out"]
     mkpath(joinpath(out, "assets"))
     assets = Dict{String,Any}()
+    probes = [(i = i, j = j, k = k, values = Dict{String,Float64}())
+              for (i, j, k) in PROBE_VOXELS]
     for (id, kind) in (("t1", :t1), ("speech-effect", :effect), ("speech-t", :t), ("speech-z", :z))
-        bytes = nifti_bytes(synthetic(kind))
+        data = synthetic(kind)
+        bytes = nifti_bytes(data)
         file = id * ".nii"
         write(joinpath(out, "assets", file), bytes)
         assets[id] = (file = file, digest = digest(bytes), size = length(bytes))
+        for p in probes
+            p.values[id] = Float64(data[p.i, p.j, p.k])
+        end
     end
+    # what an independent reader must see in the volumes (checked by nifti-check.R); outside
+    # the manifest and outside assets/, so it is not part of the published bundle
+    oracle = IOBuffer()
+    JSON3.pretty(oracle, JSON3.write((
+        shape = collect(SHAPE),
+        spacing = collect(SPACING),
+        origin = collect(ORIGIN),
+        affine = [[affine()[r, c] for c in 1:4] for r in 1:4],
+        files = [(id = id, file = assets[id].file) for id in sort(collect(keys(assets)))],
+        probes = [(voxel1 = [p.i, p.j, p.k],
+                   values = [(id = id, value = p.values[id]) for id in sort(collect(keys(p.values)))])
+                  for p in probes],
+    )))
+    write(joinpath(out, "oracle.json"), String(take!(oracle)) * "\n")
     # pretty-printed for readers; the digest covers exactly these bytes
     pretty = IOBuffer()
     JSON3.pretty(pretty, JSON3.write(manifest(assets)))

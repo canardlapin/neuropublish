@@ -21,11 +21,36 @@ ThisBuild / tlCiHeaderCheck := false
 ThisBuild / tlCiDocCheck := false
 ThisBuild / tlFatalWarnings := false
 ThisBuild / githubWorkflowBuild := Seq(WorkflowStep.Sbt(List("npCheck"), name = Some("Check")))
+// The neutrality proof (Julia producer, R reader) and the Docker-backed suites (PostgreSQL,
+// MinIO) must run in CI, not skip: the tools are installed here and the suites are told so.
 ThisBuild / githubWorkflowBuildPreamble := Seq(
   WorkflowStep.Use(
     UseRef.Public("actions", "setup-node", "v4"),
     params = Map("node-version" -> "22")
+  ),
+  WorkflowStep.Use(
+    UseRef.Public("julia-actions", "setup-julia", "v2"),
+    name = Some("Setup Julia"),
+    params = Map("version" -> "1.12")
+  ),
+  WorkflowStep.Run(
+    List("julia -e 'using Pkg; Pkg.add(\"JSON3\")'"),
+    name = Some("Install Julia packages")
+  ),
+  WorkflowStep.Use(
+    UseRef.Public("r-lib", "actions/setup-r", "v2"),
+    name = Some("Setup R"),
+    params = Map("use-public-rspm" -> "true")
+  ),
+  WorkflowStep.Use(
+    UseRef.Public("r-lib", "actions/setup-r-dependencies", "v2"),
+    name = Some("Install R packages"),
+    params = Map("packages" -> "cran::jsonlite, cran::neuroim2")
   )
+)
+ThisBuild / githubWorkflowEnv ++= Map(
+  "NP_TEST_REQUIRE_TOOLS" -> "1",
+  "NP_TEST_REQUIRE_DOCKER" -> "1"
 )
 
 // Pre-release: no publication until Stage 6 decides a release channel.

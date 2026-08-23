@@ -22,8 +22,16 @@ migration:
 
 - `workspaces` is a first-class table; every project, revision, asset
   record, saved view, share link, publisher credential, upload session, and
-  audit event carries a workspace ID, and every repository query is
-  workspace-scoped.
+  audit event carries a workspace ID. Store lookups take the workspace: the
+  signatures of the store algebras (`modules/domain`) carry a `ProjectKey` or
+  workspace id, so a caller cannot ask for a project, revision, credential,
+  view, or share link without naming the workspace, and the composite foreign
+  keys reject a cross-workspace row. What the signatures do not yet enforce is
+  caller-side: a route handler must still derive the workspace from the
+  authenticated principal's membership rather than from the request path
+  alone, and the lookups keyed by a server-issued id (revision, view, share
+  secret) return the row's workspace for the caller to check. Row-level
+  security in PostgreSQL remains deferred.
 - Project slugs are unique within a workspace, not globally; URLs carry the
   workspace segment from day one.
 - Logical authorization and physical deduplication are separate tables:

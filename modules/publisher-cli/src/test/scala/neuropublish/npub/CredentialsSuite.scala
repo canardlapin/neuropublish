@@ -17,6 +17,7 @@ class CredentialsSuite extends CatsEffectSuite:
     yield
       assertEquals(loaded.get("http://h:1"), Some(entry))
       assertEquals(loaded.get("http://h:1/"), Some(entry))
+      assertEquals(loaded.get("HTTP://H:1"), Some(entry))
       assertEquals(perms, PosixPermissions.fromString("rw-------").get)
       assertEquals(
         io.circe.parser.parse(raw).flatMap(_.hcursor.downField("servers").downField("http://h:1")
@@ -34,6 +35,17 @@ class CredentialsSuite extends CatsEffectSuite:
     yield
       assertEquals(empty, CredentialsFile())
       assertEquals(after.servers, Map.empty[String, ServerEntry])
+  }
+
+  test("server keys normalize scheme and host case, default ports, and trailing slashes") {
+    assertEquals(Credentials.key("HTTP://Np.Test:80/"), "http://np.test:80")
+    assertEquals(Credentials.key("http://np.test"), "http://np.test:80")
+    assertEquals(Credentials.key("https://np.test/"), Credentials.key("HTTPS://NP.TEST:443"))
+    assertEquals(Credentials.key("https://np.test/base/"), "https://np.test:443/base")
+    assertNotEquals(Credentials.key("http://np.test:8080"), Credentials.key("http://np.test"))
+    assertEquals(Credentials.key(" not-a-url/ "), "not-a-url")
+    val c = CredentialsFile().put("HTTP://H/", ServerEntry("t", "u"))
+    assertEquals(c.get("http://h:80"), Some(ServerEntry("t", "u")))
   }
 
   test("config dir honours NPUB_CONFIG_DIR, else ~/.config/npub") {

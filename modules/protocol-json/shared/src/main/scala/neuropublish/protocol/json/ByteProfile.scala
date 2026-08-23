@@ -26,7 +26,11 @@ object ByteProfile:
     then errors += Violation(0, "UTF-8 byte order mark is not allowed")
     Utf8.validate(bytes).foreach(o => errors += Violation(o, "invalid UTF-8 sequence"))
     val text = new String(bytes, "UTF-8")
-    errors ++= Scanner.scan(text).map(v => v.copy(offset = byteOffset(text, v.offset)))
+    // a BOM is reported once, above; the scanner sees the text behind it
+    val bom = if text.startsWith("\uFEFF") then 1 else 0
+    errors ++= Scanner.scan(text.substring(bom)).map(v =>
+      v.copy(offset = byteOffset(text, v.offset + bom))
+    )
     val es = errors.result()
     if es.isEmpty then Right(Sha256.of(bytes)) else Left(es)
 

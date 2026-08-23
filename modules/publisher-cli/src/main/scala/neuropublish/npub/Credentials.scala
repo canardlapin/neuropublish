@@ -29,8 +29,18 @@ object Credentials:
 
   val fileName = "credentials.json"
 
-  /** Servers are keyed without a trailing slash so `http://h:1/` and `http://h:1` agree. */
-  def key(server: String): String = server.trim.stripSuffix("/")
+  /** Servers are keyed by normalized origin plus path: scheme and host lower-cased, the scheme's
+    * default port made explicit, no trailing slash — so `HTTP://H:80/`, `http://h/` and
+    * `http://h:80` all name one entry. A string that is not a URL is keyed as written (trimmed,
+    * without a trailing slash).
+    */
+  def key(server: String): String =
+    val trimmed = server.trim.stripSuffix("/")
+    org.http4s.Uri.fromString(trimmed).toOption.flatMap(u => Origin.of(u).map(o => (o, u))) match
+      case Some((o, u)) =>
+        val path = u.path.renderString.stripSuffix("/")
+        o.render + (if path.isEmpty || path == "/" then "" else path)
+      case None => trimmed
 
   def configDir(env: Map[String, String] = sys.env): Path =
     env.get("NPUB_CONFIG_DIR").filter(_.nonEmpty).map(Path(_)).getOrElse(

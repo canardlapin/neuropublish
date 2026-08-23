@@ -1,9 +1,9 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:neuropublish:schema:domain:volume-grid:1.0",
+  "$id": "https://neuropublish.org/schema/0.1/records/volume-grid-v1.schema.json",
   "title": "Neuropublish volume-grid domain descriptor version 1.0",
   "type": "object",
-  "additionalProperties": false,
+  "unevaluatedProperties": true,
   "required": [
     "space",
     "coordinateConvention",

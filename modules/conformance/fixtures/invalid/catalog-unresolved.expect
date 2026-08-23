@@ -1,1 +1,2 @@
-/assets/0/catalog
+/assets/0/digest: required property 'digest' not found
+/assets/0/catalog: catalog reference is not resolved to a digest (run `npub pack`)

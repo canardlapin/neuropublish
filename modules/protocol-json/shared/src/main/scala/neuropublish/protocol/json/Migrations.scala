@@ -29,16 +29,29 @@ object Migrations:
   /** Bring a parsed manifest to the current core: apply each migration in turn (stamping
     * `migratedFrom` with the version the bytes declared), accept the current line and newer minors
     * unchanged, reject anything else with a clear problem at `/core`.
+    *
+    * `migratedFrom` is set by a reader, never written by a producer: a document that already
+    * carries it is refused at `/migratedFrom`, so a migrated parsed form can never be re-stored as
+    * if it were the producer's bytes. Problems found after a migration address the migrated form
+    * (SPEC §8).
     */
   def bring(json: Json): Either[Problem, Json] =
     json.hcursor.get[String]("core") match
       case Left(_) => Left(Problem("/core", "core protocol version is required"))
+      case Right(_) if json.hcursor.downField("migratedFrom").succeeded =>
+        Left(Problem(
+          "/migratedFrom",
+          "migratedFrom is stamped by a reader after migration; a producer must not write it"
+        ))
       case Right(core) =>
         ProtocolVersion.parse(core) match
           case Left(m) => Left(Problem("/core", m))
-          case Right(v)
-              if v.major == ProtocolVersion.current.major &&
-                v.minor >= ProtocolVersion.current.minor => Right(json)
+          case Right(v) if v.major != ProtocolVersion.current.major =>
+            Left(Problem(
+              "/core",
+              s"core major ${v.major} is not supported by a ${ProtocolVersion.current.render} implementation (only ${ProtocolVersion.current.major}.x is readable)"
+            ))
+          case Right(v) if v.minor >= ProtocolVersion.current.minor => Right(json)
           case Right(v) =>
             def step(j: Json, at: ProtocolVersion): Either[Problem, Json] =
               if at == ProtocolVersion.current then Right(j)
