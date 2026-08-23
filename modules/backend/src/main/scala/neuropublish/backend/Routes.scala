@@ -3,6 +3,7 @@ package neuropublish.backend
 import cats.effect.IO
 import cats.syntax.all.*
 import fs2.io.file.{Files, Path}
+import io.circe.Json
 import java.time.Instant
 import neuropublish.api.*
 import neuropublish.protocol.ProtocolVersion
@@ -22,6 +23,7 @@ final class Routes(
     identity: Identity,
     members: Members,
     sessions: Sessions,
+    userTokens: UserTokens,
     device: DeviceFlow,
     credentials: Credentials,
     views: Views,
@@ -35,6 +37,10 @@ final class Routes(
   private def notFound(what: String): ApiError = ApiError("not_found", what)
   private def badRequest(msg: String): ApiError = ApiError("bad_request", msg)
   private val secure = baseUrl.startsWith("https://")
+
+  /** Caps on the opaque saved-view state: one version's JSON and the versions per view. */
+  private val MaxStateBytes = 256 * 1024
+  private val MaxVersions = 200
 
   private def sessionCookie(secret: String, expires: Instant): CookieValueWithMeta =
     CookieValueWithMeta.unsafeApply(
@@ -76,11 +82,32 @@ final class Routes(
   private def authed[A](p: Principal)(body: => Res[A]): Res[A] =
     if p == Principal.Anonymous then IO.pure(Left(ApiError("unauthorized", "sign in required")))
     else body
-  private def revisionOf(p: Principal, id: String): Res[RevisionRecord] = authed(p):
-    if !Ids.valid(id) then IO.pure(Left(notFound(s"revision $id does not exist")))
-    else revisions.revision(id).map(_.toRight(notFound(s"revision $id does not exist")))
-  private def viewOf(p: Principal, id: String): Res[ViewRecord] = authed(p):
-    views.get(id).map(_.toRight(notFound(s"view $id does not exist")))
+
+  /** A record addressed by id that only its project's readers may learn about: a missing record and
+    * a record the principal may not read are the same 404 (no existence oracle).
+    */
+  private def scoped[A](p: Principal, what: String, lookup: IO[Option[A]])(key: A => ProjectKey)
+      : Res[A] =
+    authed(p):
+      lookup.flatMap {
+        case None => IO.pure(Left(notFound(what)))
+        case Some(a) =>
+          authz.canRead(p, key(a)).map {
+            case Right(_) => Right(a)
+            case Left(e) if e.code == "forbidden" => Left(notFound(what))
+            case Left(e) => Left(e)
+          }
+      }
+  private def revisionOf(p: Principal, id: String): Res[RevisionRecord] =
+    scoped(
+      p,
+      s"revision $id does not exist",
+      if !Ids.valid(id) then IO.none else revisions.revision(id)
+    )(r => ProjectKey(r.workspace, r.project))
+  private def viewOf(p: Principal, id: String): Res[ViewRecord] =
+    scoped(p, s"view $id does not exist", views.get(id))(v => ProjectKey(v.workspace, v.project))
+  private def linkOf(p: Principal, id: String): Res[ShareLinkRecord] =
+    scoped(p, s"link $id does not exist", links.get(id))(l => ProjectKey(l.workspace, l.project))
   private def projectOf(p: Principal, ws: String, proj: String): Res[ProjectKey] = authed(p):
     val key = ProjectKey(ws, proj)
     if !Ids.valid(ws) || !Ids.valid(proj) then
@@ -196,9 +223,20 @@ final class Routes(
     _ =>
       (p match
         case Principal.Session(_, secret) => sessions.revoke(secret)
+        case Principal.UserToken(u, secret) =>
+          userTokens.revoke(secret) *> auditUser(u, "token.revoke", Some("logout"))
         case _ => IO.unit
       ).as(Right(clearedCookie))
   )
+  private val revokeTokens =
+    Stage4.revokeTokens.serverSecurityLogic[Principal, IO](resolve).serverLogic(p =>
+      _ =>
+        withE(IO.pure(authz.requireUser(p)))(u =>
+          userTokens.revokeAll(u.id).flatMap(n =>
+            auditUser(u, "token.revoke", Some(s"all ($n)")).as(Right(()))
+          )
+        )
+    )
   private val whoami = Stage4.me.serverSecurityLogic[Principal, IO](resolve).serverLogic(p =>
     _ => authz.requireUser(p).traverse(me)
   )
@@ -218,6 +256,7 @@ final class Routes(
   private val devicePoll = Stage4.devicePoll.serverLogic[IO] { req =>
     device.poll(req.deviceCode).flatMap {
       case device.Poll.Pending => IO.pure(Right(DeviceToken("pending", None, None, None)))
+      case device.Poll.SlowDown => IO.pure(Right(DeviceToken("slow_down", None, None, None)))
       case device.Poll.Denied => IO.pure(Right(DeviceToken("denied", None, None, None)))
       case device.Poll.Expired => IO.pure(Right(DeviceToken("expired", None, None, None)))
       case device.Poll.Granted(token, uid) =>
@@ -227,19 +266,68 @@ final class Routes(
     }
   }
 
-  /** Only a browser session may approve: a user token approving another would be self-escalation.
+  /** Only a browser session may approve or deny: a user token approving another would be
+    * self-escalation.
     */
+  private def settleDevice(p: Principal, action: String)(
+      f: UserRecord => IO[Either[String, DeviceGrant]]
+  ): Res[Unit] =
+    p match
+      case Principal.Session(u, _) =>
+        f(u).flatMap {
+          case Left(m) => IO.pure(Left(badRequest(m)))
+          case Right(g) => auditUser(u, action, Some(g.client)).as(Right(()))
+        }
+      case Principal.Anonymous => IO.pure(Left(ApiError("unauthorized", "sign in required")))
+      case _ => IO.pure(Left(ApiError("forbidden", "a browser session must decide the code")))
   private val deviceApprove =
     Stage4.deviceApprove.serverSecurityLogic[Principal, IO](resolve).serverLogic(p =>
-      req =>
-        p match
-          case Principal.Session(u, _) =>
-            device.approve(req.userCode, u.id).flatMap {
-              case Left(m) => IO.pure(Left(badRequest(m)))
-              case Right(g) => auditUser(u, "device.approve", Some(g.client)).as(Right(()))
-            }
-          case Principal.Anonymous => IO.pure(Left(ApiError("unauthorized", "sign in required")))
-          case _ => IO.pure(Left(ApiError("forbidden", "a browser session must approve the code")))
+      req => settleDevice(p, "device.approve")(u => device.approve(req.userCode, u.id))
+    )
+  private val deviceDeny =
+    Stage4.deviceDeny.serverSecurityLogic[Principal, IO](resolve).serverLogic(p =>
+      req => settleDevice(p, "device.deny")(_ => device.deny(req.userCode))
+    )
+
+  // ------------------------------------------------------------------ members
+
+  private val addMember =
+    Stage4.addMember.serverSecurityLogic[Principal, IO](resolve).serverLogic(p =>
+      (ws, req) =>
+        withE(authz.requireAdmin(p, ws).flatMap(_.traverse(u => authz.role(p, ws).map(u -> _)))) {
+          (_, callerRole) =>
+            val email = req.email.trim.toLowerCase
+            Role.parse(req.role) match
+              case None => IO.pure(Left(badRequest("role must be owner, admin, member, or viewer")))
+              case Some(_) if email.isEmpty || !email.contains('@') =>
+                IO.pure(Left(badRequest("a valid email is required")))
+              case Some(role) if role == Role.Owner && !callerRole.contains(Role.Owner) =>
+                IO.pure(Left(ApiError("forbidden", "only an owner may add another owner")))
+              case Some(role) =>
+                identity.lookupIdentity(Identity.LocalIssuer, email).flatMap {
+                  case Some(u) => IO.pure((u, None))
+                  case None =>
+                    Secrets.token(18).flatMap(pw =>
+                      identity.ensureLocalUser(email, email.takeWhile(_ != '@'), pw).map(_ ->
+                        Some(pw))
+                    )
+                }.flatMap { (u, oneTime) =>
+                  members.set(ws, u.id, role) *>
+                    audit.record(p.actor, "member.add", ws, None, Some(u.id), Some(role.render))
+                      .as(Right(MemberAdded(u.public, role.render, oneTime)))
+                }
+        }
+    )
+  private val listMembers =
+    Stage4.listMembers.serverSecurityLogic[Principal, IO](resolve).serverLogic(p =>
+      ws =>
+        withE(authz.requireAdmin(p, ws))(_ =>
+          members.members(ws).flatMap(_.traverse(m =>
+            identity.lookup(m.userId).map(_.map(u =>
+              MemberSummary(u.public, m.role.render, m.addedAt)
+            ))
+          )).map(ms => Right(ms.flatten))
+        )
     )
 
   // ------------------------------------------------------------------ credentials
@@ -270,7 +358,16 @@ final class Routes(
   private val revokeCredential =
     Stage4.revokeCredential.serverSecurityLogic[Principal, IO](resolve).serverLogic(p =>
       (ws, proj, id) =>
-        withE(authz.requireAdmin(p, ws)) { _ =>
+        // a non-member learns nothing: the same 404 as for an unknown credential
+        val admin = authz.requireMember(p, ws).map {
+          case Left(e) if e.code == "forbidden" =>
+            Left(notFound(s"credential $id does not exist in $ws/$proj"))
+          case Left(e) => Left(e)
+          case Right((u, r)) =>
+            if r.isAdmin then Right(u)
+            else Left(ApiError("forbidden", "owner or admin role required"))
+        }
+        withE(admin) { _ =>
           credentials.get(id).flatMap {
             case Some(c) if c.key == ProjectKey(ws, proj) =>
               credentials.revoke(id) *>
@@ -289,13 +386,22 @@ final class Routes(
 
   // ------------------------------------------------------------------ saved views
 
+  private def stateWithinCap(state: Json): Either[ApiError, Unit] =
+    val n = state.noSpaces.getBytes("UTF-8").length
+    if n > MaxStateBytes then
+      Left(badRequest(s"view state is $n bytes; the limit is $MaxStateBytes"))
+    else Right(())
+
   private val saveView = Stage4.saveView.serverSecurityLogic[Principal, IO](resolve).serverLogic(
     p =>
       (rev, req) =>
         withE(revisionOf(p, rev)) { r =>
-          withE(authz.requireMember(p, r.workspace)) { (u, _) =>
+          withE(authz.requireSharer(p, r.workspace)) { (u, _) =>
             if req.name.isBlank then IO.pure(Left(badRequest("name is required")))
-            else views.create(r, req.name.trim, req.state, u.id).map(v => Right(v.detail))
+            else
+              withE(IO.pure(stateWithinCap(req.state)))(_ =>
+                views.create(r, req.name.trim, req.state, u.id).map(v => Right(v.detail))
+              )
           }
         }
   )
@@ -303,34 +409,35 @@ final class Routes(
     Stage4.updateView.serverSecurityLogic[Principal, IO](resolve).serverLogic(p =>
       (id, req) =>
         withE(viewOf(p, id)) { v =>
-          withE(authz.requireMember(p, v.workspace)) { (u, role) =>
+          withE(authz.requireSharer(p, v.workspace)) { (u, role) =>
             if v.owner != u.id && !role.isAdmin then
               IO.pure(Left(ApiError(
                 "forbidden",
                 "only the view's owner or a workspace admin may update it"
               )))
+            else if v.versions.length >= MaxVersions then
+              IO.pure(
+                Left(badRequest(s"view $id already has $MaxVersions versions; save a new view"))
+              )
             else
-              views.update(
-                id,
-                req.state,
-                u.id
-              ).map(_.map(_.detail).toRight(notFound(s"view $id does not exist")))
+              withE(IO.pure(stateWithinCap(req.state)))(_ =>
+                views.update(
+                  id,
+                  req.state,
+                  u.id
+                ).map(_.map(_.detail).toRight(notFound(s"view $id does not exist")))
+              )
           }
         }
     )
   private val getView = Stage4.getView.serverSecurityLogic[Principal, IO](resolve).serverLogic(p =>
-    id =>
-      withE(viewOf(p, id))(v =>
-        withE(authz.canRead(p, ProjectKey(v.workspace, v.project)))(_ => IO.pure(Right(v.detail)))
-      )
+    id => withE(viewOf(p, id))(v => IO.pure(Right(v.detail)))
   )
   private val listViews = Stage4.listViews.serverSecurityLogic[Principal, IO](resolve).serverLogic(
     p =>
       rev =>
-        withE(revisionOf(p, rev))(r =>
-          withE(authz.canRead(p, ProjectKey(r.workspace, r.project)))(_ =>
-            views.listForRevision(rev).map(vs => Right(vs.map(_.summary)))
-          )
+        withE(revisionOf(p, rev))(_ =>
+          views.listForRevision(rev).map(vs => Right(vs.map(_.summary)))
         )
   )
 
@@ -340,22 +447,30 @@ final class Routes(
     Stage4.createShareLink.serverSecurityLogic[Principal, IO](resolve).serverLogic(p =>
       (id, version, req) =>
         withE(viewOf(p, id)) { v =>
-          withE(authz.requireMember(p, v.workspace)) { (u, _) =>
+          withE(authz.requireSharer(p, v.workspace)) { (u, _) =>
             if v.version(version).isEmpty then
               IO.pure(Left(notFound(s"view $id has no version $version")))
             else if req.expiresInDays.exists(_ <= 0) then
               IO.pure(Left(badRequest("expiresInDays must be positive")))
             else
-              links.create(v, version, u.id, req.expiresInDays).flatMap { (l, secret) =>
-                audit.record(
-                  p.actor,
-                  "share.create",
-                  v.workspace,
-                  Some(v.project),
-                  Some(l.id),
-                  Some(s"${v.id}@$version")
-                )
-                  .as(Right(ShareLinkCreated(l.id, s"$baseUrl/s/$secret", secret, l.expiresAt)))
+              // publication policy is checked where the link is minted, not where it is opened
+              val policy = pub.revision(v.revision).map(_.flatMap(rd =>
+                SharedProjection.shareable(rd.manifest).leftMap(badRequest)
+              ))
+              withE(policy)(_ =>
+                links.create(v, version, u.id, req.expiresInDays).map(Right(_))
+              ).flatMap {
+                case Left(e) => IO.pure(Left(e))
+                case Right((l, secret)) =>
+                  audit.record(
+                    p.actor,
+                    "share.create",
+                    v.workspace,
+                    Some(v.project),
+                    Some(l.id),
+                    Some(s"${v.id}@$version")
+                  )
+                    .as(Right(ShareLinkCreated(l.id, s"$baseUrl/s/$secret", secret, l.expiresAt)))
               }
           }
         }
@@ -370,26 +485,24 @@ final class Routes(
   private val revokeShareLink =
     Stage4.revokeShareLink.serverSecurityLogic[Principal, IO](resolve).serverLogic(p =>
       id =>
-        authed(p)(links.get(id).map(_.toRight(notFound(s"link $id does not exist")))).flatMap {
-          case Left(e) => IO.pure(Left(e))
-          case Right(l) =>
-            withE(authz.requireMember(p, l.workspace)) { (u, role) =>
-              if l.createdBy != u.id && !role.isAdmin then
-                IO.pure(Left(ApiError(
-                  "forbidden",
-                  "only the link's creator or a workspace admin may revoke it"
-                )))
-              else
-                links.revoke(id) *>
-                  audit.record(
-                    p.actor,
-                    "share.revoke",
-                    l.workspace,
-                    Some(l.project),
-                    Some(id),
-                    None
-                  ).as(Right(()))
-            }
+        withE(linkOf(p, id)) { l =>
+          withE(authz.requireMember(p, l.workspace)) { (u, role) =>
+            if l.createdBy != u.id && !role.isAdmin then
+              IO.pure(Left(ApiError(
+                "forbidden",
+                "only the link's creator or a workspace admin may revoke it"
+              )))
+            else
+              links.revoke(id) *>
+                audit.record(
+                  p.actor,
+                  "share.revoke",
+                  l.workspace,
+                  Some(l.project),
+                  Some(id),
+                  None
+                ).as(Right(()))
+          }
         }
     )
 
@@ -419,7 +532,20 @@ final class Routes(
                 payloadUrl = s"$baseUrl/api/v1/share/$secret/renditions/${r.assetId}/payload"
               )
             )
-            SharedView(v.detail, ver, rd.copy(renditions = rends), l.expiresAt)
+            // the presentation subset: what the page renders, nothing of the record behind it
+            val presentation = rd.copy(
+              parent = None,
+              message = None,
+              committedAt = rd.committedAt.take(10),
+              manifest = SharedProjection.of(rd.manifest),
+              renditions = rends
+            )
+            SharedView(
+              SharedViewRef(v.id, v.name, v.revision, v.project),
+              SharedVersion(ver.version, ver.state, ver.savedAt),
+              presentation,
+              l.expiresAt
+            )
           })
     }
   }
@@ -435,16 +561,14 @@ final class Routes(
   private val provenance =
     Stage4.provenance.serverSecurityLogic[Principal, IO](resolve).serverLogic(p =>
       rev =>
-        withE(revisionOf(p, rev)) { r =>
-          withE(authz.canRead(p, ProjectKey(r.workspace, r.project))) { _ =>
-            ProvenanceModel.cached(
-              data,
-              rev,
-              pub.revision(rev).flatMap(d =>
-                IO.fromEither(d.leftMap(e => IllegalStateException(e.message)))
-              ).map(_.manifest)
-            ).map(Right(_))
-          }
+        withE(revisionOf(p, rev)) { _ =>
+          ProvenanceModel.cached(
+            data,
+            rev,
+            pub.revision(rev).flatMap(d =>
+              IO.fromEither(d.leftMap(e => IllegalStateException(e.message)))
+            ).map(_.manifest)
+          ).map(Right(_))
         }
     )
   private val auditLog = Stage4.audit.serverSecurityLogic[Principal, IO](resolve).serverLogic(p =>
@@ -464,10 +588,14 @@ final class Routes(
       renditionPayload,
       login,
       logout,
+      revokeTokens,
       whoami,
       deviceStart,
       devicePoll,
       deviceApprove,
+      deviceDeny,
+      addMember,
+      listMembers,
       createCredential,
       listCredentials,
       revokeCredential,

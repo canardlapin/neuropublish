@@ -3,7 +3,8 @@ package neuropublish.backend
 import cats.effect.IO
 import cats.syntax.all.*
 import fs2.io.file.Path
-import io.circe.Json
+import io.circe.{Codec, Json}
+import io.circe.generic.semiauto.*
 import neuropublish.api.*
 import neuropublish.api.Stage4.given
 
@@ -11,15 +12,24 @@ import neuropublish.api.Stage4.given
   * plus compatibility facets across receipts that share the fmrireg analysis-receipt schema.
   * Heterogeneous inputs are summarized as value groups and never as one invented shared setting
   * (Stage 4 exit criterion). Unknown schemas are kept verbatim and marked `unsupported`. Cached per
-  * revision under `<data>/provenance/<rev>.json`; the cache is a pure function of the manifest.
+  * revision under `<data>/provenance/<rev>.json`, stamped with [[computeVersion]]; the cache is a
+  * pure function of the manifest and these rules, so a rule change invalidates every cache.
   */
 object ProvenanceModel:
   val ReceiptSchema = "org.bbuchsbaum.fmrireg/analysis-receipt"
-  private val UnderstoodNamespaces = List("org.neuropublish.", "org.bbuchsbaum.")
+  val GroupReducerSchema = "org.bbuchsbaum.fmrigds/reducer/meta-random-effects"
+
+  /** Schema ids this server has a reader for — an allow-list, never a namespace prefix: a namespace
+    * is not a capability, and `interpretation = understood` drives privileged UI.
+    */
+  val Understood: Set[String] = Set(ReceiptSchema, GroupReducerSchema)
+
+  /** Bump whenever `compute` or [[Understood]] changes; mismatched caches are recomputed. */
+  val computeVersion: Int = 2
   private val NonFacetKeys = Set("subject")
 
   def interpretation(schemaId: String): String =
-    if UnderstoodNamespaces.exists(schemaId.startsWith) then "understood" else "unsupported"
+    if Understood(schemaId) then "understood" else "unsupported"
 
   def compute(revision: String, manifest: Json): Provenance =
     val prov = manifest.hcursor.downField("provenance")
@@ -108,10 +118,18 @@ object ProvenanceModel:
       warnings
     )
 
-  /** Cached read: computed from the manifest on first request. */
+  private final case class Cached(computeVersion: Int, provenance: Provenance)
+  private given Codec[Cached] = deriveCodec
+
+  /** Cached read: computed from the manifest on first request, or again when the cache was written
+    * by another `computeVersion` (or in an older format).
+    */
   def cached(root: Path, revision: String, manifest: => IO[Json]): IO[Provenance] =
     val p = root / "provenance" / s"$revision.json"
-    JsonFiles.read[Provenance](p).flatMap {
-      case Some(pr) => IO.pure(pr)
-      case None => manifest.map(compute(revision, _)).flatTap(JsonFiles.write(p, _))
+    JsonFiles.read[Cached](p).attempt.map(_.toOption.flatten).flatMap {
+      case Some(c) if c.computeVersion == computeVersion => IO.pure(c.provenance)
+      case _ =>
+        manifest.map(compute(revision, _)).flatTap(pr =>
+          JsonFiles.write(p, Cached(computeVersion, pr))
+        )
     }

@@ -57,7 +57,7 @@ SECRET=$($CLI credential create --server "http://127.0.0.1:$PORT" --project rotm
 code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $SECRET" -H 'content-type: application/json' \
   -d '{"manifestDigest":"sha256:'$(printf '0%.0s' $(seq 1 64))'","manifestSize":1,"parent":null,"assets":[]}' \
   "http://127.0.0.1:$PORT/api/v1/workspaces/rotman/projects/other/upload-sessions")
-[ "$code" = "403" ] || [ "$code" = "404" ] || { echo "credential crossed projects (HTTP $code)"; exit 1; }
+[ "$code" = "403" ] || { echo "credential crossed projects (expected 403, got HTTP $code)"; exit 1; }
 
 echo "== npub push"
 $CLI push modules/conformance/fixtures/reference \

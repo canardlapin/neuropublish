@@ -9,8 +9,10 @@ enum Principal:
   /** Browser session (`np_session` cookie); `secret` is kept only so logout can revoke it. */
   case Session(user: UserRecord, secret: String)
 
-  /** Bearer user token minted by the device flow (`npub login`). */
-  case UserToken(user: UserRecord)
+  /** Bearer user token minted by the device flow (`npub login`); `secret` only so logout can revoke
+    * it.
+    */
+  case UserToken(user: UserRecord, secret: String)
 
   /** Project-scoped publisher credential: a non-human principal (ADR 0004). */
   case Credential(credential: CredentialRecord)
@@ -21,13 +23,13 @@ enum Principal:
 
   def signedIn: Option[UserRecord] = this match
     case Session(u, _) => Some(u)
-    case UserToken(u) => Some(u)
+    case UserToken(u, _) => Some(u)
     case _ => None
 
   /** Actor string for audit rows. */
   def actor: String = this match
     case Session(u, _) => s"user:${u.id}"
-    case UserToken(u) => s"user:${u.id}"
+    case UserToken(u, _) => s"user:${u.id}"
     case Credential(c) => s"credential:${c.id}"
     case Legacy => "legacy-token"
     case Anonymous => "anonymous"
@@ -38,11 +40,14 @@ enum Principal:
   *     viewer, or a credential scoped to exactly that project (another project → 403);
   *   - reading a project, revision, rendition, view, or provenance needs a member (session or user
   *     token) or that project's credential; share routes authorize by link secret instead;
-  *   - credential management and the audit log need an owner or admin;
-  *   - saved views and share links are created by members; updates and revocations by the owner or
-  *     creator, or a workspace admin.
+  *   - credential and member management and the audit log need an owner or admin;
+  *   - saved views and share links are created by members who are not viewers ([[Role.canShare]]);
+  *     updates and revocations by the owner or creator, or a workspace admin.
   *
-  * No principal → 401 `unauthorized`; a principal the rule rejects → 403 `forbidden`.
+  * No principal → 401 `unauthorized`; a principal the rule rejects → 403 `forbidden` — except that
+  * a non-member asking about a *specific* record (revision, view, link, credential) gets the same
+  * 404 as for a record that does not exist, so membership never becomes an existence oracle
+  * ([[Routes]]). Bearer tokens that are unknown, expired, or revoked are all one generic 401.
   */
 final class Authz(
     identity: Identity,
@@ -77,13 +82,12 @@ final class Authz(
       userTokens.resolve(t).flatMap {
         case Some(tok) =>
           identity.lookup(tok.userId).map(
-            _.map(Principal.UserToken(_)).toRight(unauthorized("token's user no longer exists"))
+            _.map(Principal.UserToken(_, t)).toRight(unauthorized("invalid token"))
           )
         case None =>
           credentials.resolve(t).map {
-            case None => Left(unauthorized("invalid token"))
-            case Some(c) if c.revokedAt.isDefined => Left(unauthorized("credential revoked"))
-            case Some(c) => Right(Principal.Credential(c))
+            case Some(c) if c.revokedAt.isEmpty => Right(Principal.Credential(c))
+            case _ => Left(unauthorized("invalid token")) // unknown and revoked are the same
           }
       }
 
@@ -101,6 +105,12 @@ final class Authz(
         members.role(workspace, u.id).map(
           _.map(u -> _).toRight(forbidden(s"not a member of workspace $workspace"))
         )
+
+  /** A member who may save views and mint share links (viewers cannot). */
+  def requireSharer(p: Principal, workspace: String): IO[Either[ApiError, (UserRecord, Role)]] =
+    requireMember(p, workspace).map(_.flatMap((u, r) =>
+      if r.canShare then Right((u, r)) else Left(forbidden("viewers cannot save or share views"))
+    ))
 
   def requireAdmin(p: Principal, workspace: String): IO[Either[ApiError, UserRecord]] =
     requireMember(p, workspace).map(_.flatMap((u, r) =>

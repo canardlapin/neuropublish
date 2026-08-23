@@ -14,6 +14,8 @@ import org.http4s.server.staticcontent.*
   *
   *   - NP_DATA_DIR (default ./data); NP_PORT (default 8080); NP_STATIC_DIR (built frontend;
   *     optional)
+  *   - NP_BASE_URL (default http://127.0.0.1:$NP_PORT): the public origin — share URLs, device
+  *     verification URIs, rendition URLs; an `https://` value marks cookies `Secure`
   *   - NP_WORKSPACE / NP_PROJECT (default rotman / sherlock — the bootstrap workspace and project)
   *   - NP_OWNER_EMAIL / NP_OWNER_PASSWORD (default owner@example.org / owner-dev-password): the
   *     local-provider user created as `owner` of the bootstrap workspace if absent (Stage 4)
@@ -30,7 +32,8 @@ object Main extends IOApp.Simple:
     val key =
       ProjectKey(env.getOrElse("NP_WORKSPACE", "rotman"), env.getOrElse("NP_PROJECT", "sherlock"))
     val port = Port.fromString(env.getOrElse("NP_PORT", "8080")).getOrElse(port"8080")
-    val base = s"http://127.0.0.1:$port"
+    val base = env.get("NP_BASE_URL").map(_.trim.stripSuffix("/")).filter(_.nonEmpty)
+      .getOrElse(s"http://127.0.0.1:$port")
     val static = env.get("NP_STATIC_DIR").map(Path(_))
     val ownerEmail = env.getOrElse("NP_OWNER_EMAIL", Server.DefaultOwnerEmail)
     val ownerPassword = env.getOrElse("NP_OWNER_PASSWORD", Server.DefaultOwnerPassword)
@@ -41,7 +44,7 @@ object Main extends IOApp.Simple:
         .build
         .evalTap(s =>
           IO.println(
-            s"neuropublish backend on ${s.address}; project ${key.render}; owner $ownerEmail; data $data" +
+            s"neuropublish backend on ${s.address}; base $base; project ${key.render}; owner $ownerEmail; data $data" +
               legacy.fold("")(_ => "; deprecated NP_LEGACY_TOKEN static token enabled")
           )
         )
@@ -51,6 +54,11 @@ object Main extends IOApp.Simple:
 object Server:
   val DefaultOwnerEmail = "owner@example.org"
   val DefaultOwnerPassword = "owner-dev-password"
+
+  /** A workspace/project to create at start with a local-provider owner (operator bootstrap; the
+    * alpha has no self-serve workspace creation, ADR 0004).
+    */
+  final case class Bootstrap(key: ProjectKey, ownerEmail: String, ownerPassword: String)
 
   /** Built frontend: real files from `dir`, everything else falls back to index.html. */
   def spa(dir: Path): HttpRoutes[IO] =
@@ -68,8 +76,9 @@ object Server:
   def build(data: Path, token: String, bootstrap: ProjectKey, baseUrl: String): IO[HttpRoutes[IO]] =
     build(data, bootstrap, baseUrl, legacyToken = Some(token))
 
-  /** Wires every store under `data`, creates the bootstrap project, and ensures the owner user and
-    * membership exist. `legacyToken` enables the deprecated NP_TOKEN path.
+  /** Wires every store under `data`, creates the bootstrap project (and any `extra` ones), and
+    * ensures each owner user and membership exist. `legacyToken` enables the deprecated NP_TOKEN
+    * path.
     */
   def build(
       data: Path,
@@ -77,11 +86,13 @@ object Server:
       baseUrl: String,
       ownerEmail: String = DefaultOwnerEmail,
       ownerPassword: String = DefaultOwnerPassword,
-      legacyToken: Option[String] = None
+      legacyToken: Option[String] = None,
+      extra: List[Bootstrap] = Nil
   ): IO[HttpRoutes[IO]] =
+    val all = Bootstrap(bootstrap, ownerEmail, ownerPassword) :: extra
     for
       revisions <- RevisionStore.localFs(data)
-      _ <- revisions.createProject(bootstrap)
+      _ <- all.traverse_(b => revisions.createProject(b.key))
       objects = ObjectStore.LocalFs(data / "objects")
       ingestion = Ingestion(objects, data)
       uploads <- Ref.of[IO, Map[String, UploadSession]](Map.empty)
@@ -95,10 +106,14 @@ object Server:
       )
       identity <- Identity.local(data)
       members <- Members.localFs(data)
-      owner <- identity.ensureLocalUser(ownerEmail, ownerEmail.takeWhile(_ != '@'), ownerPassword)
-      _ <- members.role(bootstrap.workspace, owner.id).flatMap {
-        case Some(_) => IO.unit
-        case None => members.set(bootstrap.workspace, owner.id, Role.Owner)
+      _ <- all.traverse_ { b =>
+        identity.ensureLocalUser(b.ownerEmail, b.ownerEmail.takeWhile(_ != '@'), b.ownerPassword)
+          .flatMap(owner =>
+            members.role(b.key.workspace, owner.id).flatMap {
+              case Some(_) => IO.unit
+              case None => members.set(b.key.workspace, owner.id, Role.Owner)
+            }
+          )
       }
       sessions = Sessions(data / "sessions")
       tokens = UserTokens(data / "tokens")
@@ -115,6 +130,7 @@ object Server:
       identity,
       members,
       sessions,
+      tokens,
       device,
       credentials,
       views,

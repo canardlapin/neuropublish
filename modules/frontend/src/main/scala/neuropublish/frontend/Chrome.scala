@@ -341,7 +341,7 @@ object Chrome:
         strong(shared.view.name),
         span(
           cls := "muted",
-          s" — saved view v${shared.version.version}, ${Ui.date(shared.version.savedAt)} by ${shared.version.savedBy}"
+          s" — saved view v${shared.version.version}, ${Ui.date(shared.version.savedAt)}"
         )
       ),
       div(m.title, m.synopsis.map(s => span(cls := "muted", s" — $s"))),

@@ -29,7 +29,10 @@ final case class DeviceCodes(
 )
 final case class DevicePoll(deviceCode: String)
 
-/** `status`: "pending" | "granted" | "denied" | "expired"; `token` only when granted. */
+/** `status`: "pending" | "slow_down" | "granted" | "denied" | "expired"; `token` only when granted.
+  * `slow_down` is RFC 8628's answer to polling faster than `interval`: the client treats it as
+  * pending and doubles its wait.
+  */
 final case class DeviceToken(
     status: String,
     token: Option[String],
@@ -37,6 +40,13 @@ final case class DeviceToken(
     user: Option[User]
 )
 final case class DeviceApprove(userCode: String)
+
+/** Workspace membership management (owner/admin). A new email creates a local-provider user whose
+  * one-time password is returned exactly once; an existing user is attached with the role.
+  */
+final case class AddMember(email: String, role: String)
+final case class MemberAdded(user: User, role: String, oneTimePassword: Option[String])
+final case class MemberSummary(user: User, role: String, addedAt: String)
 
 final case class CreateCredential(name: String)
 
@@ -91,10 +101,21 @@ final case class ShareLinkSummary(
     revokedAt: Option[String]
 )
 
-/** What a link viewer gets: no membership, no edit affordances. */
+/** The view a link addresses: no owner, no other versions. */
+final case class SharedViewRef(id: String, name: String, revision: String, project: String)
+
+/** One immutable view version as a link viewer sees it: no saver identity. */
+final case class SharedVersion(version: Int, state: Json, savedAt: String)
+
+/** What a link viewer gets: the addressed version only, and a *presentation subset* of the revision
+  * — `manifest` reduced to what the viewer renders (core, title, synopsis, warnings, analyses
+  * without method payloads, resultFields, underlays, domains, assets as id/digest/size/mediaType);
+  * no provenance, no open records, no message or parent, `committedAt` truncated to the date. No
+  * membership, no edit affordances.
+  */
 final case class SharedView(
-    view: SavedViewDetail,
-    version: ViewVersion,
+    view: SharedViewRef,
+    version: SharedVersion,
     revision: RevisionDetail,
     expiresAt: Option[String]
 )
@@ -147,6 +168,9 @@ object Stage4:
   given Codec[DevicePoll] = deriveCodec
   given Codec[DeviceToken] = deriveCodec
   given Codec[DeviceApprove] = deriveCodec
+  given Codec[AddMember] = deriveCodec
+  given Codec[MemberAdded] = deriveCodec
+  given Codec[MemberSummary] = deriveCodec
   given Codec[CreateCredential] = deriveCodec
   given Codec[CredentialCreated] = deriveCodec
   given Codec[CredentialSummary] = deriveCodec
@@ -159,6 +183,8 @@ object Stage4:
   given Codec[ShareLinkCreated] = deriveCodec
   given Codec[ShareLinkSummary] = deriveCodec
   given Codec[RevisionDetail] = Protocol.given_Codec_RevisionDetail
+  given Codec[SharedViewRef] = deriveCodec
+  given Codec[SharedVersion] = deriveCodec
   given Codec[SharedView] = deriveCodec
   given Codec[ProvenanceNode] = deriveCodec
   given Codec[ProvenanceEdge] = deriveCodec
@@ -198,6 +224,11 @@ object Stage4:
   val logout = secured.post.in(
     "auth" / "logout"
   ).out(setCookie("np_session")).out(statusCode(StatusCode.NoContent))
+    .description(
+      "Ends the presented principal: a session cookie is revoked and cleared; a bearer user token is revoked."
+    )
+  val revokeTokens = secured.delete.in("auth" / "tokens").out(statusCode(StatusCode.NoContent))
+    .description("Revokes every user token of the signed-in user (sessions are untouched).")
   val me = secured.get.in("auth" / "me").out(jsonBody[Me])
 
   val deviceStart =
@@ -209,6 +240,15 @@ object Stage4:
     .out(statusCode(
       StatusCode.NoContent
     )).description("A signed-in browser approves the CLI's user code.")
+  val deviceDeny = secured.post.in("auth" / "device" / "deny").in(jsonBody[DeviceApprove])
+    .out(statusCode(StatusCode.NoContent))
+    .description("A signed-in browser denies the CLI's user code; the CLI's next poll is `denied`.")
+
+  // ---- workspace members (owner/admin) ----
+  val addMember = secured.post.in("workspaces" / path[String]("workspace") / "members")
+    .in(jsonBody[AddMember]).out(statusCode(StatusCode.Created).and(jsonBody[MemberAdded]))
+  val listMembers = secured.get.in("workspaces" / path[String]("workspace") / "members")
+    .out(jsonBody[List[MemberSummary]])
 
   // ---- publisher credentials (project-scoped, non-human principals; ADR 0004) ----
   val createCredential = secured.post
@@ -270,10 +310,14 @@ object Stage4:
   val all: List[AnyEndpoint] = List(
     login,
     logout,
+    revokeTokens,
     me,
     deviceStart,
     devicePoll,
     deviceApprove,
+    deviceDeny,
+    addMember,
+    listMembers,
     createCredential,
     listCredentials,
     revokeCredential,

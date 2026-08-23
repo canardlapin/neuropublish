@@ -33,6 +33,9 @@ enum Role(val render: String):
   case Viewer extends Role("viewer")
   def isAdmin: Boolean = this == Owner || this == Admin
   def canPublish: Boolean = this != Viewer
+
+  /** Saving views and minting share links: owner, admin, member — a viewer only looks. */
+  def canShare: Boolean = this != Viewer
 object Role:
   def parse(s: String): Option[Role] = values.find(_.render == s)
   given Codec[Role] = Codec.from(

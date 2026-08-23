@@ -44,24 +44,58 @@ final class Sessions(dir: Path):
   def revoke(secret: String): IO[Unit] =
     Files[IO].deleteIfExists(file(Secrets.sha256Hex(secret))).void
 
-/** User tokens minted by the device flow; `<data>/tokens/<sha256>.json`. */
-final case class UserTokenRecord(userId: String, client: String, createdAt: String)
+/** User tokens minted by the device flow; `<data>/tokens/<sha256>.json`. A token lives
+  * [[UserTokens.lifetime]] from minting (`expiresAt`; a record without one predates expiry and is
+  * treated as expired) and can be revoked one at a time (logout) or all at once per user.
+  */
+final case class UserTokenRecord(
+    userId: String,
+    client: String,
+    createdAt: String,
+    expiresAt: Option[String]
+)
 object UserTokenRecord:
   given Codec[UserTokenRecord] = deriveCodec
 
 final class UserTokens(dir: Path):
+  val lifetime: FiniteDuration = 30.days
   private def file(hash: String) = dir / s"$hash.json"
   def mint(userId: String, client: String): IO[String] =
     for
       secret <- Secrets.token(32).map("npu_" + _)
       now <- IO.realTimeInstant
+      exp = now.plusMillis(lifetime.toMillis)
       _ <- JsonFiles.write(
         file(Secrets.sha256Hex(secret)),
-        UserTokenRecord(userId, client, now.toString)
+        UserTokenRecord(userId, client, now.toString, Some(exp.toString))
       )
     yield secret
+
+  /** The live token a secret names; an expired one is deleted and answered as unknown. */
   def resolve(secret: String): IO[Option[UserTokenRecord]] =
-    JsonFiles.read[UserTokenRecord](file(Secrets.sha256Hex(secret)))
+    val p = file(Secrets.sha256Hex(secret))
+    JsonFiles.read[UserTokenRecord](p).flatMap {
+      case None => IO.none
+      case Some(t) =>
+        IO.realTimeInstant.flatMap { now =>
+          if t.expiresAt.exists(e => Instant.parse(e).isAfter(now)) then IO.pure(Some(t))
+          else Files[IO].deleteIfExists(p).as(None)
+        }
+    }
+
+  def revoke(secret: String): IO[Unit] =
+    Files[IO].deleteIfExists(file(Secrets.sha256Hex(secret))).void
+
+  /** Revoke every token of one user. */
+  def revokeAll(userId: String): IO[Int] =
+    Files[IO].exists(dir).flatMap {
+      case false => IO.pure(0)
+      case true =>
+        Files[IO].list(dir).filter(_.fileName.toString.endsWith(".json")).evalFilter(p =>
+          JsonFiles.read[UserTokenRecord](p).attempt.map(_.toOption.flatten.exists(_.userId ==
+            userId))
+        ).evalMap(p => Files[IO].deleteIfExists(p)).compile.count.map(_.toInt)
+    }
 
 /** RFC 8628 device authorization grants. In memory: a code lives ten minutes and the server that
   * issued it is the one polled.
@@ -97,11 +131,12 @@ final class DeviceFlow(grants: Ref[IO, Map[String, DeviceGrant]], tokens: UserTo
 
   enum Poll:
     case Pending
+    case SlowDown
     case Granted(token: String, userId: String)
     case Denied
     case Expired
 
-  /** Polling faster than `interval` is answered with `pending` without consulting the grant. A
+  /** Polling faster than `interval` is answered with `slow_down` without consulting the grant. A
     * granted code is consumed: the token is minted exactly once.
     */
   def poll(deviceCode: String): IO[Poll] =
@@ -112,7 +147,7 @@ final class DeviceFlow(grants: Ref[IO, Map[String, DeviceGrant]], tokens: UserTo
           case Some(g) if !g.expiresAt.isAfter(now) => (m - deviceCode, Left(Poll.Expired))
           case Some(g)
               if g.lastPolled.exists(t => now.toEpochMilli - t.toEpochMilli < interval.toMillis) =>
-            (m.updated(deviceCode, g.copy(lastPolled = Some(now))), Left(Poll.Pending))
+            (m.updated(deviceCode, g.copy(lastPolled = Some(now))), Left(Poll.SlowDown))
           case Some(g) =>
             g.state match
               case DeviceState.Pending =>
@@ -127,6 +162,12 @@ final class DeviceFlow(grants: Ref[IO, Map[String, DeviceGrant]], tokens: UserTo
 
   /** Bind a user code to the approving user. Left = no such pending code. */
   def approve(userCode: String, userId: String): IO[Either[String, DeviceGrant]] =
+    settle(userCode, DeviceState.Granted(userId))
+
+  /** Refuse a user code: the CLI's next poll is `denied` and the code is consumed. */
+  def deny(userCode: String): IO[Either[String, DeviceGrant]] = settle(userCode, DeviceState.Denied)
+
+  private def settle(userCode: String, to: DeviceState): IO[Either[String, DeviceGrant]] =
     Secrets.normalizeUserCode(userCode) match
       case None => IO.pure(Left("malformed user code"))
       case Some(uc) =>
@@ -137,7 +178,7 @@ final class DeviceFlow(grants: Ref[IO, Map[String, DeviceGrant]], tokens: UserTo
             ) match
               case None => (m, Left("unknown or expired user code"))
               case Some(g) =>
-                val g2 = g.copy(state = DeviceState.Granted(userId))
+                val g2 = g.copy(state = to)
                 (m.updated(g.deviceCode, g2), Right(g2))
           }
         }

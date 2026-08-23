@@ -64,8 +64,25 @@ class Stage4Suite extends CatsEffectSuite:
 
   /** The whole publisher flow under `auth`; returns the commit response. */
   private def push(app: HttpApp[IO], auth: Auth, parent: Option[String] = None) =
+    bytes("reference/manifest.json").flatMap(m => pushBytes(app, auth, m, key, parent))
+  private def pushWith(app: HttpApp[IO], auth: Auth, manifest: Array[Byte]): IO[CommitResult] =
+    pushBytes(app, auth, manifest, key, None).flatMap { c =>
+      assertEquals(c.status, Status.Created)
+      decode[CommitResult](c)
+    }
+  private def pushedTo(app: HttpApp[IO], auth: Auth, to: ProjectKey): IO[CommitResult] =
+    bytes("reference/manifest.json").flatMap(pushBytes(app, auth, _, to, None)).flatMap { c =>
+      assertEquals(c.status, Status.Created)
+      decode[CommitResult](c)
+    }
+  private def pushBytes(
+      app: HttpApp[IO],
+      auth: Auth,
+      manifest: Array[Byte],
+      to: ProjectKey,
+      parent: Option[String]
+  ) =
     for
-      manifest <- bytes("reference/manifest.json")
       assets <- List("t1", "speech-effect", "speech-se", "speech-t", "speech-z").traverse(id =>
         bytes(s"reference/assets/$id.nii").map(id -> _)
       )
@@ -74,7 +91,7 @@ class Stage4Suite extends CatsEffectSuite:
       )
       created <- post(
         app,
-        "/api/v1/workspaces/rotman/projects/sherlock/upload-sessions",
+        s"/api/v1/workspaces/${to.workspace}/projects/${to.project}/upload-sessions",
         CreateUploadSession(Sha256.of(manifest).render, manifest.length.toLong, parent, inv),
         auth
       )
@@ -201,11 +218,11 @@ class Stage4Suite extends CatsEffectSuite:
           cookie(c)
         )
         _ = assertEquals(ok.status, Status.NoContent)
-        // polling faster than the interval is still "pending"
+        // polling faster than the interval is answered "slow_down" (RFC 8628)
         p2 <- post(app, "/api/v1/auth/device/token", DevicePoll(codes.deviceCode), anon).flatMap(
           decode[DeviceToken]
         )
-        _ = assertEquals(p2.status, "pending")
+        _ = assertEquals(p2.status, "slow_down")
         _ <- IO.sleep(5.2.seconds)
         p3 <- post(app, "/api/v1/auth/device/token", DevicePoll(codes.deviceCode), anon).flatMap(
           decode[DeviceToken]
@@ -226,6 +243,78 @@ class Stage4Suite extends CatsEffectSuite:
           decode[ProjectSummary]
         )
       yield assertEquals(proj.head, Some(r.revisionId))
+  }
+
+  server.test("device flow: a session can deny the code; the CLI's next poll is `denied`") {
+    app =>
+      for
+        codes <- post(app, "/api/v1/auth/device", DeviceStart("npub"), anon).flatMap(
+          decode[DeviceCodes]
+        )
+        c <- login(app)
+        denied <- post(app, "/api/v1/auth/device/deny", DeviceApprove(codes.userCode), cookie(c))
+        _ = assertEquals(denied.status, Status.NoContent)
+        p <- post(app, "/api/v1/auth/device/token", DevicePoll(codes.deviceCode), anon).flatMap(
+          decode[DeviceToken]
+        )
+        _ = assertEquals(p.status, "denied")
+        // the code is consumed: it cannot be approved afterwards
+        late <- post(app, "/api/v1/auth/device/approve", DeviceApprove(codes.userCode), cookie(c))
+      yield assertEquals(late.status, Status.BadRequest)
+  }
+
+  /** Mint a user token through the device flow (sleeping past the poll interval). */
+  private def userToken(app: HttpApp[IO], c: String): IO[String] =
+    for
+      codes <- post(app, "/api/v1/auth/device", DeviceStart("npub"), anon).flatMap(
+        decode[DeviceCodes]
+      )
+      _ <- post(app, "/api/v1/auth/device/approve", DeviceApprove(codes.userCode), cookie(c))
+      t <- post(app, "/api/v1/auth/device/token", DevicePoll(codes.deviceCode), anon).flatMap(
+        decode[DeviceToken]
+      )
+    yield t.token.get
+
+  serverWithDir.test("user tokens expire after 30 days and are revoked by logout or all at once") {
+    (dir, app) =>
+      for
+        c <- login(app)
+        t1 <- userToken(app, c)
+        t2 <- userToken(app, c)
+        ok <- get(app, "/api/v1/auth/me", bearer(t1))
+        _ = assertEquals(ok.status, Status.Ok)
+        // the stored record carries an expiry 30 days out
+        rec <- JsonFiles.read[UserTokenRecord](dir / "tokens" / s"${Secrets.sha256Hex(t1)}.json")
+        now <- IO.realTimeInstant
+        exp = java.time.Instant.parse(rec.get.expiresAt.get)
+        _ = assert(exp.isAfter(now.plusSeconds(29 * 86400)) &&
+          exp.isBefore(now.plusSeconds(31 * 86400)))
+        // an expired token is a generic 401
+        _ <- JsonFiles.write(
+          dir / "tokens" / s"${Secrets.sha256Hex(t1)}.json",
+          rec.get.copy(expiresAt = Some(now.minusSeconds(1).toString))
+        )
+        expired <- get(app, "/api/v1/auth/me", bearer(t1))
+        _ = assertEquals(expired.status, Status.Unauthorized)
+        e <- decode[ApiError](expired)
+        _ = assertEquals(e.message, "invalid token")
+        // logout on a bearer revokes that token only
+        out <- post(app, "/api/v1/auth/logout", Json.obj(), bearer(t2))
+        _ = assertEquals(out.status, Status.NoContent)
+        revoked <- get(app, "/api/v1/auth/me", bearer(t2))
+        _ = assertEquals(revoked.status, Status.Unauthorized)
+        sessionStill <- get(app, "/api/v1/auth/me", cookie(c))
+        _ = assertEquals(sessionStill.status, Status.Ok)
+        // DELETE auth/tokens revokes every token of the caller
+        t3 <- userToken(app, c)
+        t4 <- userToken(app, c)
+        all <- delete(app, "/api/v1/auth/tokens", cookie(c))
+        _ = assertEquals(all.status, Status.NoContent)
+        r3 <- get(app, "/api/v1/auth/me", bearer(t3))
+        r4 <- get(app, "/api/v1/auth/me", bearer(t4))
+        _ = assertEquals((r3.status, r4.status), (Status.Unauthorized, Status.Unauthorized))
+        anonAll <- delete(app, "/api/v1/auth/tokens", anon)
+      yield assertEquals(anonAll.status, Status.Unauthorized)
   }
 
   // ---------------------------------------------------------------- credentials
@@ -327,6 +416,31 @@ class Stage4Suite extends CatsEffectSuite:
       yield assertEquals(anonView.status, Status.Unauthorized)
   }
 
+  server.test("view state is capped at 256 KB per version and 200 versions per view") { app =>
+    for
+      c <- login(app)
+      r <- pushed(app, cookie(c))
+      big = Json.obj("blob" -> Json.fromString("x" * (256 * 1024 + 1)))
+      tooBig <-
+        post(app, s"/api/v1/revisions/${r.revisionId}/views", SaveView("big", big), cookie(c))
+      _ = assertEquals(tooBig.status, Status.BadRequest)
+      v <-
+        post(app, s"/api/v1/revisions/${r.revisionId}/views", SaveView("v", Json.obj()), cookie(c))
+          .flatMap(decode[SavedViewDetail])
+      bigUpdate <- put(app, s"/api/v1/views/${v.id}", UpdateView(big), cookie(c))
+      _ = assertEquals(bigUpdate.status, Status.BadRequest)
+      _ <- (2 to 200).toList.traverse_(i =>
+        put(app, s"/api/v1/views/${v.id}", UpdateView(Json.obj("i" -> Json.fromInt(i))), cookie(c))
+          .map(resp => assertEquals(resp.status, Status.Ok, s"version $i"))
+      )
+      full <- get(app, s"/api/v1/views/${v.id}", cookie(c)).flatMap(decode[SavedViewDetail])
+      _ = assertEquals(full.latest, 200)
+      over <- put(app, s"/api/v1/views/${v.id}", UpdateView(Json.obj()), cookie(c))
+      _ = assertEquals(over.status, Status.BadRequest)
+      still <- get(app, s"/api/v1/views/${v.id}", cookie(c)).flatMap(decode[SavedViewDetail])
+    yield assertEquals(still.latest, 200)
+  }
+
   // ---------------------------------------------------------------- share links
 
   server.test(
@@ -370,12 +484,34 @@ class Stage4Suite extends CatsEffectSuite:
         _ = assertEquals(missing.status, Status.NotFound)
         opened <- get(app, s"/api/v1/share/${link.secret}", anon)
         _ = assertEquals(opened.status, Status.Ok)
-        shared <- decode[SharedView](opened)
+        body <- opened.as[String]
+        shared <- IO.fromEither(io.circe.parser.decode[SharedView](body))
         _ = assertEquals(shared.view.id, v.id)
+        _ = assertEquals(shared.view.project, "sherlock")
         _ = assertEquals(shared.version.version, 1)
         _ = assertEquals(shared.revision.id, r.revisionId)
+        _ = assertEquals(shared.revision.message, None)
+        _ = assert(
+          shared.revision.committedAt.matches("\\d{4}-\\d{2}-\\d{2}"),
+          shared.revision.committedAt
+        )
         _ =
           assert(shared.revision.renditions.forall(_.headerUrl.contains(s"/share/${link.secret}/")))
+        // the presentation subset: no provenance, subjects, method payloads, owner or saver ids
+        me <- get(app, "/api/v1/auth/me", cookie(c)).flatMap(decode[Me])
+        _ = List(
+          "provenance",
+          "\"subject\"",
+          "temporalNoise",
+          "\"method\"",
+          "\"owner\"",
+          "\"savedBy\"",
+          me.user.id,
+          "\"sensitivity\""
+        ).foreach(needle =>
+          assert(!body.contains(needle), s"share response leaks '$needle'")
+        )
+        _ = assert(body.contains("\"title\""))
         hdr <- get(app, s"/api/v1/share/${link.secret}/renditions/speech-t/header", anon)
         _ = assertEquals(hdr.status, Status.Ok)
         body <- hdr.as[String]
@@ -413,6 +549,184 @@ class Stage4Suite extends CatsEffectSuite:
         _ = assertEquals(audit.find(_.action == "share.revoke").flatMap(_.subject), Some(link.id))
         anonAudit <- get(app, "/api/v1/workspaces/rotman/audit", anon)
       yield assertEquals(anonAudit.status, Status.Unauthorized)
+  }
+
+  server.test("a link can only be minted for a group-level revision") { app =>
+    for
+      c <- login(app)
+      manifest <- bytes("reference/manifest.json")
+      subjectLevel = new String(manifest, "UTF-8").replace(
+        "\"sensitivity\": \"group-level\"",
+        "\"sensitivity\": \"subject-level\""
+      ).getBytes("UTF-8")
+      _ = assert(!java.util.Arrays.equals(subjectLevel, manifest))
+      r <- pushWith(app, cookie(c), subjectLevel)
+      v <-
+        post(app, s"/api/v1/revisions/${r.revisionId}/views", SaveView("v", Json.obj()), cookie(c))
+          .flatMap(decode[SavedViewDetail])
+      refused <-
+        post(app, s"/api/v1/views/${v.id}/versions/1/links", CreateShareLink(None), cookie(c))
+      _ = assertEquals(refused.status, Status.BadRequest)
+      e <- decode[ApiError](refused)
+      _ = assertEquals(e.code, "bad_request")
+      links <- get(app, "/api/v1/workspaces/rotman/projects/sherlock/links", cookie(c))
+        .flatMap(decode[List[ShareLinkSummary]])
+    yield assertEquals(links, Nil)
+  }
+
+  // ---------------------------------------------------------------- workspaces are islands
+
+  private val keyB = ProjectKey("labb", "projb")
+  private val ownerB = "owner-b@example.org"
+  private val passwordB = "owner-b-password"
+  private def twoWorkspaces = ResourceFunFixture(
+    Files[IO].tempDirectory.evalMap(dir =>
+      Server.build(
+        dir,
+        key,
+        "http://test",
+        owner,
+        password,
+        legacyToken = None,
+        extra = List(Server.Bootstrap(keyB, ownerB, passwordB))
+      ).map(_.orNotFound)
+    )
+  )
+
+  twoWorkspaces.test(
+    "a member of A learns nothing about B; a viewer of A reads but cannot save or share"
+  ) { app =>
+    for
+      a <- login(app)
+      b <- login(app, ownerB, passwordB)
+      meB <- get(app, "/api/v1/auth/me", cookie(b)).flatMap(decode[Me])
+      _ = assertEquals(meB.memberships, List(Membership("labb", "owner")))
+      rA <- pushed(app, cookie(a))
+      rB <- pushedTo(app, cookie(b), keyB)
+      vA <-
+        post(app, s"/api/v1/revisions/${rA.revisionId}/views", SaveView("a", Json.obj()), cookie(a))
+          .flatMap(decode[SavedViewDetail])
+      vB <-
+        post(app, s"/api/v1/revisions/${rB.revisionId}/views", SaveView("b", Json.obj()), cookie(b))
+          .flatMap(decode[SavedViewDetail])
+      lA <- post(app, s"/api/v1/views/${vA.id}/versions/1/links", CreateShareLink(None), cookie(a))
+        .flatMap(decode[ShareLinkCreated])
+      lB <- post(app, s"/api/v1/views/${vB.id}/versions/1/links", CreateShareLink(None), cookie(b))
+        .flatMap(decode[ShareLinkCreated])
+      credA <- post(
+        app,
+        "/api/v1/workspaces/rotman/projects/sherlock/credentials",
+        CreateCredential("a-batch"),
+        cookie(a)
+      ).flatMap(decode[CredentialCreated])
+      // A on B's records: the same 404 as for records that do not exist
+      r1 <- get(app, s"/api/v1/revisions/${rB.revisionId}", cookie(a))
+      r2 <- get(app, s"/api/v1/revisions/${rB.revisionId}/provenance", cookie(a))
+      r3 <- get(app, s"/api/v1/revisions/${rB.revisionId}/renditions/speech-t/header", cookie(a))
+      r4 <- get(app, s"/api/v1/views/${vB.id}", cookie(a))
+      r5 <- put(app, s"/api/v1/views/${vB.id}", UpdateView(Json.obj()), cookie(a))
+      r6 <- delete(app, s"/api/v1/links/${lB.id}", cookie(a))
+      r7 <- post(app, s"/api/v1/views/${vB.id}/versions/1/links", CreateShareLink(None), cookie(a))
+      r8 <- get(app, s"/api/v1/revisions/${rB.revisionId}/views", cookie(a))
+      r9 <- delete(app, s"/api/v1/workspaces/labb/projects/projb/credentials/c-nope", cookie(a))
+      _ = assertEquals(
+        List(r1, r2, r3, r4, r5, r6, r7, r8, r9).map(_.status),
+        List.fill(9)(Status.NotFound)
+      )
+      // B's link is still alive: A's 404s did nothing
+      openB <- get(app, s"/api/v1/share/${lB.secret}", anon)
+      _ = assertEquals(openB.status, Status.Ok)
+      // A's credential on B's project: a scoping error for a legitimate principal → 403
+      cross <- post(
+        app,
+        "/api/v1/workspaces/labb/projects/projb/upload-sessions",
+        CreateUploadSession("sha256:" + "0" * 64, 1, None, Nil),
+        bearer(credA.secret)
+      )
+      _ = assertEquals(cross.status, Status.Forbidden)
+      crossRead <- get(app, "/api/v1/workspaces/labb/projects/projb", bearer(credA.secret))
+      _ = assertEquals(crossRead.status, Status.Forbidden)
+      // A's share link serves A's revision only
+      sharedA <- get(app, s"/api/v1/share/${lA.secret}", anon).flatMap(decode[SharedView])
+      _ = assertEquals(sharedA.revision.id, rA.revisionId)
+      _ = assert(sharedA.revision.renditions.forall(_.headerUrl.contains(s"/share/${lA.secret}/")))
+      hdrA <- get(app, s"/api/v1/share/${lA.secret}/renditions/speech-t/header", anon)
+      _ = assertEquals(hdrA.status, Status.Ok)
+      noSuch <- get(app, s"/api/v1/share/${lA.secret}/renditions/not-in-a/header", anon)
+      _ = assertEquals(noSuch.status, Status.NotFound)
+      // members API: A's owner adds a viewer (new user, one-time password) and attaches B's owner
+      viewerAdded <- post(
+        app,
+        "/api/v1/workspaces/rotman/members",
+        AddMember("viewer@example.org", "viewer"),
+        cookie(a)
+      )
+      _ = assertEquals(viewerAdded.status, Status.Created)
+      viewer <- decode[MemberAdded](viewerAdded)
+      _ = assertEquals(viewer.role, "viewer")
+      _ = assert(viewer.oneTimePassword.exists(_.length >= 16))
+      attached <-
+        post(app, "/api/v1/workspaces/rotman/members", AddMember(ownerB, "member"), cookie(a))
+          .flatMap(decode[MemberAdded])
+      _ = assertEquals((attached.user.email, attached.oneTimePassword), (ownerB, None))
+      members <- get(app, "/api/v1/workspaces/rotman/members", cookie(a))
+        .flatMap(decode[List[MemberSummary]])
+      _ = assertEquals(
+        members.map(m => (m.user.email, m.role)).toSet,
+        Set((owner, "owner"), ("viewer@example.org", "viewer"), (ownerB, "member"))
+      )
+      byB <- get(app, "/api/v1/workspaces/labb/members", cookie(a))
+      _ = assertEquals(byB.status, Status.Forbidden)
+      badRole <-
+        post(app, "/api/v1/workspaces/rotman/members", AddMember("x@example.org", "god"), cookie(a))
+      _ = assertEquals(badRole.status, Status.BadRequest)
+      // the viewer reads A but cannot save a view or mint a link
+      vc <- login(app, "viewer@example.org", viewer.oneTimePassword.get)
+      canRead <- get(app, s"/api/v1/revisions/${rA.revisionId}", cookie(vc))
+      _ = assertEquals(canRead.status, Status.Ok)
+      canReadView <- get(app, s"/api/v1/views/${vA.id}", cookie(vc))
+      _ = assertEquals(canReadView.status, Status.Ok)
+      noSave <- post(
+        app,
+        s"/api/v1/revisions/${rA.revisionId}/views",
+        SaveView("x", Json.obj()),
+        cookie(vc)
+      )
+      _ = assertEquals(noSave.status, Status.Forbidden)
+      noUpdate <- put(app, s"/api/v1/views/${vA.id}", UpdateView(Json.obj()), cookie(vc))
+      _ = assertEquals(noUpdate.status, Status.Forbidden)
+      noLink <-
+        post(app, s"/api/v1/views/${vA.id}/versions/1/links", CreateShareLink(None), cookie(vc))
+      _ = assertEquals(noLink.status, Status.Forbidden)
+      noPublish <- post(
+        app,
+        "/api/v1/workspaces/rotman/projects/sherlock/upload-sessions",
+        CreateUploadSession("sha256:" + "0" * 64, 1, None, Nil),
+        cookie(vc)
+      )
+      _ = assertEquals(noPublish.status, Status.Forbidden)
+      // B's owner, now a plain member of A, may read A but not its audit
+      bReadsA <- get(app, s"/api/v1/revisions/${rA.revisionId}", cookie(b))
+      _ = assertEquals(bReadsA.status, Status.Ok)
+      bAuditA <- get(app, "/api/v1/workspaces/rotman/audit", cookie(b))
+      _ = assertEquals(bAuditA.status, Status.Forbidden)
+      // A's audit holds none of B's events
+      auditA <-
+        get(app, "/api/v1/workspaces/rotman/audit", cookie(a)).flatMap(decode[List[AuditEvent]])
+      _ = assert(auditA.nonEmpty)
+      _ = assert(auditA.forall(_.workspace == "rotman"))
+      _ = assert(
+        !auditA.exists(e =>
+          e.subject.contains(rB.revisionId) || e.subject.contains(vB.id) ||
+            e.subject.contains(lB.id)
+        ),
+        auditA
+      )
+      _ = assert(auditA.exists(_.action == "member.add"))
+      auditB <-
+        get(app, "/api/v1/workspaces/labb/audit", cookie(b)).flatMap(decode[List[AuditEvent]])
+      _ = assert(auditB.exists(_.action == "share.create"))
+    yield assert(auditB.forall(_.workspace == "labb"))
   }
 
   // ---------------------------------------------------------------- provenance
