@@ -64,6 +64,12 @@ final case class Loaded(
 
   def isPlaced(surfaceId: String): Boolean = placedSurfaces.values.exists(_.id == surfaceId)
 
+  /** Decoded left/right surfaces that lost their hemisphere's slot: declared, but not drawn. */
+  def unplacedSurfaces: List[SurfaceDecl] =
+    decodedSurfaces
+      .filter(d => (d.hemisphere == "left" || d.hemisphere == "right") && !isPlaced(d.id))
+      .sortBy(_.id)
+
   /** Result fields with at least one drawable representation, in manifest order. */
   def fields: List[ResultField] =
     manifest.resultFields

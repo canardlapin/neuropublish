@@ -188,10 +188,7 @@ final class WorkspaceStore(
   /** Decoded left/right surfaces that lost their hemisphere's slot to another surface: the pane has
     * one slot per hemisphere, so these are declared but not drawn.
     */
-  val unplacedSurfaces: List[SurfaceDecl] =
-    loaded.surfaces.values.map(_._1)
-      .filter(d => (d.hemisphere == "left" || d.hemisphere == "right") && !loaded.isPlaced(d.id))
-      .toList.sortBy(_.id)
+  val unplacedSurfaces: List[SurfaceDecl] = loaded.unplacedSurfaces
 
   /** Why the two panes must not share a cursor, when a placed surface and the underlay declare
     * different spaces (B1's client half). Constant for the revision: spaces are facts of the bytes,
