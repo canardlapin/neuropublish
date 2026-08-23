@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# `npub` launcher for a checkout: exports the publisher CLI's runtime classpath
+# once (sbt is slow to start) into target/npub.classpath and then runs
+# `java -cp … neuropublish.npub.Main "$@"`. Delete the cache, or set
+# NPUB_REFRESH=1, after changing Scala sources. The R client
+# (clients/r/neuropublish) finds this script when NPUB_BIN is unset and no
+# `npub` is on PATH.
+set -euo pipefail
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cache="$root/target/npub.classpath"
+if [[ ! -s "$cache" || "${NPUB_REFRESH:-}" == "1" ]]; then
+  mkdir -p "$root/target"
+  (cd "$root" && sbt --batch -Dsbt.supershell=false -Dsbt.log.noformat=true \
+    "publisherCli/compile" "export publisherCli/Runtime/fullClasspath" 2>/dev/null \
+    | grep -v '^\[' | grep -E '(^|:)[^:]*/' | tail -n 1 > "$cache")
+  [[ -s "$cache" ]] || { echo "scripts/npub: could not export the classpath; run sbt publisherCli/compile first" >&2; rm -f "$cache"; exit 2; }
+fi
+exec java -cp "$(cat "$cache")" neuropublish.npub.Main "$@"

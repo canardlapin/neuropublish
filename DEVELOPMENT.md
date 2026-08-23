@@ -260,3 +260,45 @@ cycle) and `persistence`; `semantic-registry` and `ingestion` are still to come.
 `modules/conformance/fixtures/reference` is the hand-written reference bundle;
 `fixtures/invalid/*.json` each pair with a `.expect` file naming the admission
 error the manifest must produce.
+
+## `scripts/npub` launcher
+
+`scripts/npub validate …` runs the publisher CLI without waiting for sbt on
+every call: the first run exports `publisherCli`'s runtime classpath into
+`target/npub.classpath` (one sbt start), later runs are
+`java -cp … neuropublish.npub.Main "$@"`. Delete the cache or set
+`NPUB_REFRESH=1` after changing Scala sources. The SLF4J "no providers"
+lines on stderr are harmless.
+
+## R client
+
+`clients/r/neuropublish/` is the Stage 5 R package (`neuropublish`): plain-list
+builders for the core 0.1 vocabulary (`np_manifest`, `np_domain_volume` from a
+`neuroim2::NeuroSpace` with the ADR 0005 fingerprint computed in R,
+`np_asset_volume`, `np_analysis`, `np_field`, `np_underlay`, `np_warning`,
+`np_provenance`, `np_measure$…`), `np_write_bundle` (staging bundle under the
+byte profile; NaN/Inf refused), and wrappers over the CLI: `np_pack`,
+`np_validate` (problems as a `pointer`/`message` data frame), `np_login`,
+`np_push` (stale parent → an `np_stale_parent` error carrying `head`). The
+`as_neuropublish()` generic is the contract domain packages (fmrigds, rMVPA,
+neuromosaic) implement; `np_publish()` is as_neuropublish → write → pack →
+push. The bundle and the CLI never require R.
+
+`npub` is resolved from `NPUB_BIN`, then `npub` on the `PATH`, then
+`scripts/npub` of the checkout found by walking up from the working directory
+(so tests run in place find it).
+
+```
+cd clients/r && R CMD build neuropublish && R CMD check --as-cran neuropublish_0.1.0.tar.gz
+Rscript -e 'testthat::test_local("clients/r/neuropublish")'          # unit + npub tests
+NPUB_SERVER=http://127.0.0.1:8090 NPUB_PROJECT=rotman/sherlock \
+  Rscript -e 'testthat::test_local("clients/r/neuropublish", filter = "e2e")'
+```
+
+The end-to-end test expects a backend like the one `scripts/e2e.sh` starts
+(`NP_DATA_DIR=$(mktemp -d) NP_PORT=8090 sbt backend/run`) and a credential the
+CLI can use: `scripts/npub login --server …` or a project credential in
+`NP_TOKEN`. It publishes a first revision, proves the idempotent re-push and
+the stale-parent rejection, and publishes a second revision on the reported
+head. The vignette (`publishing.Rmd`) builds without a server and without
+`npub`; its pack/validate chunks run when `npub` is found.

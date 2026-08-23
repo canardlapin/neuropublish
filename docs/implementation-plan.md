@@ -769,6 +769,21 @@ pass; atlas lookup; surface rendition fidelity (Stage 5).
   session information, and Git identity;
 - R-to-Scala golden fixtures and privacy checks.
 
+Status (2026-08-23), R client core: done in this repository as
+`clients/r/neuropublish` (CRAN-clean `R CMD check --as-cran`). It holds the
+neutral half of the R track: plain-list builders for the core 0.1 vocabulary,
+`np_domain_volume()` with the ADR 0005 fingerprint recomputed in R (tests pin
+it to the reference and Julia fixtures), `np_write_bundle()` under the byte
+profile, `np_pack`/`np_validate`/`np_login`/`np_push` over the `npub` CLI
+(`scripts/npub` launcher; stale parent → `np_stale_parent` error with the
+head), the `as_neuropublish()` generic with its contract and a reference
+method for a list of `NeuroVol`s, `np_publish()` as the one high-level call,
+and a vignette that rebuilds the Julia producer's bundle from `neuroim2`
+volumes. Not here, by design: the `fmrigds`, `fmrireg`, `rMVPA`, and
+`neuromosaic` methods (they live in those packages and implement
+`as_neuropublish()`; the vignette shows what each returns), and the
+R-to-Scala golden fixtures and privacy checks, which land with those methods.
+
 ### Exit criteria
 
 - one result switches among volume, surface, and hybrid layouts without

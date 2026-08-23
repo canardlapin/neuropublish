@@ -1,0 +1,287 @@
+---
+title: "Publishing a result from R"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Publishing a result from R}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+A Neuropublish publication is a *bundle*: a directory with a `manifest.json`
+written to a public schema and the NIfTI files it names. The manifest says
+what each volume *is* (which analysis, which estimand, which measure, on which
+grid), what the viewer should show first, and where the numbers came from.
+Transport is the job of the reference command-line tool `npub`; this package
+builds the manifest as plain R lists and wraps the tool. Neither the bundle nor
+`npub` needs R.
+
+This vignette builds the same bundle the Julia conformance producer writes
+(`modules/conformance/julia/producer.jl`) from `neuroim2` volumes, validates
+it, and publishes it when a server is available.
+
+```{r setup}
+library(neuropublish)
+```
+
+## The volumes
+
+`np_synthetic_volumes()` evaluates the producer's formulas on its
+16 × 16 × 12 grid (2 mm, origin −15, −15, −11), rounded to float32, so every
+voxel value is known: a T1-like underlay and an effect, *t*, and *z* map.
+
+```{r volumes}
+vols <- np_synthetic_volumes()
+names(vols)
+round(vols$`speech-t`[8, 8, 6], 4)
+neuroim2::space(vols$`speech-t`)
+```
+
+## The manifest
+
+A manifest starts with a title, a synopsis and its sensitivity (only
+`group-level` revisions can be link-shared). Each builder returns a plain list
+that serializes to exactly one record of the schema.
+
+```{r manifest}
+m <- np_manifest(
+  "Julia producer — synthetic speech group model",
+  "The Julia conformance bundle, rebuilt from R.",
+  sensitivity = "group-level"
+)
+```
+
+### Domain
+
+The grid is described once, as a `volume-grid` domain. The open *descriptor*
+carries shape and affine (from `neuroim2::trans()`); the exact *key* carries
+the ADR 0005 structural fingerprint, a SHA-256 over a documented binary
+preimage, which lets the server tell whether two results share a grid without
+parsing anyone's payload. R, Julia and Scala compute the same bytes:
+
+```{r domain}
+dom <- np_domain_volume(neuroim2::space(vols$t1), id = "grid-2mm")
+dom$key$structuralFingerprint
+identical(
+  dom$key$structuralFingerprint,
+  "sha256:aa1d8cdb290b7739ff086b1f380552f59366c8671dc33425716abd5f2bce7687"
+) # the value in fixtures/julia/manifest.json
+m <- np_add(m, "domains", dom)
+```
+
+### Assets
+
+`np_asset_volume()` writes a `NeuroVol` to NIfTI in a staging directory (or
+references an existing file) and records its `path`. Content identity
+(`digest`, `size`) is filled in later by `npub pack`, which hashes the bytes.
+
+```{r assets}
+staging <- file.path(tempdir(), "vignette-staging")
+m <- np_add(m, "assets", np_asset_volume("t1", vols$t1, staging = staging, catalog = "synthetic:r/t1"))
+for (id in c("speech-effect", "speech-t", "speech-z")) {
+  m <- np_add(m, "assets", np_asset_volume(id, vols[[id]], staging = staging))
+}
+m$assets[[1]]
+```
+
+### Analysis, fields, underlay
+
+An analysis declares its estimands; a result field is one measure of one
+estimand on one domain. The method is an *open record*: a schema reference
+from your own namespace plus a payload the server keeps but does not
+interpret. Measures come from `np_measure`. A `publishedDisplay` is a
+recommendation for the viewer, never an inferential decision.
+
+```{r analysis}
+m <- np_add(m, "analyses", np_analysis("group-model", "Group model · speech (synthetic)",
+  method = np_record("org.example.r/reducer/mean", "0.1", list(weights = "equal", inputs = 12)),
+  sample_size = 12,
+  estimands = list(np_estimand("speech", "speech coefficient", order = 1))
+))
+m <- np_add(m, "resultFields", np_field("speech-effect", "speech", np_measure$effect, "grid-2mm",
+  representations = list(np_volume_rep("speech-effect")), order = 1
+))
+m <- np_add(m, "resultFields", np_field("speech-t", "speech", np_measure$t_statistic, "grid-2mm",
+  representations = list(np_volume_rep("speech-t")), order = 2,
+  published_display = np_display(np_threshold("two-sided", 2.5), np_window(-6, 6, centre = 0), "cold-hot")
+))
+m <- np_add(m, "resultFields", np_field("speech-z", "speech", np_measure$z_statistic, "grid-2mm",
+  representations = list(np_volume_rep("speech-z")), order = 3,
+  published_display = np_display(np_threshold("two-sided", 2.3), np_window(-5, 5, centre = 0), "cold-hot")
+))
+m <- np_add(m, "underlays", np_underlay("t1", "grid-2mm", "Synthetic T1"))
+```
+
+### Provenance and warnings
+
+Provenance is a small graph of entities and activities; activities are open
+records too (here the `fmrireg` analysis-receipt vocabulary the reference
+bundle uses). A warning names what it concerns.
+
+```{r provenance}
+receipt <- function(subject, noise) {
+  np_record("org.bbuchsbaum.fmrireg/analysis-receipt", "1.0",
+    list(subject = subject, temporalNoise = noise, drift = "cosine-128s", hrf = "spmg1"),
+    digest = "sha256:aa00000000000000000000000000000000000000000000000000000000000001"
+  )
+}
+m$provenance <- np_provenance(
+  entities = list(np_entity("raw", "Synthetic raw data")),
+  activities = list(
+    np_activity("first-level-01", receipt("01", "AR(2)")),
+    np_activity("first-level-02", receipt("02", "AR(1)")),
+    np_activity("denoise", np_record("org.example.r/denoise", "0.1",
+      list(method = "wavelet", levels = 3, threshold = 0.05)
+    ))
+  ),
+  edges = list(
+    np_edge("raw", "first-level-01"), np_edge("raw", "first-level-02"),
+    np_edge("first-level-01", "denoise"), np_edge("first-level-02", "denoise"),
+    np_edge("denoise", "speech-t")
+  )
+)
+m <- np_add(m, "warnings", np_warning("heterogeneous-temporal-noise",
+  "First-level temporal noise models differ across inputs.",
+  concerns = list(analysis = "group-model")
+))
+```
+
+### Extension fields
+
+The manifest is a list: add what your package needs. Unknown fields are kept
+by the writer, by `npub pack`, and by the server (value preservation, ADR
+0001).
+
+```{r extension}
+m$`x-r-client` <- list(version = "0.1", note = "unknown top-level extension")
+```
+
+## Writing, packing, validating
+
+`np_write_bundle()` writes the *staging* bundle under the byte profile (UTF-8,
+no byte-order mark, finite numbers only: a `NaN` is refused with its JSON
+Pointer). `npub pack` then hashes the files into a normalized bundle, and
+`npub validate` runs the server's admission on the result.
+
+```{r write}
+work <- file.path(tempdir(), "vignette-bundle")
+unlink(work, recursive = TRUE)
+staged <- np_write_bundle(m, file.path(work, "staging"))
+list.files(staged, recursive = TRUE)
+```
+
+```{r inspect}
+written <- np_read_manifest(staged)
+str(written$domains[[1]]$key)
+written$assets[[2]]
+written$`x-r-client`
+```
+
+The remaining steps need `npub` (found through `NPUB_BIN`, the `PATH`, or a
+Neuropublish checkout's `scripts/npub`); the chunks below run only when it is
+available.
+
+```{r pack, eval = np_has_npub()}
+packed <- np_pack(staged, file.path(work, "bundle.npub"))
+packed$digest
+packed$assets
+problems <- np_validate(packed$dir)
+nrow(problems) # zero rows: admitted
+attr(problems, "digest")
+```
+
+A manifest that breaks a rule comes back as rows of JSON Pointer and message:
+
+```{r invalid, eval = np_has_npub()}
+bad <- np_read_manifest(packed$dir)
+bad$resultFields[[1]]$estimand <- "no-such-estimand"
+np_write_bundle(bad, file.path(work, "bad"))
+np_validate(file.path(work, "bad"))
+```
+
+## Publishing
+
+After a one-time `np_login(server)` (device flow: the CLI prints a URL and a
+code you approve in any browser), `np_push()` uploads only the objects the
+server lacks and commits one immutable revision. Batch jobs use a
+project-scoped publisher credential in `NP_TOKEN` instead of a login. This
+chunk runs only when `NPUB_SERVER` is set.
+
+```{r push, eval = nzchar(Sys.getenv("NPUB_SERVER")) && np_has_npub()}
+server <- Sys.getenv("NPUB_SERVER")
+project <- Sys.getenv("NPUB_PROJECT", "rotman/sherlock")
+r <- np_push(packed$dir, project, server, message = "R vignette")
+r$revision
+r$view_url
+```
+
+A second push with a parent that is no longer the head is rejected with the
+current head; the error has class `np_stale_parent` and a `head` field:
+
+```{r stale, eval = FALSE}
+tryCatch(
+  np_push(packed$dir, project, server, parent = "some-old-revision"),
+  np_stale_parent = function(e) e$head
+)
+```
+
+## One call: `np_publish()` and `as_neuropublish()`
+
+`as_neuropublish()` is the generic a domain package implements: it returns a
+`neuropublish_result` (a manifest whose assets carry `path`s, plus the asset
+list). `np_publish()` is `as_neuropublish()` → write → pack → push. The
+reference method for a named list of `NeuroVol`s builds the structure above
+from a measure map:
+
+```{r publish-list}
+r <- as_neuropublish(vols,
+  title = "Synthetic speech model", synopsis = "From a list of volumes.",
+  measures = c("speech-effect" = np_measure$effect, "speech-t" = np_measure$t_statistic,
+    "speech-z" = np_measure$z_statistic),
+  estimand = "speech", estimand_label = "speech coefficient",
+  underlay = "t1", underlay_label = "Synthetic T1", domain_id = "grid-2mm",
+  staging = staging
+)
+r
+```
+
+```{r publish, eval = FALSE}
+np_publish(vols, "rotman/sherlock", server = "http://127.0.0.1:8080",
+  title = "Synthetic speech model", synopsis = "From a list of volumes.",
+  measures = c("speech-t" = np_measure$t_statistic)
+)
+```
+
+### What the domain packages' methods return
+
+The methods live in the domain packages, not here. Each returns the same
+`neuropublish_result`; what differs is what it knows:
+
+* `as_neuropublish.fmrigds_result` (fmrigds): one analysis per reducer
+  (`method = np_record("org.bbuchsbaum.fmrigds/reducer/<name>", ...)` with
+  the reducer's options as payload, `sample_size` from the inputs), one
+  estimand per contrast, and one field per emitted map with the right measure
+  (`effect`, `standard_error`, `t_statistic`, `z_statistic`); a
+  `np_warning()` for heterogeneous first-level models, and a `provenance`
+  whose activities are the inputs' `fmrireg` receipts
+  (`org.bbuchsbaum.fmrireg/analysis-receipt@1.0`) and whose edges lead from
+  the raw dataset through the receipts and the reducer to the published
+  fields.
+* `as_neuropublish.rMVPA_result` (rMVPA): one analysis per model with the
+  model specification as the method payload, estimands for the performance
+  metrics, fields with `np_measure$accuracy` / `correlation` (or the package's
+  own measure ids for what the protocol does not name), and provenance
+  activities carrying the runtime context, session information, and Git
+  identity rMVPA already records.
+* `neuromosaic::publish()` calls `np_publish()` on the report's result and
+  keeps the static Quarto output as a companion artifact, so a static export
+  and the interactive publication come from one description.
+
+Every method ends the same way:
+
+```{r contract, eval = FALSE}
+np_result(manifest) # manifest$assets entries carry `path`; np_publish() does the rest
+```
