@@ -1,0 +1,8 @@
+^.*\.Rproj$
+^\.Rproj\.user$
+^LICENSE\.md$
+^\.Rcheck$
+^.*\.Rcheck$
+^.*\.tar\.gz$
+^doc$
+^Meta$

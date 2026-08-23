@@ -21,6 +21,12 @@ local.sbt
 *.local.conf
 .env
 
+# R client build artifacts
+clients/r/*.Rcheck/
+clients/r/*.tar.gz
+clients/r/neuropublish/doc/
+clients/r/neuropublish/Meta/
+
 # os / editors
 .DS_Store
 .idea/
