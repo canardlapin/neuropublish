@@ -10,7 +10,7 @@ object ManifestChecks:
   def all(m: Manifest): List[Problem] =
     uniqueIds(m) ++ referenceClosure(m) ++ estimandClosure(m) ++ orders(m) ++ measures(m) ++
       sensitivity(m) ++ warningScopes(m) ++ openRecords(m) ++ domains(m) ++ surfaces(m) ++
-      provenanceEdges(m)
+      spaces(m) ++ provenanceEdges(m)
 
   private def dupes(pointer: Int => String, ids: List[String], what: String): List[Problem] =
     ids.zipWithIndex.groupBy(_._1).toList.filter(_._2.size > 1).flatMap { (id, occ) =>
@@ -202,16 +202,62 @@ object ManifestChecks:
         case _ => Nil
     }
 
+  /** How a domain reads as a surface support: a readable surface-vertices payload, a
+    * surface-vertices descriptor whose payload does not read (already reported under
+    * `/domains/i/descriptor/payload` by [[domains]]), or not a surface-vertices domain at all.
+    * Keeping the three apart is what lets a surface say the accurate thing about its domain.
+    */
+  enum SurfaceSupport:
+    case Vertices(payload: SurfaceVertices.Payload)
+    case Unreadable
+    case NotSurfaceVertices
+
+  /** Every domain's surface support, in `domains[]` order. */
+  private def supports(m: Manifest): List[SurfaceSupport] =
+    m.domains.zipWithIndex.map { (d, i) =>
+      TrustedSchemas.interpret(s"/domains/$i/descriptor", d.descriptor) match
+        case Interpretation.Understood(r, _)
+            if r.schema.id == TrustedSchemas.SurfaceVerticesV1.id =>
+          SurfaceVertices.readPayload("", r.payload).fold(
+            _ => SurfaceSupport.Unreadable,
+            SurfaceSupport.Vertices.apply
+          )
+        case _ => SurfaceSupport.NotSurfaceVertices
+    }
+
+  def surfaceSupport(m: Manifest, id: String): Option[SurfaceSupport] =
+    m.domains.zip(supports(m)).collectFirst { case (d, s) if d.id == id => s }
+
   /** The trusted surface-vertices payload of domain `id`, when it is one and reads. */
   def surfaceDomain(m: Manifest, id: String): Option[SurfaceVertices.Payload] =
-    m.domains.zipWithIndex.collectFirst {
-      case (d, i) if d.id == id =>
-        TrustedSchemas.interpret(s"/domains/$i/descriptor", d.descriptor) match
-          case Interpretation.Understood(r, _)
-              if r.schema.id == TrustedSchemas.SurfaceVerticesV1.id =>
-            SurfaceVertices.readPayload("", r.payload).toOption
-          case _ => None
-    }.flatten
+    surfaceSupport(m, id).collect { case SurfaceSupport.Vertices(p) => p }
+
+  /** The `space` of every trusted volume-grid domain whose payload reads, in `domains[]` order. */
+  private def volumeSpaces(m: Manifest): List[String] =
+    m.domains.zipWithIndex.flatMap { (d, i) =>
+      TrustedSchemas.interpret(s"/domains/$i/descriptor", d.descriptor) match
+        case Interpretation.Understood(r, _) if r.schema.id == TrustedSchemas.VolumeGridV1.id =>
+          VolumeGrid.readPayload("", r.payload).toOption.map(_.space)
+        case _ => None
+    }.distinct
+
+  /** A surface and a volume in one revision are linked by world millimetres — a surface pick moves
+    * the volume cursor and back — which means something only when both are in the same space. A
+    * `surface-vertices` domain whose `space` is not every `volume-grid` domain's `space` is
+    * refused at its `space` member (SPEC §6, "Spaces"); a manifest with no volume domain has
+    * nothing to disagree with.
+    */
+  def spaces(m: Manifest): List[Problem] =
+    val volume = volumeSpaces(m)
+    if volume.isEmpty then Nil
+    else
+      m.domains.zip(supports(m)).zipWithIndex.collect {
+        case ((_, SurfaceSupport.Vertices(p)), i) if volume != List(p.space) =>
+          Problem(
+            s"/domains/$i/descriptor/payload/space",
+            s"surface space '${p.space}' is not the volume space ${volume.map(v => s"'$v'").mkString(" or ")}; a surface and a volume in one revision must be in the same space"
+          )
+      }
 
   /** Surfaces sit on a surface-vertices domain of their hemisphere; a surface representation names
     * a declared surface of its hemisphere, and its `derivation`, when present, a provenance
@@ -219,28 +265,55 @@ object ManifestChecks:
     * surface's triangles realize the domain's key — is verified at ingestion (SPEC §6).
     */
   def surfaces(m: Manifest): List[Problem] =
-    val declared = m.domains.map(_.id).toSet
     val activities = provenanceIds(m, "activities").toSet
+    // an asset renders as one thing: a geometry, a volume, or a vertex field. Two roles on one
+    // asset silently keep the first rendition target and drop the rest, and several surfaces on
+    // one asset would take one of their hemispheres for the whole rendition (SPEC §5).
+    val assetRole: Map[String, String] =
+      (m.underlays.map(u => u.asset -> "an underlay") ++
+        m.resultFields.flatMap(f =>
+          f.representations.collect {
+            case r if r.kind == "volume" => r.asset -> s"a volume representation of '${f.id}'"
+            case r if r.kind == "surface" =>
+              r.asset -> s"the vertex-field asset of a surface representation of '${f.id}'"
+          }
+        )).toMap
     val onSurfaces = m.surfaces.zipWithIndex.flatMap { (s, si) =>
       val at = s"/surfaces/$si"
       val validHemisphere = SurfaceVertices.Hemispheres(s.hemisphere)
       val hemisphere = Option.when(!validHemisphere)(
         Problem(s"$at/hemisphere", s"hemisphere must be 'left' or 'right', not '${s.hemisphere}'")
       )
-      val domain = surfaceDomain(m, s.domain) match
-        case Some(p) if p.hemisphere != s.hemisphere && validHemisphere =>
+      val domain = surfaceSupport(m, s.domain) match
+        case Some(SurfaceSupport.Vertices(p))
+            if p.hemisphere != s.hemisphere && validHemisphere =>
           Some(Problem(
             s"$at/domain",
             s"surface is the ${s.hemisphere} hemisphere but domain '${s.domain}' is ${p.hemisphere}"
           ))
-        case Some(_) => None
-        case None if declared(s.domain) =>
+        case Some(SurfaceSupport.Vertices(_)) => None
+        // the payload's own problems are reported under /domains/i/descriptor/payload; saying
+        // "not a surface-vertices domain" here would be both wrong and a second voice on one fault
+        case Some(SurfaceSupport.Unreadable) => None
+        case Some(SurfaceSupport.NotSurfaceVertices) =>
           Some(Problem(
             s"$at/domain",
             s"domain '${s.domain}' is not a trusted surface-vertices domain"
           ))
         case None => None // undeclared: reported by the reference closure
-      List(hemisphere, domain).flatten
+      val shared = m.surfaces.take(si).find(_.asset == s.asset).map(first =>
+        Problem(
+          s"$at/asset",
+          s"asset '${s.asset}' already backs surface '${first.id}'; an asset backs at most one surfaces[] entry"
+        )
+      )
+      val role = assetRole.get(s.asset).map(what =>
+        Problem(
+          s"$at/asset",
+          s"asset '${s.asset}' is also $what; an asset is a surface geometry or a volume or a vertex field, not two of them"
+        )
+      )
+      List(hemisphere, domain, shared, role).flatten
     }
     val onReps = m.resultFields.zipWithIndex.flatMap((f, fi) =>
       f.representations.zipWithIndex.flatMap { (r, ri) =>
