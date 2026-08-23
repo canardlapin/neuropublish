@@ -34,6 +34,11 @@ object WorkspaceLayout:
 
   private def clamp(f: Double) = math.min(0.9, math.max(0.05, f))
 
+  /** The divider is kept at the URL's precision (`sf=0.4123`, four decimals), so
+    * `ViewUrl.apply(ViewUrl.encode(w)) == w` holds exactly for any state a drag produced.
+    */
+  private def quantise(f: Double) = math.round(f * 1e4) / 1e4
+
   /** Pure reducer; never produces an invalid layout from a valid one. */
   def reduce(l: WorkspaceLayout, a: Action): WorkspaceLayout = a match
     case Action.SetPreset(p) => l.copy(preset = p)
@@ -44,4 +49,5 @@ object WorkspaceLayout:
       val nf = math.min(clamp(f), 0.95 - l.navigatorFraction)
       l.copy(inspectorFraction = nf)
     case Action.ResizeDrawer(f) => l.copy(drawerFraction = clamp(f))
-    case Action.ResizeSplit(f) => if f.isNaN then l else l.copy(splitFraction = clamp(f))
+    case Action.ResizeSplit(f) =>
+      if f.isNaN then l else l.copy(splitFraction = quantise(clamp(f)))

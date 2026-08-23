@@ -39,11 +39,38 @@ final case class Loaded(
     volumes: Map[String, NeuroVol[Double]],
     summaries: Map[String, ScalarSummary], // by asset id: volumes and vertex fields
     surfaces: Map[String, (SurfaceDecl, SurfaceGeometry)], // by surface id (e.g. "lh-pial")
-    vertexFields: Map[String, SurfaceField[Double]] // by asset id
+    vertexFields: Map[String, SurfaceField[Double]], // by asset id
+    surfaceSpaces: Map[String, String] = Map.empty // by surface id: the rendition header's `space`
 ):
   private val surfaceRepsByField: Map[String, List[SurfaceRep]] = Loaded.surfaceReps(manifest)
 
-  /** Result fields with at least one ready representation, in manifest order. */
+  /** Declared surfaces whose geometry decoded, in manifest order. */
+  private val decodedSurfaces: List[SurfaceDecl] =
+    manifest.surfaces.map(_.id).flatMap(surfaces.get).map(_._1)
+
+  /** Surface representations whose vertex field and surface geometry both decoded, placed or not.
+    */
+  private def decodedSurfaceRepsOf(f: ResultField): List[SurfaceRep] =
+    surfaceRepsByField.getOrElse(f.id, Nil).filter(r =>
+      vertexFields.contains(r.asset) && surfaces.contains(r.surface)
+    )
+
+  /** The surface occupying each hemisphere slot ("left" | "right"): `SurfacePlacement`'s rule. */
+  val placedSurfaces: Map[String, SurfaceDecl] =
+    SurfacePlacement.place(
+      decodedSurfaces,
+      manifest.resultFields.flatMap(decodedSurfaceRepsOf).map(_.surface).toSet
+    )
+
+  def isPlaced(surfaceId: String): Boolean = placedSurfaces.values.exists(_.id == surfaceId)
+
+  /** Decoded left/right surfaces that lost their hemisphere's slot: declared, but not drawn. */
+  def unplacedSurfaces: List[SurfaceDecl] =
+    decodedSurfaces
+      .filter(d => (d.hemisphere == "left" || d.hemisphere == "right") && !isPlaced(d.id))
+      .sortBy(_.id)
+
+  /** Result fields with at least one drawable representation, in manifest order. */
   def fields: List[ResultField] =
     manifest.resultFields
       .filter(f => volumeAssetOf(f).isDefined || surfaceRepsOf(f).nonEmpty)
@@ -57,20 +84,52 @@ final case class Loaded(
   def volumeAssetOf(f: ResultField): Option[String] =
     f.representations.find(r => r.kind == "volume" && volumes.contains(r.asset)).map(_.asset)
 
-  /** Surface representations whose vertex field and surface geometry both decoded. */
+  /** Surface representations that are actually drawn: decoded, and on a *placed* surface. A field
+    * has at most one per hemisphere.
+    */
   def surfaceRepsOf(f: ResultField): List[SurfaceRep] =
-    surfaceRepsByField.getOrElse(f.id, Nil).filter(r =>
-      vertexFields.contains(r.asset) && surfaces.contains(r.surface)
-    )
+    decodedSurfaceRepsOf(f).filter(r => isPlaced(r.surface)).distinctBy(_.hemisphere)
+
+  /** Decoded surface representations that are not drawn because their surface is not the placed one
+    * for its hemisphere (stated on the card, never silently dropped).
+    */
+  def undrawnSurfaceRepsOf(f: ResultField): List[SurfaceRep] =
+    decodedSurfaceRepsOf(f).filterNot(r => isPlaced(r.surface))
 
   def representationsOf(f: ResultField): LayerRepresentations =
     LayerRepresentations(volumeAssetOf(f).isDefined, surfaceRepsOf(f).map(_.hemisphere).toSet)
 
-  /** The first declared surface of a hemisphere ("left" | "right") whose geometry decoded. */
+  /** The placed surface of a hemisphere ("left" | "right") with its geometry. */
   def surface(hemisphere: String): Option[(SurfaceDecl, SurfaceGeometry)] =
-    manifest.surfaces.map(_.id).flatMap(surfaces.get).find(_._1.hemisphere == hemisphere)
+    placedSurfaces.get(hemisphere).flatMap(d => surfaces.get(d.id))
 
   def hasSurfaces: Boolean = surfaces.nonEmpty
+
+  /** The underlay's `volume-grid` domain payload `space`, when the manifest states one. */
+  val volumeSpace: Option[String] =
+    manifest.underlays.headOption.flatMap(u => manifest.domains.find(_.id == u.domain)).flatMap(d =>
+      d.descriptor.payload.hcursor.downField("space").as[String].toOption
+    )
+
+  /** A surface representation's derivation record, from the manifest's provenance activities:
+    * `(activity id, schema id @ version, method/software line)`. `None` when the representation
+    * declares no `derivation` or names an unknown activity — stated, never inferred.
+    */
+  def derivationOf(f: ResultField, surfaceId: String): Option[(String, String, Option[String])] =
+    f.representations.find(r => r.kind == "surface" && r.surface.contains(surfaceId))
+      .flatMap(_.derivation).flatMap { id =>
+        val activities = manifest.raw.hcursor.downField("provenance").downField("activities")
+        activities.values.toList.flatten.map(_.hcursor).find(_.get[String]("id").contains(id)).map {
+          a =>
+            val schema = a.downField("schema")
+            val sid = schema.get[String]("id").getOrElse("(unknown record)")
+            val ver = schema.get[String]("version").map(v => s" @ $v").getOrElse("")
+            val line = List("method", "software", "tool").flatMap(k =>
+              a.downField("payload").get[String](k).toOption.map(v => s"$k: $v")
+            ).headOption
+            (id, sid + ver, line)
+        }
+      }
 
   /** The summary the layer card and data-derived defaults use: the volume's, else the first vertex
     * field's.
@@ -206,10 +265,11 @@ object Loaded:
       val meshes = fetched.collect {
         case (r, hdr, bytes) if r.kind == "surface-mesh" =>
           val h = orFail(r.assetId, SurfaceRendition.decodeHeader(hdr))
-          r.assetId -> orFail(r.assetId, SurfaceRendition.decode(h, bytes))
+          r.assetId -> (orFail(r.assetId, SurfaceRendition.decode(h, bytes)), headerSpace(hdr))
       }.toMap
       // surface id → geometry, through the manifest's declaration of which asset each surface is
-      val surfaces = decls.flatMap(d => meshes.get(d.asset).map(g => d.id -> (d, g))).toMap
+      val surfaces = decls.flatMap(d => meshes.get(d.asset).map((g, _) => d.id -> (d, g))).toMap
+      val spaces = decls.flatMap(d => meshes.get(d.asset).flatMap(_._2).map(d.id -> _)).toMap
       val fields = fetched.collect {
         case (r, hdr, bytes) if r.kind == "vertex-field" =>
           val h = orFail(r.assetId, VertexFieldRendition.decodeHeader(hdr))
@@ -229,5 +289,14 @@ object Loaded:
         vols.map(t => t._1 -> t._2).toMap,
         (vols ++ fields).flatMap(t => t._3.map(t._1 -> _)).toMap,
         surfaces,
-        fields.map(t => t._1 -> t._2).toMap
+        fields.map(t => t._1 -> t._2).toMap,
+        spaces
       )
+
+  /** The surface-mesh header's `space` (the space its coordinates are expressed in). Optional: the
+    * field is being added to the profile, and a header without it stays decodable.
+    */
+  def headerSpace(headerJson: String): Option[String] =
+    io.circe.parser.parse(headerJson).toOption.flatMap(
+      _.hcursor.downField("space").as[String].toOption
+    ).map(_.trim).filter(_.nonEmpty)

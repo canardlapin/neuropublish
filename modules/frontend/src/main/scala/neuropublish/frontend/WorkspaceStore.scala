@@ -4,10 +4,11 @@ import com.raquo.laminar.api.L.*
 import intaglio.{DeviceContext, DisplayOpacity, DisplayThreshold, DisplayWindow, ScalarColorizer}
 import neuropublish.viewer.*
 import neuropublish.viewer.laminar.*
+import org.scalajs.dom
 import scala.scalajs.js
 import scalafim.image.*
 import scalafim.image.view.*
-import scalafim.surface.CorticalHemisphere
+import scalafim.surface.{CorticalHemisphere, VertexId}
 import scalafim.surface.view.{
   BilateralOrder,
   CameraProjection,
@@ -21,6 +22,7 @@ import scalafim.surface.view.{
   SurfaceReadout,
   SurfaceViewerAction,
   SurfaceViewerModel,
+  SurfaceViewerState,
   SurfaceViewpoint
 }
 
@@ -31,9 +33,12 @@ import scalafim.surface.view.{
   * first frame.
   *
   * One result field is one layer; it renders in the volume pane when it has a volume representation
-  * and on each hemisphere it has a surface representation for. The world cursor is shared: a pick
-  * in either pane sets it, the volume pane shows the voxel under it, and the surface pane links it
-  * to the nearest vertex within `SurfaceHost.DefaultLinkRadius` or says why not.
+  * and on each *placed* surface it has a surface representation for (`SurfacePlacement`: one
+  * surface per hemisphere slot). Surface layers are keyed `field@surface`, so two surfaces of one
+  * hemisphere cannot collide. The world cursor is shared: a pick in either pane sets it, the volume
+  * pane shows the voxel under it, and the surface pane links it to the nearest vertex within
+  * `SurfaceHost.DefaultLinkRadius` or says why not — unless the surface and the underlay declare
+  * different spaces, in which case they never link.
   */
 final class WorkspaceStore(
     val loaded: Loaded,
@@ -124,7 +129,16 @@ final class WorkspaceStore(
     probe
   )
 
+  /** A pane badge may claim the cursor came from the other pane; when that pane is gone (a preset
+    * switch, a URL restore), the claim goes with it.
+    */
+  private def resetStaleCursorSource(): Unit = cursorSource.now() match
+    case Some("volume") if live.isEmpty => cursorSource.set(None)
+    case Some("surface") if surfaceLive.isEmpty => cursorSource.set(None)
+    case _ => ()
+
   def attach(l: VolumeHost.Live): Unit =
+    resetStaleCursorSource()
     live = Some(l)
     l.onCursor = Some(() => readout.set(host.readout(l)))
     val w = state.now()
@@ -153,6 +167,7 @@ final class WorkspaceStore(
 
   // ---------------------------------------------------------------- surface
 
+  /** One surface per hemisphere slot, by `SurfacePlacement`'s documented rule. */
   private val leftSurface = loaded.surface("left")
   private val rightSurface = loaded.surface("right")
   private val surfaceAssets: Vector[SurfaceAsset] =
@@ -170,6 +185,27 @@ final class WorkspaceStore(
     )
       .toList.sortBy(_.id)
 
+  /** Decoded left/right surfaces that lost their hemisphere's slot to another surface: the pane has
+    * one slot per hemisphere, so these are declared but not drawn.
+    */
+  val unplacedSurfaces: List[SurfaceDecl] = loaded.unplacedSurfaces
+
+  /** Why the two panes must not share a cursor, when a placed surface and the underlay declare
+    * different spaces (B1's client half). Constant for the revision: spaces are facts of the bytes,
+    * not presentation.
+    */
+  val spaceMismatch: Option[String] =
+    loaded.placedSurfaces.values.toList.sortBy(_.id).flatMap { d =>
+      SpaceGuard.decide(loaded.surfaceSpaces.get(d.id), loaded.volumeSpace) match
+        case m: SpaceGuard.Decision.Mismatch => Some(SpaceGuard.message(m))
+        case SpaceGuard.Decision.Link => None
+    }.headOption
+
+  /** Why the surface pane cannot draw this revision, when the model could not be built. Never
+    * swallowed: the pane says so and the console carries the reducer's own message.
+    */
+  val surfaceError: Var[Option[String]] = Var(None)
+
   /** Bilateral when both hemispheres decoded, single otherwise. */
   val surfaceLayout: Option[SurfaceLayout] = (leftSurface, rightSurface) match
     case (Some((l, _)), Some((r, _))) =>
@@ -182,36 +218,67 @@ final class WorkspaceStore(
     case (None, Some((r, _))) => Some(SurfaceLayout.Single(SurfaceId.unsafe(r.id)))
     case _ => None
 
-  /** Surface layer id for one field on one hemisphere. */
-  def surfaceLayerId(field: String, hemisphere: String): SurfaceLayerId =
-    SurfaceLayerId.unsafe(s"$field@$hemisphere")
+  /** Surface layer id for one field on one *placed* surface. Keying by the surface (not the
+    * hemisphere) is what keeps `lh-pial` and `lh-white` from colliding.
+    */
+  def surfaceLayerId(field: String, surface: String): SurfaceLayerId =
+    SurfaceLayerId.unsafe(SurfacePlacement.layerId(field, surface))
 
-  /** The surface model: every decoded hemisphere, and one scalar layer per (field, hemisphere) with
-    * a surface representation. `None` when the revision has no surface geometry at all.
+  /** The surface layers a field is actually drawn as: one per placed surface it has a decoded
+    * representation on. Facts of the revision, so a dispatch can never name a layer that the model
+    * does not contain.
+    */
+  def surfaceLayerIdsOf(field: String): Vector[SurfaceLayerId] =
+    loaded.field(field).toVector
+      .flatMap(f => loaded.surfaceRepsOf(f).toVector.map(r => surfaceLayerId(field, r.surface)))
+
+  /** The surface model: every placed hemisphere, and one scalar layer per (field, placed surface)
+    * with a surface representation. `None` when the revision has no placeable surface geometry, or
+    * when the model was rejected — which is reported through `surfaceError`, never swallowed.
     */
   def surfaceModel(w: Workspace): Option[SurfaceViewerModel] =
     if surfaceAssets.isEmpty then None
     else
+      val problems = Vector.newBuilder[String]
       val layers = w.layers.reverse.flatMap { l =>
         loaded.field(l.id).toVector.flatMap(f =>
           loaded.surfaceRepsOf(f).toVector.flatMap { rep =>
-            for
-              field <- loaded.vertexFields.get(rep.asset)
-              (_, geometry) <- loaded.surfaces.get(rep.surface)
-              if surfaceAssets.exists(_.id == SurfaceId.unsafe(rep.surface))
-              layer <- SurfaceLayer.scalar(
-                surfaceLayerId(l.id, rep.hemisphere),
-                SurfaceId.unsafe(rep.surface),
-                geometry,
-                field.data,
-                colorizer(l.current),
-                opacity = DisplayOpacity.unsafe(l.current.opacity)
-              ).toOption
-            yield layer
+            val built =
+              for
+                field <- loaded.vertexFields.get(rep.asset)
+                  .toRight(s"${rep.asset}: no decoded vertex field")
+                geometry <- loaded.surfaces.get(rep.surface).map(_._2)
+                  .toRight(s"${rep.surface}: no decoded geometry")
+                layer <- SurfaceLayer.scalar(
+                  surfaceLayerId(l.id, rep.surface),
+                  SurfaceId.unsafe(rep.surface),
+                  geometry,
+                  field.data,
+                  colorizer(l.current),
+                  opacity = DisplayOpacity.unsafe(l.current.opacity)
+                ).left.map(e => s"${l.id} on ${rep.surface}: ${e.message}")
+              yield layer
+            built match
+              case Right(layer) => Vector(layer)
+              case Left(m) => problems += m; Vector.empty
           }
         )
       }
-      SurfaceViewerModel.make(surfaceAssets, layers).toOption
+      SurfaceViewerModel.make(surfaceAssets, layers) match
+        case Right(m) =>
+          report(problems.result())
+          Some(m)
+        case Left(e) =>
+          report(problems.result() :+ e.message)
+          None
+
+  /** Publish what the surface pane could not draw (empty clears the message). */
+  private def report(problems: Vector[String]): Unit =
+    if problems.isEmpty then surfaceError.set(None)
+    else
+      val message = "The surface pane cannot draw this revision: " + problems.mkString("; ")
+      dom.console.error(message)
+      surfaceError.set(Some(message))
 
   val surfaceHost: SurfaceHost = new SurfaceHost(three, surfaceModel(initial), surfaceProbe)
 
@@ -227,7 +294,41 @@ final class WorkspaceStore(
     case "orthographic" => CameraProjection.Orthographic(OrthographicScale.unsafe(1.0))
     case _ => CameraProjection.Perspective(FieldOfViewDegrees.Default)
 
+  /** The camera as presentation state, read back from the renderer's own state. `None` for a
+    * viewpoint this vocabulary cannot name (a medial view): never guessed.
+    */
+  private def cameraStateOf(s: SurfaceViewerState): Option[SurfaceCameraState] =
+    val viewpoint = s.camera.viewpoint match
+      case SurfaceViewpoint.Lateral(CorticalHemisphere.Left) => Some("left")
+      case SurfaceViewpoint.Lateral(CorticalHemisphere.Right) => Some("right")
+      case SurfaceViewpoint.Dorsal => Some("dorsal")
+      case SurfaceViewpoint.Ventral => Some("ventral")
+      case SurfaceViewpoint.Anterior => Some("anterior")
+      case SurfaceViewpoint.Posterior => Some("posterior")
+      case _ => None
+    val projection = s.camera.projection match
+      case _: CameraProjection.Orthographic => "orthographic"
+      case _: CameraProjection.Perspective => "perspective"
+    viewpoint.map(SurfaceCameraState(_, projection))
+
+  /** The surface pane's own state as the store last saw it: what a remount rebuilds from and what
+    * the saved-view record's `surfaceCamera` is taken from.
+    */
+  def surfaceSnapshot: Option[SurfaceViewerState] =
+    surfaceLive.flatMap(surfaceHost.state).orElse(surfaceHost.snapshot)
+
+  /** Mirror the renderer's camera back into the workspace, so a saved view records what the pane
+    * shows rather than what the dropdowns last dispatched.
+    */
+  private def captureSurfaceCamera(): Unit =
+    for
+      s <- surfaceSnapshot
+      c <- cameraStateOf(s)
+      if c != state.now().surfaceCamera
+    do state.update(_.copy(surfaceCamera = c))
+
   def attachSurface(l: SurfaceHost.Live): Unit =
+    resetStaleCursorSource()
     surfaceLive = Some(l)
     l.onFrame = Some(() => surfaceReadout.set(surfaceHost.readout(l)))
     val w = state.now()
@@ -238,6 +339,7 @@ final class WorkspaceStore(
     w.cursor.foreach((x, y, z) => linkCursor(WorldPoint(x, y, z)))
 
   def detachSurface(): Unit =
+    captureSurfaceCamera() // the host keeps the reducer state; the workspace keeps the camera
     surfaceLive = None
     surfaceReadout.set(None)
     link.set(None)
@@ -246,8 +348,8 @@ final class WorkspaceStore(
     surfaceLayout.foreach(lay => surfaceHost.dispatch(l, SurfaceViewerAction.SetLayout(lay)))
     applySurfaceCamera(w)
     w.layers.foreach { layer =>
-      layer.representations.surfaces.foreach { h =>
-        val id = surfaceLayerId(layer.id, h); val d = layer.current
+      surfaceLayerIdsOf(layer.id).foreach { id =>
+        val d = layer.current
         surfaceHost.dispatch(l, SurfaceViewerAction.SetLayerVisible(id, d.visible))
         surfaceHost.dispatch(
           l,
@@ -267,11 +369,16 @@ final class WorkspaceStore(
     surfaceHost.dispatch(l, SurfaceViewerAction.SetProjection(projectionOf(w.surfaceCamera)))
   }
 
-  /** Link the world cursor into the surface pane and publish the explicit result. */
+  /** Link the world cursor into the surface pane and publish the explicit result. Surfaces and
+    * volumes that declare different spaces never link: a millimetre distance between them would be
+    * a number without a meaning.
+    */
   private def linkCursor(world: WorldPoint): Unit =
-    surfaceLive match
-      case Some(l) => link.set(Some(surfaceHost.setCursor(l, world)))
-      case None => link.set(None)
+    if spaceMismatch.isDefined then link.set(None)
+    else
+      surfaceLive match
+        case Some(l) => link.set(Some(surfaceHost.setCursor(l, world)))
+        case None => link.set(None)
 
   // ---------------------------------------------------------------- dispatch
 
@@ -280,6 +387,7 @@ final class WorkspaceStore(
     */
   def replace(w: Workspace): Unit =
     state.set(w)
+    cursorSource.set(None) // the cursor comes from the record, not from a pane
     lastModelKey = modelKey(w)
     lastSurfaceKey = modelKey(w)
     live.foreach { l =>
@@ -359,9 +467,7 @@ final class WorkspaceStore(
       else
         def each(id: String)(f: (SurfaceLayerId, LayerDisplay) => SurfaceViewerAction): Unit =
           after.layers.find(_.id == id).foreach(x =>
-            x.representations.surfaces.foreach(h =>
-              surfaceHost.dispatch(l, f(surfaceLayerId(id, h), x.current))
-            )
+            surfaceLayerIdsOf(id).foreach(sid => surfaceHost.dispatch(l, f(sid, x.current)))
           )
         a match
           case Workspace.Action.SetVisible(id, _) =>
@@ -405,8 +511,12 @@ final class WorkspaceStore(
     * the volume pane moves there and the surface pane links back to the same vertex at 0 mm.
     */
   def pickSurface(cssX: Double, cssY: Double): Boolean =
-    surfaceLive.flatMap(l => surfaceHost.pick(l, cssX, cssY)) match
-      case Some(p) =>
+    surfaceLive.flatMap(l => surfaceHost.pick(l, cssX, cssY).map((l, _))) match
+      case Some((l, p)) if spaceMismatch.isDefined =>
+        // the vertex is selected and read out, but it cannot move a cursor into another space
+        surfaceHost.dispatch(l, SurfaceViewerAction.Select(p.surface, VertexId(p.vertex)))
+        true
+      case Some((_, p)) =>
         cursorSource.set(Some("surface"))
         dispatch(Workspace.Action.SetCursor(p.world.x, p.world.y, p.world.z))
         true

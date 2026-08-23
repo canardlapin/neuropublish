@@ -957,12 +957,69 @@ representations, read from `Manifest.raw` until the typed projection lands).
   `speech-t`/`speech-z` surface representations) — a URL cursor at a Julia
   oracle probe vertex links at 0.0 mm and reads the oracle's vertex values in
   the status bar, while the origin (5 mm off the nearest sphere) reports "no
-  vertex within 3 mm". `scripts/e2e.sh` runs all 15 browser scenarios green
-  through the Julia producer gate.
+  vertex within 3 mm". `scripts/e2e.sh` runs the browser scenarios green
+  through the Julia producer gate (15 at this point; 18 after the review fixes
+  below).
 
 Not done here: atlas lookup; the Hybrid artboard visual pass (design README);
 topology/coordinate-identity rejection and the derivation-receipt gate live
 with the rendition/admission track.
+
+#### Review fixes (2026-08-23) — workspace track
+
+From the fresh-context review of `c0ba616..b1b153f`
+(`docs/plans/stage5-review-fixes.md`, Track W). Each item is verified by a
+unit test where the logic is pure, by an e2e assertion where only the page
+shows it.
+
+- **Placement rule (S2).** The surface pane has one slot per hemisphere.
+  `SurfacePlacement.place` fills a slot with the first surface in manifest
+  order that some result field targets with a decoded surface representation,
+  and with the first declared surface when no field targets any. Deterministic,
+  and a field lands on the surface it was published for whenever one surface
+  per hemisphere carries data. Representations are counted against the *placed*
+  surfaces only: a decoded representation on an unplaced surface is named on
+  the card ("not drawn on lh-white") instead of being dropped, the navigator
+  never claims "surf L" for a field that is not drawn, and no display action
+  can name a layer id the model does not contain.
+- **Layer identity (S1).** Surface layers are keyed `field@surface`, not
+  `field@hemisphere`, so `lh-pial` and `lh-white` cannot collide. A rejected
+  `SurfaceViewerModel` — or a rejected layer — is no longer swallowed by
+  `.toOption`: it becomes a visible pane message (`surface-error`) and a
+  console error.
+- **View state across presets (S7).** `SurfaceHost` keeps the reducer state of
+  a disposed pane and rebuilds a remounted pane from it, so zoom, orbit,
+  lighting, and the selection survive Volume → Hybrid → Surface. The store
+  reads the camera back from the renderer on detach, so a saved view's
+  `surfaceCamera` records what the pane showed.
+- **Honest link distance (S8).** `Link.Linked` carries the measured distance
+  from the picked vertex; a failed transform is a not-linked state, never
+  "0.0 mm". An unchanged selection no longer schedules a frame, and the
+  cursor-source badge is cleared when the pane that claimed it is gone.
+- **Space guard (B1, client half).** A placed surface and the underlay are
+  compared through their declared spaces (the surface-mesh header's `space`,
+  the underlay's `volume-grid` domain payload). Different spaces never link:
+  the readout says which two, and a surface pick selects the vertex without
+  moving the shared cursor. An absent space on either side still links —
+  admission is where a mismatch is rejected.
+- **Per-hemisphere absence (product rule).** A field with one hemisphere says
+  so ("left surface only; no right-hemisphere representation"). Surface values
+  state their derivation activity, or — the deliberate non-change — "native
+  surface measurement; no projection receipt declared".
+- **Divider and canvas details.** The splitter captures the pointer and
+  releases its window listeners on unmount mid-drag (keyboard handling
+  unchanged); panes resize on a device-pixel-ratio change, not only on a box
+  change; `splitFraction` is quantised to the URL's four decimals so a dragged
+  divider round-trips exactly (property test); the dead "cannot be rendered
+  yet" threshold branch is gone.
+- **Tests.** viewer-state gains the URL round-trip property; the frontend
+  gains `SurfacePlacementSuite`, `SpaceGuardSuite`, and `LoadedSurfaceSuite`
+  (a revision declaring `lh-pial` and `lh-white`, which the reference fixture
+  cannot express cheaply); `e2e-stage5.spec.mjs` gains a right-hemisphere pick
+  asserted against the hand-derived icosphere radius, a threshold that
+  repaints the surface pane and a reset that restores it pixel for pixel, and
+  the card's absence/derivation lines. `scripts/e2e.sh` runs 18 browser
+  scenarios green, the lifecycle suite 4.
 
 ## Stage 5b — post-MVP finite-indexed and parcel track
 

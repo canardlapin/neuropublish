@@ -272,3 +272,84 @@ test("narrow layout: Hybrid stacks the panes and the divider still works by keyb
   await page.getByTestId("preset-surface").click(); await settle(page);
   await page.screenshot({ path: "test-results/stage5-narrow-surface.png", fullPage: true });
 });
+
+// ---------------------------------------------------------------------------
+// Review fixes (2026-08-23)
+// ---------------------------------------------------------------------------
+
+/** Distance from one synthetic hemisphere's centre: the icospheres are r = 25 mm at x = ∓30 mm. */
+const radiusFrom = (world, centreX) => Math.hypot(world[0] - centreX, world[1], world[2]);
+
+test("a pick in the right half of the surface pane lands on the right hemisphere and moves the volume cursor", async ({ page }) => {
+  await login(page);
+  await openWorkspace(page);
+  await page.getByTestId("preset-hybrid").click(); await settle(page);
+  const surface = page.locator('.pane[data-pane="surface"] .surface-canvas');
+  const box = await surface.boundingBox();
+
+  // scan the right half only: the bilateral layout puts the right hemisphere in the right slot
+  let world = null;
+  for (const [fx, fy] of [[0.75, 0.5], [0.8, 0.45], [0.7, 0.55], [0.78, 0.6]]) {
+    await surface.click({ position: { x: box.width * fx, y: box.height * fy } });
+    await settle(page);
+    if (await page.getByTestId("volume-link").count()) { world = await worldReadout(page); break; }
+  }
+  expect(world).not.toBeNull();
+  // hand-derived, not read back from the oracle: the vertex is on the +30 mm sphere of radius 25
+  expect(Math.abs(radiusFrom(world, 30) - 25)).toBeLessThan(0.6);
+  expect(radiusFrom(world, -30)).toBeGreaterThan(25.6);
+  // the volume pane took the cursor from the surface pick, and the status bar names the vertex
+  await expect(page.getByTestId("volume-link")).toContainText(/vertex \d+/);
+  await expect(page.locator('.readout-layer[data-readout="speech-t"][data-pane="surface"]')).toHaveCount(1);
+  // the shared cursor is in the URL at the picked world position
+  await urlSettled(page);
+  const c = query(page).get("c").split(",").map(parseFloat);
+  expect(Math.abs(radiusFrom(c, 30) - 25)).toBeLessThan(0.6);
+  await page.screenshot({ path: "test-results/stage5-right-hemisphere-pick.png", fullPage: true });
+});
+
+test("a threshold above every value hides the surface overlay; resetting the layer brings it back", async ({ page }) => {
+  await login(page);
+  await openWorkspace(page);
+  // one visible surface-backed layer, so the pane's pixels answer for that layer alone
+  await page.locator('.layer-card[data-layer="speech-z"] input[type=checkbox]').uncheck();
+  await page.getByTestId("preset-surface").click(); await settle(page);
+  const canvas = page.locator('.pane[data-pane="surface"] canvas');
+  const card = page.locator('.layer-card[data-layer="speech-t"]');
+  await settle(page); await settle(page);
+  const drawn = await canvas.screenshot();
+
+  // |t| < 99 everywhere on the synthetic fields, so a two-sided 99 threshold hides all of it
+  await card.locator("select").first().selectOption("two-sided");
+  const min = card.locator('label.field', { hasText: "minimum |value|" }).locator("input");
+  await min.fill("99");
+  await min.press("Enter");
+  await settle(page); await settle(page);
+  const hidden = await canvas.screenshot();
+  expect(hidden.equals(drawn)).toBe(false);
+  // the geometry is still drawn: the pane is not blank, it is unpainted by this layer
+  expect(await page.locator('.pane[data-pane="surface"] canvas').count()).toBe(1);
+  await expect(page.getByTestId("surface-error")).toHaveCount(0);
+
+  // "modified · reset" returns the published display and the values reappear, pixel for pixel
+  await card.locator("button.reset").click();
+  await settle(page); await settle(page);
+  const restored = await canvas.screenshot();
+  expect(restored.equals(drawn)).toBe(true);
+  await page.screenshot({ path: "test-results/stage5-threshold-hides-surface.png", fullPage: true });
+});
+
+test("the layer card states per-hemisphere absence and whether a projection receipt was declared", async ({ page }) => {
+  await login(page);
+  await openWorkspace(page);
+  // the reference bundle publishes speech-t on both hemispheres, with a declared derivation
+  const t = page.locator('.layer-card[data-layer="speech-t"]');
+  await expect(t.getByTestId("layer-representations")).toContainText("left surface");
+  await expect(t.getByTestId("layer-representations")).toContainText("right surface");
+  await expect(t.getByTestId("layer-representations")).not.toContainText("only");
+  await expect(t.getByTestId("layer-derivation")).toContainText("project-to-surface");
+  // a volume-only field claims no surface at all, and carries no surface-derivation line
+  const effect = page.locator('.layer-card[data-layer="speech-effect"]');
+  await expect(effect.getByTestId("layer-representations")).not.toContainText("surface");
+  await expect(effect.getByTestId("layer-derivation")).toHaveCount(0);
+});
