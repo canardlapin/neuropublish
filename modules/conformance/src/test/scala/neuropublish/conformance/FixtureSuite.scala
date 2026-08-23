@@ -81,10 +81,10 @@ class FixtureSuite extends FunSuite:
     assertEquals(how("/domains/1/descriptor"), "Understood")
     assertEquals(how("/domains/2/descriptor"), "Understood")
     assertEquals(
-      m.surfaces.map(s => (s.id, s.hemisphere, s.domain, s.kind)),
+      m.surfaces.map(s => (s.id, s.asset, s.hemisphere, s.domain, s.kind)),
       List(
-        ("lh-pial", "left", "ico3-lh", "pial"),
-        ("rh-pial", "right", "ico3-rh", "pial")
+        ("lh-pial-surface", "lh-pial", "left", "ico3-lh", "pial"),
+        ("rh-pial-surface", "rh-pial", "right", "ico3-rh", "pial")
       )
     )
     assertEquals(
@@ -93,8 +93,20 @@ class FixtureSuite extends FunSuite:
       ),
       List(
         ("volume", "speech-t", None, None, None),
-        ("surface", "speech-t-lh", Some("lh-pial"), Some("left"), Some("project-to-surface")),
-        ("surface", "speech-t-rh", Some("rh-pial"), Some("right"), Some("project-to-surface"))
+        (
+          "surface",
+          "speech-t-lh",
+          Some("lh-pial-surface"),
+          Some("left"),
+          Some("project-to-surface")
+        ),
+        (
+          "surface",
+          "speech-t-rh",
+          Some("rh-pial-surface"),
+          Some("right"),
+          Some("project-to-surface")
+        )
       )
     )
     assertEquals(
@@ -107,10 +119,10 @@ class FixtureSuite extends FunSuite:
         ("speech-z", "volume", None),
         ("lh-pial", "surface-mesh", None),
         ("rh-pial", "surface-mesh", None),
-        ("speech-t-lh", "vertex-field", Some("lh-pial")),
-        ("speech-t-rh", "vertex-field", Some("rh-pial")),
-        ("speech-z-lh", "vertex-field", Some("lh-pial")),
-        ("speech-z-rh", "vertex-field", Some("rh-pial"))
+        ("speech-t-lh", "vertex-field", Some("lh-pial-surface")),
+        ("speech-t-rh", "vertex-field", Some("rh-pial-surface")),
+        ("speech-z-lh", "vertex-field", Some("lh-pial-surface")),
+        ("speech-z-rh", "vertex-field", Some("rh-pial-surface"))
       )
     )
   }
@@ -122,13 +134,30 @@ class FixtureSuite extends FunSuite:
     // fingerprint itself is proven by GiftiToRenditionSuite (rendition) and at ingestion
     val (_, m) =
       Manifest.parse(read("reference/manifest.json")).fold(ps => fail(Problem.render(ps)), identity)
+    val volumeSpace = ManifestChecks.surfaceDomain(m, "ico3-lh").map(_.space)
+    // a surface and a volume in one revision are in one space (B1): the surface domains say what
+    // the volume domain says, and nothing links across spaces by raw millimetres
+    assertEquals(
+      volumeSpace,
+      VolumeGrid.readPayload(
+        "",
+        m.domains.find(_.id == "mni-2mm").get.descriptor.payload
+      ).toOption.map(_.space)
+    )
     List("ico3-lh" -> "left", "ico3-rh" -> "right").foreach { (id, hemisphere) =>
       val p = ManifestChecks.surfaceDomain(m, id).getOrElse(fail(s"$id is not a surface domain"))
       assertEquals(
         (p.space, p.hemisphere, p.vertexCount, p.faceCount),
-        ("synthetic-ico3", hemisphere, 642, 1280)
+        ("MNI152NLin2009cAsym", hemisphere, 642, 1280)
       )
+      // `topology` is the ASSET of a surfaces[] entry on this domain, never the entry's id (B2)
       assertEquals(p.topology, s"${id.drop(5)}-pial")
+      assert(m.assets.exists(_.id == p.topology), p.topology)
+      assert(!m.surfaces.exists(_.id == p.topology), p.topology)
+      assertEquals(
+        m.surfaces.find(_.asset == p.topology).map(_.id),
+        Some(s"${id.drop(5)}-pial-surface")
+      )
       val key = m.domains.find(_.id == id).flatMap(_.key).get.hcursor
       assertEquals(key.get[Long]("size"), Right(642L))
       val oracle =
@@ -362,14 +391,20 @@ class FixtureSuite extends FunSuite:
     for id <- List("lh-pial", "rh-pial") do
       val text = new String(read(s"reference/renditions/$id.json"), StandardCharsets.UTF_8)
       assertEquals(SchemaCheck.renditionHeader(parse(text).toOption.get), Nil, id)
-      assert(SurfaceRendition.decodeHeader(text).isRight)
+      val h = SurfaceRendition.decodeHeader(text).fold(m => fail(s"$id: $m"), identity)
+      // world positions: the source transform is provenance, surfaceToWorld the identity
+      assertEquals(h.surfaceToWorld, SurfaceRendition.Identity)
+      assert(h.faceDigest.isDefined, id)
+      assert(h.sourceTransform.isDefined, id)
+      assertEquals(h.space, "MNI152NLin2009cAsym", id)
     for id <- List("speech-t-lh", "speech-z-rh") do
       val text = new String(read(s"reference/renditions/$id.json"), StandardCharsets.UTF_8)
       assertEquals(SchemaCheck.renditionHeader(parse(text).toOption.get), Nil, id)
       assert(VertexFieldRendition.decodeHeader(text).isRight)
     val badSurface = parse(
       """{"profile":"org.neuropublish.rendition/surface-mesh@0","hemisphere":"both","kind":"pial",
-      "vertexCount":4,"faceCount":2,"surfaceToWorld":[],"coordinateSystem":"RAS+","topologyIdentity":"x"}"""
+      "space":"MNI152NLin2009cAsym","vertexCount":4,"faceCount":2,"surfaceToWorld":[],
+      "coordinateSystem":"RAS+","topologyIdentity":"x"}"""
     ).toOption.get
     assert(SchemaCheck.renditionHeader(badSurface).nonEmpty)
     assert(SurfaceRendition.decodeHeader(badSurface.noSpaces).isLeft)
@@ -409,7 +444,12 @@ class FixtureSuite extends FunSuite:
       assertEquals(Sha256.of(file).render, a.digest.render, a.id)
       assertEquals(file.length.toLong, a.size, a.id)
     }
-    assertEquals(manifest.surfaces.map(_.id), List("lh-pial", "rh-pial"))
+    // the producer's own spelling: a surfaces[] id that happens to equal its asset. The reference
+    // bundle spells them apart, so a check that confuses the two fails on one of the two bundles.
+    assertEquals(
+      manifest.surfaces.map(s => (s.id, s.asset)),
+      List(("lh-pial", "lh-pial"), ("rh-pial", "rh-pial"))
+    )
     assertEquals(manifest.renditionTargets.length, 10)
     val raw = manifest.raw.hcursor
     assertEquals(raw.downField("x-julia-producer").downField("version").as[String], Right("0.1"))

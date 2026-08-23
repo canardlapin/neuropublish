@@ -1,6 +1,6 @@
 {
   "core": "0.1",
-  "title": "invalid: representation-surface-hemisphere",
+  "title": "invalid: surface-asset-two-roles",
   "synopsis": "Group meta random-effects over 26 first-level speech-feature GLMs.",
   "warnings": [
     {
@@ -87,7 +87,7 @@
           "digest": "sha256:2adc4285db8d257af4aa4e54272631451b7103d1a124b83544dc0814f85487e8"
         },
         "size": 642,
-        "structuralFingerprint": "sha256:676ab979d593efee7b473c6868feb825251f01a48a2b24c11e2ddf6acabbf799"
+        "structuralFingerprint": "sha256:87c510fe0b22b14c009afcf8833601f7c54d5714a86d08fb7b60b7938c2934c4"
       },
       "descriptor": {
         "schema": {
@@ -113,7 +113,7 @@
           "digest": "sha256:2adc4285db8d257af4aa4e54272631451b7103d1a124b83544dc0814f85487e8"
         },
         "size": 642,
-        "structuralFingerprint": "sha256:0861bddcdbe8a54c7da2e7b7e9ae88cd0f0dac6a16dd26af5cfc5873bae98f48"
+        "structuralFingerprint": "sha256:3701cb541fdad954cc8a4b83ea4e059a42dfefbd7b0bb22b91b12d2bc32a4105"
       },
       "descriptor": {
         "schema": {
@@ -203,7 +203,7 @@
   "analyses": [
     {
       "id": "group-model",
-      "label": "Group model \u00b7 speech features",
+      "label": "Group model · speech features",
       "method": {
         "schema": {
           "id": "org.bbuchsbaum.fmrigds/reducer/meta-random-effects",
@@ -285,14 +285,15 @@
         {
           "kind": "surface",
           "asset": "speech-t-lh",
-          "surface": "lh-pial",
+          "surface": "lh-pial-surface",
           "hemisphere": "left",
           "derivation": "project-to-surface"
         },
         {
           "kind": "surface",
           "asset": "speech-t-rh",
-          "surface": "rh-pial",
+          "surface": "rh-pial-surface",
+          "hemisphere": "right",
           "derivation": "project-to-surface"
         }
       ],
@@ -326,14 +327,14 @@
         {
           "kind": "surface",
           "asset": "speech-z-lh",
-          "surface": "lh-pial",
+          "surface": "lh-pial-surface",
           "hemisphere": "left",
           "derivation": "project-to-surface"
         },
         {
           "kind": "surface",
           "asset": "speech-z-rh",
-          "surface": "rh-pial",
+          "surface": "rh-pial-surface",
           "hemisphere": "right",
           "derivation": "project-to-surface"
         }
@@ -463,7 +464,7 @@
   },
   "surfaces": [
     {
-      "id": "lh-pial",
+      "id": "lh-pial-surface",
       "asset": "lh-pial",
       "domain": "ico3-lh",
       "hemisphere": "left",
@@ -471,12 +472,28 @@
       "label": "Synthetic left pial (icosphere)"
     },
     {
-      "id": "rh-pial",
+      "id": "rh-pial-surface",
       "asset": "rh-pial",
       "domain": "ico3-rh",
       "hemisphere": "right",
       "kind": "pial",
       "label": "Synthetic right pial (icosphere)"
+    },
+    {
+      "id": "t1-surface",
+      "asset": "t1",
+      "domain": "ico3-lh",
+      "hemisphere": "left",
+      "kind": "white",
+      "label": "The underlay volume declared as a geometry (refused)"
+    },
+    {
+      "id": "speech-t-lh-surface",
+      "asset": "speech-t-lh",
+      "domain": "ico3-lh",
+      "hemisphere": "left",
+      "kind": "white",
+      "label": "A vertex-field asset declared as a geometry (refused)"
     }
   ]
 }

@@ -2,6 +2,7 @@
   "profile" : "org.neuropublish.rendition/surface-mesh@0",
   "hemisphere" : "right",
   "kind" : "pial",
+  "space" : "MNI152NLin2009cAsym",
   "vertexCount" : 642,
   "faceCount" : 1280,
   "surfaceToWorld" : [
@@ -32,5 +33,37 @@
   ],
   "coordinateSystem" : "RAS+",
   "topologyIdentity" : "171662359971510d",
+  "faceDigest" : "sha256:83d4e8fbf5de9136adb1c22249ec99554b171c00f468c929ce05e66d69f0da5b",
+  "sourceTransform" : {
+    "matrix" : [
+      [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "dataSpace" : "NIFTI_XFORM_SCANNER_ANAT",
+    "transformedSpace" : "NIFTI_XFORM_SCANNER_ANAT"
+  },
+  "anatomicalStructurePrimary" : "CortexRight",
   "source" : "assets/rh-pial.surf.gii"
 }

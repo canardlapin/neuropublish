@@ -1,0 +1,2 @@
+/surfaces/2/asset: asset 't1' is also an underlay; an asset is a surface geometry or a volume or a vertex field, not two of them
+/surfaces/3/asset: asset 'speech-t-lh' is also the vertex-field asset of a surface representation of 'speech-t'; an asset is a surface geometry or a volume or a vertex field, not two of them

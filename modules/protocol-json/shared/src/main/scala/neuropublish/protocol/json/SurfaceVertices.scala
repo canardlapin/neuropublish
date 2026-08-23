@@ -110,8 +110,10 @@ object SurfaceVertices:
 
   /** Admission-time check of one trusted surface-vertices domain: everything verifiable without the
     * topology asset's bytes. `surfacesOnDomain` are the `surfaces[]` entries declared on this
-    * domain, `(asset id, hemisphere)`; the `topology` asset must be one of them with the payload's
-    * hemisphere. The fingerprint itself is verified at ingestion ([[fingerprint]]).
+    * domain, `(asset id, hemisphere)`; `topology` names an asset (a `surfaces[].asset`, never a
+    * `surfaces[].id` — the fingerprint is a function of the asset's bytes) and must be one of them
+    * with the payload's hemisphere. The fingerprint itself is verified at ingestion
+    * ([[fingerprint]]).
     */
   def check(
       at: String,
@@ -129,12 +131,12 @@ object SurfaceVertices:
           case None =>
             Some(Problem(
               s"$payloadAt/topology",
-              s"topology asset '${p.topology}' is not declared in surfaces[] on this domain"
+              s"topology '${p.topology}' is not the asset of any surfaces[] entry on this domain (topology names a surfaces[].asset, not a surfaces[].id)"
             ))
           case Some((_, h)) if h != p.hemisphere =>
             Some(Problem(
               s"$payloadAt/topology",
-              s"topology surface '${p.topology}' is the $h hemisphere; the domain is ${p.hemisphere}"
+              s"topology asset '${p.topology}' is declared as the $h hemisphere in surfaces[]; the domain is ${p.hemisphere}"
             ))
           case _ => None
         val keyProblems = key match

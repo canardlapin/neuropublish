@@ -229,7 +229,7 @@
                 641,
                 639
             ],
-            "structuralFingerprint": "sha256:676ab979d593efee7b473c6868feb825251f01a48a2b24c11e2ddf6acabbf799"
+            "structuralFingerprint": "sha256:87c510fe0b22b14c009afcf8833601f7c54d5714a86d08fb7b60b7938c2934c4"
         },
         {
             "id": "rh-pial",
@@ -274,7 +274,7 @@
                 641,
                 639
             ],
-            "structuralFingerprint": "sha256:0861bddcdbe8a54c7da2e7b7e9ae88cd0f0dac6a16dd26af5cfc5873bae98f48"
+            "structuralFingerprint": "sha256:3701cb541fdad954cc8a4b83ea4e059a42dfefbd7b0bb22b91b12d2bc32a4105"
         }
     ],
     "fields": [

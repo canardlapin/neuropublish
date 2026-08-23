@@ -168,6 +168,16 @@ float32 + TRIANGLE int32, ASCII or Base64 encoded) on a trusted
 `invalid/surface-domain-not-surface`); `kind` is `pial | white | midthickness
 | inflated`. Several surfaces (white, pial, inflated) may realize one domain;
 each must carry the domain's triangles exactly, which is proven at ingestion.
+An `id` is not an `asset`: the reference bundle's `lh-pial-surface` sits on
+asset `lh-pial`, and what a member names — an entry or an asset — is stated
+wherever the two could be confused.
+
+One asset is one thing. An asset backs at most one `surfaces[]` entry
+(`invalid/surface-asset-shared`: two entries would derive one geometry
+rendition and quietly take one of their hemispheres for it), and an asset that
+is a surface geometry is not also an underlay, a volume representation, or a
+vertex field (`invalid/surface-asset-two-roles`): the server derives one
+rendition per asset, so a second role would be dropped without a word.
 
 A representation of `kind: "surface"` carries `surface` (a `surfaces[].id`)
 and `hemisphere`, which must equal the surface's
@@ -178,10 +188,51 @@ data array; the vertex count is checked at ingestion). Left and right fields
 are two representations of the same result field, one per hemisphere; a field
 with no surface representation has no surface display — readers show an
 honest empty state, they do not project. The representation's support is its
-surface's domain, not the field's `domain`; the producer did that mapping, and
-may name the provenance activity that did it in `derivation`
-(`invalid/representation-derivation-unknown`). `surface` and `hemisphere` are
-refused on any other representation kind.
+surface's domain, not the field's `domain`. `derivation` is optional and names
+the provenance activity that produced the values
+(`invalid/representation-derivation-unknown`); its absence declares a native
+surface measurement, not a missing receipt — admission cannot tell a measured
+field from a projected one, so requiring the member would only move the claim
+one field over. `surface` and `hemisphere` are refused on any other
+representation kind.
+
+**What ingestion requires of the bytes.** A surface geometry and a vertex
+field are read on the JVM, and what the manifest cannot prove is proven there
+(§6, "admission split"), each failure naming the asset and refusing the
+revision:
+
+- *float32 sources only in this revision.* A `NIFTI_TYPE_FLOAT64` POINTSET or
+  vertex-field array is refused ("this revision reads float32 GIFTI sources
+  only (write NIFTI_TYPE_FLOAT32)"); the reference GIFTI reader decodes
+  `NIFTI_TYPE_FLOAT32`, `NIFTI_TYPE_INT32`, and `NIFTI_TYPE_UINT8`. NIfTI
+  volumes are unaffected: a float64 volume is read and narrowed to float32 in
+  its rendition, and the canonical asset remains the record.
+- *dense fields only.* A `.func.gii` carrying a `NIFTI_INTENT_NODE_INDEX`
+  array is a sparse field — the layout Workbench and nibabel write for values
+  on part of a surface — and is refused by name rather than having its vertex
+  indices stored as values. The field array (the first that is neither
+  POINTSET nor TRIANGLE) must be rank 1, or rank 2 with `Dim1 = 1`: a V×T
+  `NIFTI_INTENT_TIME_SERIES` is refused for what it is, never through a
+  vertex-count message.
+- *the hemisphere must survive the bytes.* Where the GIFTI states
+  `AnatomicalStructurePrimary` (on the POINTSET array or the document), it must
+  agree with the declared hemisphere: `CortexLeft` with `left`, `CortexRight`
+  with `right`, anything else (`CortexLeftAndRight`, a cerebellar structure)
+  refused. Left and right meshes of one template share a vertex count and a
+  topology, so a swapped hemisphere is otherwise undetectable. A GIFTI that
+  says nothing is taken at the manifest's word.
+- *world coordinates are computed, not assumed.* The GIFTI's
+  `CoordinateSystemTransformMatrix` is applied to the positions at
+  ingestion — the one place it is applied — when its `TransformedSpace` is one
+  this build can place in RAS+ millimetres (`NIFTI_XFORM_SCANNER_ANAT`,
+  `NIFTI_XFORM_ALIGNED_ANAT`, `NIFTI_XFORM_TALAIRACH`, `NIFTI_XFORM_MNI_152`).
+  The rendition payload is therefore world positions, its `surfaceToWorld` is
+  the identity, and the matrix with both space names is kept as
+  `sourceTransform` for provenance — a reader that composes through
+  `surfaceToWorld` (picking, linking) cannot apply the transform twice. A
+  transform into any other space (`NIFTI_XFORM_UNKNOWN` above all) is refused
+  unless it is the identity and so says nothing; the label `RAS+` is a
+  statement about the payload, and nothing writes it over a guess.
 
 ### Canonical versus derived representations
 
@@ -206,15 +257,40 @@ and listed on the revision with `kind` and, for vertex fields, `surface`:
 | `kind` | Source | Profile (header JSON) | Payload (little-endian) |
 | --- | --- | --- | --- |
 | `volume` | `underlays[]` and volume representations (NIfTI) | `org.neuropublish.rendition/volume-f32@0`: `shape`, `affine`, `dtype`, `byteOrder`, `order`, `missing`, `source`, `summary` | float32 × shape product, x-fastest, NaN missing |
-| `surface-mesh` | `surfaces[]` (GIFTI geometry) | `org.neuropublish.rendition/surface-mesh@0`: `hemisphere`, `kind`, `vertexCount`, `faceCount`, `surfaceToWorld` (4×4 row-major), `coordinateSystem: "RAS+"`, `topologyIdentity`, `source` | float32 × 3·V positions (vertex order), then int32 × 3·F vertex ordinals (face order) |
+| `surface-mesh` | `surfaces[]` (GIFTI geometry) | `org.neuropublish.rendition/surface-mesh@0`: `hemisphere`, `kind`, `space`, `vertexCount`, `faceCount`, `surfaceToWorld` (4×4 row-major, the identity), `coordinateSystem: "RAS+"`, `topologyIdentity`, `faceDigest`, `sourceTransform`, `anatomicalStructurePrimary`, `source` | float32 × 3·V world positions (vertex order), then int32 × 3·F vertex ordinals (face order) |
 | `vertex-field` | surface representations (GIFTI scalars) | `org.neuropublish.rendition/vertex-field-f32@0`: `surface` (the `surfaces[].id`), `vertexCount`, `summary`, `source` | float32 × V, vertex order, NaN missing |
 
-`topologyIdentity` is the reference implementation's stable key of the ordered
-faces (ScalaFIM `MeshTopologyIdentity.stableKey`); a decoder rebuilds the mesh
-and must arrive at the same key. `summary` is the server-derived
-`ScalarSummary` (min, max, quantiles, histogram, counts). All three headers
-validate against `schemas/rendition-header.schema.json`. Float64 sources lose
-precision in a rendition; the canonical asset remains the record.
+A `surface-mesh` payload is world positions: `surfaceToWorld` is the identity
+and `sourceTransform` records the GIFTI transform ingestion applied
+("Surfaces" above), so composing a pick through `surfaceToWorld` stays correct
+and applies nothing twice. `space` is the surface's domain `space`; a reader
+compares it with a volume's before it links the two by world millimetres.
+`anatomicalStructurePrimary` is what the GIFTI said, verified against the
+declared hemisphere at ingestion.
+
+Two topology keys are carried, and they are not interchangeable.
+`faceDigest` is the SHA-256 of the payload's face bytes (little-endian int32
+ordinals in face order): a cryptographic identity that does not depend on any
+implementation's hash seeds, and the one a decoder must verify when it is
+present. `topologyIdentity` is the reference implementation's key of the
+ordered faces (ScalaFIM `MeshTopologyIdentity.stableKey`, a 64-bit
+non-cryptographic hash); a decoder rebuilds the mesh and must arrive at the
+same key, and a ScalaFIM change that moved it would be a rendition-profile
+change, not a silent one. `summary` is the server-derived `ScalarSummary`
+(min, max, quantiles, histogram, counts). All three headers validate against
+`schemas/rendition-header.schema.json`. A float64 NIfTI volume loses precision
+in its rendition and the canonical asset remains the record; a float64 GIFTI
+source is refused outright in this revision ("Surfaces" above).
+
+`space` is required on a `surface-mesh@0` header and the decoder refuses one
+without it. Renditions written before `space` existed therefore no longer
+decode and must be re-derived from their canonical assets — a rendition is
+server-derived, outside the snapshot digest, and always reproducible, while an
+unlabelled space is the dishonesty this member exists to remove: a reader that
+defaulted it to "compatible" would link a surface to a volume of another space
+exactly as before. The profile stays at `@0`, the band in which a header may
+gain required members and stored renditions are re-derived rather than
+migrated.
 
 ## 6. Domains (ADR 0005 §1)
 
@@ -247,14 +323,26 @@ descriptor's own values. For `volume-grid/v1`: space id, coordinate convention,
 spatial unit, ordinal layout, three int32 shape values, sixteen row-major
 float64 affine values (non-finite values invalid, negative zero written as
 positive zero). For `surface-vertices/v1` (payload `{space, hemisphere,
-vertexCount, faceCount, topology}`, `topology` a `surfaces[].id` on this
-domain with the payload's hemisphere): space id, hemisphere, uint64 vertex
-count, uint64 face count, then every triangle of the `topology` asset as three
-uint32 vertex ordinals in face-array order — and nothing of the coordinates,
-so white, pial, and inflated geometries of one hemisphere share a domain. The
+vertexCount, faceCount, topology}`, `topology` the `asset` of a `surfaces[]`
+entry on this domain carrying the payload's hemisphere — an `assets[].id`,
+never a `surfaces[].id`, because the fingerprint is a function of that asset's
+bytes; `invalid/surface-topology-surface-id`): space id, hemisphere, uint64
+vertex count, uint64 face count, then every triangle of the `topology` asset
+as three uint32 vertex ordinals in face-array order — and nothing of the
+coordinates, so white, pial, and inflated geometries of one hemisphere share
+a domain. The
 server recomputes the fingerprint; a producer-supplied fingerprint with no
 verifiable source is insufficient. An unknown descriptor is retained and
 inspectable but gains no rendering or alignment behavior.
+
+**Spaces.** A surface and a volume in one revision are linked by world
+millimetres — a surface pick moves the volume cursor, and back — which
+means something only when both are in the same space. Every `surface-vertices`
+domain's `space` must therefore equal every `volume-grid` domain's `space` in
+the same manifest, refused at `/domains/i/descriptor/payload/space`
+(`invalid/surface-space-mismatch`). A manifest with no volume domain has
+nothing to disagree with. The rendition header carries the space onward so a
+reader can refuse the link defensively.
 
 **Admission split.** The `volume-grid/v1` fingerprint is a function of the
 descriptor, so admission recomputes it. The `surface-vertices/v1` fingerprint
@@ -263,11 +351,12 @@ manifest is admitted before its assets are stored; GIFTI is decoded on the
 JVM). Admission therefore checks the payload against its records schema, that
 `key.descriptor` agrees, that `key.size` equals `vertexCount`, that
 `structuralFingerprint` is a well-formed `sha256:` identity, and that
-`topology` is a declared surface on this domain with the same hemisphere
-(`invalid/surface-topology-undeclared`). Ingestion then reads every surface's
-GIFTI, checks its vertex and face counts against its domain, recomputes the
-fingerprint from its triangles, and refuses the revision (ingestion status
-`failed`, the message naming the surface and both fingerprints) when it
+`topology` is the asset of a declared surface on this domain with the same
+hemisphere (`invalid/surface-topology-undeclared`). Ingestion then reads
+every surface's GIFTI, checks its vertex and face counts against its domain,
+recomputes the fingerprint from its triangles, and refuses the revision
+(ingestion status `failed`, the message naming the surface and both
+fingerprints) when it
 disagrees; it likewise refuses a vertex-field asset whose value count is not
 its surface's vertex count. In worker mode the commit has already moved the
 head, so the revision is visible with a failed ingestion and no renditions; in

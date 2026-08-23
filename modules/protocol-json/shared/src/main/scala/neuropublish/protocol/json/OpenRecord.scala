@@ -91,7 +91,7 @@ object TrustedSchemas:
   val SurfaceVerticesV1 = SchemaRefWire(
     "org.neuropublish.domain/surface-vertices",
     "1.0",
-    Some(Sha256.unsafe("686d9b2e17090e776c3a876f470e83dc874638c10b3dc67a4e4fad27a31c9232"))
+    Some(Sha256.unsafe("2adc4285db8d257af4aa4e54272631451b7103d1a124b83544dc0814f85487e8"))
   )
 
   val all: List[SchemaRefWire] = List(VolumeGridV1, SurfaceVerticesV1)

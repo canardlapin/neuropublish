@@ -809,13 +809,90 @@ S3 stores), the admission fixtures `invalid/surface-*` and
 | --- | --- |
 | surface rendition fidelity | `SurfaceFidelitySuite` (JVM + JS): exact coordinates, faces, topology identity, field values, sums against the Julia oracle; decode → encode identity |
 | topology admission | `GiftiToRenditionSuite`: triangles hash to the manifest key; `IngestionSurfaceSuite`: a permuted-face surface and a 4-vertex field are refused with messages naming the asset and both fingerprints |
-| coordinate system | every mesh header states `RAS+`; a header with another system is refused by the decoder |
+| coordinate system | the mesh payload is world positions (the GIFTI transform applied once at ingestion, `surfaceToWorld` the identity, `sourceTransform` kept); a header with another system is refused by the decoder |
 | explicit left/right fields | `speech-t`/`speech-z` carry one surface representation per hemisphere; `renditionTargets` lists both vertex fields on their surfaces |
 | honest empty state | a field without a surface representation has no vertex-field target (`speech-effect`, `speech-se`); the workspace shows it as absent (workspace track) |
-| no projection without a receipt | the server never projects: a vertex field is the producer's GIFTI; the reference and Julia representations name `derivation: project-to-surface`, an activity admission resolves |
+| no projection without a receipt | the server never projects: a vertex field is the producer's GIFTI; the reference and Julia representations name `derivation: project-to-surface`, an activity admission resolves. `derivation` stays optional — admission cannot tell a measured field from a projected one — and its absence declares a native surface measurement (SPEC §5) |
 
 Not done here: the surface/hybrid workspace itself (the workspace track builds
 it against the decoders above); picking and volume–surface linking.
+
+#### Review fixes (2026-08-23)
+
+From the fresh-context reviews of `c0ba616..b1b153f`
+(`docs/plans/stage5-review-fixes.md`, Track R). Every item has a test that
+fails without it.
+
+- **B1, surface and volume spaces (`ManifestChecks.spaces`).** A
+  `surface-vertices` domain's `space` must equal every `volume-grid` domain's
+  `space` in the same manifest, refused at
+  `/domains/i/descriptor/payload/space` (`invalid/surface-space-mismatch`).
+  The mesh rendition header now carries `space` so a reader can refuse to link
+  across spaces defensively. The Julia producer and the reference bundle put
+  the icospheres in the volume's space, where they always were geometrically
+  (±30 mm in the volume's RAS+ world), which moved the two surface
+  fingerprints and both bundle digests.
+- **B2, `topology` names an asset.** The check always compared
+  `surfaces[].asset`; SPEC §5/§6, the records schema description, and the
+  error text now say so, and the reference bundle's surfaces are
+  `lh-pial-surface` / `rh-pial-surface` on assets `lh-pial` / `rh-pial`, so
+  the two spellings can no longer coincide. The Julia bundle keeps `id ==
+  asset`, so a check that confused them fails on one bundle or the other.
+  `invalid/surface-topology-surface-id` covers the confusion directly. Editing
+  the records schema repinned its digest in `TrustedSchemas` and every fixture
+  that names it.
+- **S3, sparse and rank-2 vertex fields (`Derivation.fieldValues`).** A
+  `.func.gii` carrying `NIFTI_INTENT_NODE_INDEX` is refused by name instead of
+  having its vertex indices stored as values; the field array must be rank 1
+  or `Dim1 = 1`, so a V×T `TIME_SERIES` is refused for what it is rather than
+  through a vertex-count message.
+- **S5/S6, the bytes decide the placement and the hemisphere
+  (`Derivation.worldGeometry`).** The GIFTI's
+  `CoordinateSystemTransformMatrix` is applied to the positions at ingestion
+  when its `TransformedSpace` is one this build can place; the payload is
+  therefore world positions, the header's `surfaceToWorld` is the identity —
+  so `SurfaceHost.pick` composing through it stays correct and applies nothing
+  twice — and the matrix is kept as `sourceTransform` for provenance. A
+  non-identity transform into an unplaceable space is refused rather than
+  labelled `RAS+`. Where the GIFTI states `AnatomicalStructurePrimary` it must
+  agree with the declared hemisphere, and the header records it.
+- **S9, evidence that is not the producer's own arithmetic.**
+  `SurfaceFidelitySuite` derives 642 = 10·4³ + 2 and 1280 = 20·4³ and vertex
+  0's position from the icosahedron construction, never from `oracle.json`.
+- **S11, a stable topology key.** `faceDigest` (SHA-256 of the payload's face
+  bytes) is carried and verified on decode; `topologyIdentity` stays as the
+  reference implementation's key and is documented as such, so a ScalaFIM hash
+  change would be a profile change rather than a silent invalidation.
+- **Asset roles.** An asset backs at most one `surfaces[]` entry
+  (`invalid/surface-asset-shared`) and is not both a geometry and a volume or
+  vertex-field asset (`invalid/surface-asset-two-roles`); the ingestion cache
+  is keyed by asset, so a geometry is read, placed, and proven once.
+- **A stored-rendition format break.** `space` is required on a
+  `surface-mesh@0` header and the decoder refuses one without it (strict on
+  purpose: absent-means-compatible would reproduce B1 on every rendition
+  written before this change). Renditions derived before this change must be
+  re-derived after deploy — and no command does that today: `reindex` rebuilds
+  the read model from the stored manifests and deliberately keeps
+  `derived_representations`, and `gc` deletes rendition sets only for
+  revisions that are no longer live. Re-deriving an existing revision needs a
+  new subcommand (or a job re-enqueue); it is not in this track.
+- **Smaller.** Float32-only GIFTI sources are stated in SPEC §5 and refused
+  with the type to write instead (float64 support is filed upstream against
+  ScalaFIM); the domain fingerprint is compared as parsed digests, not as
+  strings; a surface on a trusted domain whose payload does not read no longer
+  claims the domain "is not a trusted surface-vertices domain" (the payload's
+  own problems say it); `VolumeGrid`'s preimage magic uses an escape instead
+  of a raw NUL byte; `SurfaceRendition.decode` and
+  `VertexFieldRendition.decode` do their size arithmetic in `Long`.
+
+| Criterion | Evidence |
+| --- | --- |
+| one space per revision | `invalid/surface-space-mismatch`; `FixtureSuite` asserts the reference surface domains carry the volume domain's space; the mesh header's `space` is asserted end to end in `IngestionSurfaceSuite` |
+| `topology` is an asset | `invalid/surface-topology-surface-id`; `GiftiToRenditionSuite` asserts `topology == asset` and `topology != surfaces[].id` on a bundle where they differ |
+| GIFTI decisions | `DerivationGiftiSuite` (10 tests on hand-written ASCII GIFTI): sparse, rank-2, float64, hemisphere disagreement, transform applied, unplaceable transform refused |
+| hemisphere against the bytes | `IngestionSurfaceSuite`: `lh-pial` declared `right` admits and then fails ingestion naming `AnatomicalStructurePrimary=CortexLeft` |
+| world positions | `SurfaceFidelitySuite`: identity `surfaceToWorld`, `sourceTransform` recorded, and an encode of a geometry with a non-identity transform is refused |
+| independent geometry | `SurfaceFidelitySuite`: counts and vertex 0 derived from the icosphere construction |
 
 ### Exit criteria
 

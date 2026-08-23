@@ -99,10 +99,10 @@ abstract class RoutesSpec(factory: ServerFactory) extends CatsEffectSuite:
           List(
             ("lh-pial", "surface-mesh", None),
             ("rh-pial", "surface-mesh", None),
-            ("speech-t-lh", "vertex-field", Some("lh-pial")),
-            ("speech-t-rh", "vertex-field", Some("rh-pial")),
-            ("speech-z-lh", "vertex-field", Some("lh-pial")),
-            ("speech-z-rh", "vertex-field", Some("rh-pial"))
+            ("speech-t-lh", "vertex-field", Some("lh-pial-surface")),
+            ("speech-t-rh", "vertex-field", Some("rh-pial-surface")),
+            ("speech-z-lh", "vertex-field", Some("lh-pial-surface")),
+            ("speech-z-rh", "vertex-field", Some("rh-pial-surface"))
           )
         )
         hdr <- app.run(auth(Request[IO](
