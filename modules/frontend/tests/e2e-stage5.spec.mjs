@@ -37,6 +37,8 @@ const worldReadout = async (page) => {
   return t.split(",").map((s) => parseFloat(s));
 };
 const query = (page) => new URL(page.url()).searchParams;
+// the page coalesces replaceState (250 ms); wait before reading the URL back
+const urlSettled = (page) => page.waitForTimeout(400);
 
 test("Volume → Surface → Hybrid keeps the result identity: same layer ids, order, and display state", async ({ page }) => {
   await login(page);
@@ -50,6 +52,7 @@ test("Volume → Surface → Hybrid keeps the result identity: same layer ids, o
   expect(await page.locator('.pane[data-pane="surface"]').count()).toBe(1);
   expect(await page.locator('.pane[data-pane="volume"]').count()).toBe(0);
   expect(await layerState(page)).toEqual(before);
+  await urlSettled(page);
   expect(query(page).get("p")).toBe("surface");
 
   await page.getByTestId("preset-hybrid").click(); await settle(page);
@@ -91,13 +94,22 @@ test("linked cursor: a surface pick moves the volume cursor to the vertex; a vol
   await expect(page.getByTestId("volume-link")).toContainText(/vertex \d+/);
   const world = await worldReadout(page);
   expect(world.length).toBe(3);
+  // the picked vertex lies on one of the two icospheres (centres x = ∓30 mm, r = 25 mm)
+  const r = Math.min(
+    Math.hypot(world[0] + 30, world[1], world[2]),
+    Math.hypot(world[0] - 30, world[1], world[2]));
+  expect(Math.abs(r - 25)).toBeLessThan(0.6);
   // the URL cursor is the vertex's world position: the round trip is exact to the readout precision
+  await urlSettled(page);
   const c = query(page).get("c").split(",").map(parseFloat);
   // (the status bar prints 2 decimals below 100 and none above; the URL keeps 4)
   for (let i = 0; i < 3; i++) expect(Math.abs(c[i] - world[i])).toBeLessThan(Math.abs(c[i]) >= 100 ? 0.51 : 0.006);
   // surface vertex values are read out per hemisphere beside the volume voxel value
   await expect(page.locator('.readout-layer[data-readout="speech-t"][data-pane="surface"]')).toHaveCount(1);
-  await expect(page.locator('.readout-layer[data-readout="speech-t"][data-pane="volume"]')).toHaveCount(1);
+  // (the volume voxel readout is only present where the vertex falls inside the volume grid; the
+  // synthetic icospheres — r = 25 mm at x = ∓30 — mostly lie outside the 32 × 32 × 24 mm fixture
+  // volume, so only the world coordinate is asserted on the volume side)
+  await expect(page.locator('.readout-layer[data-readout="world"]')).toHaveCount(1);
 
   // now a pick in the volume pane: the surface pane reports the link explicitly
   const volume = page.locator('.pane[data-pane="volume"]');
@@ -109,6 +121,40 @@ test("linked cursor: a surface pick moves the volume cursor to the vertex; a vol
   await expect(link).toContainText(/linked to vertex \d+, \d+\.\d mm|no vertex within 3 mm/);
   await expect(page.locator('[data-readout="link"]')).toContainText(/linked to vertex|no vertex within/);
   await page.screenshot({ path: "test-results/stage5-linked-cursor.png", fullPage: true });
+});
+
+// Julia oracle (modules/conformance/fixtures/julia/oracle.json): probe vertices of the synthetic
+// icosphere surfaces (642 vertices, hemispheres at x ∓ 30 mm, r = 25 mm) and the vertex-field values.
+const ORACLE = {
+  lh: { 321: { world: [-36.60206985473633, 7.531472206115723, 22.906105041503906], t: 4.581221103668213, z: 2.7569239139556885 } },
+  rh: { 641: { world: [52.824562072753906, 9.9901762008667, 2.0580894947052], t: 0.4116179049015045, z: 3.2978386878967285 } },
+};
+const readoutValue = (page, id, pane) =>
+  page.locator(`.readout-layer[data-readout="${id}"][data-pane="${pane}"] .mono`).textContent().then(parseFloat);
+
+test("a URL cursor at an oracle vertex links at 0 mm and reads the oracle's vertex values; 5 mm off the sphere does not link", async ({ page }) => {
+  await login(page);
+  const href = await openWorkspace(page);
+  const lh = ORACLE.lh[321];
+  await page.goto(`${href}?p=hybrid&c=${lh.world.map((v) => v.toFixed(4)).join(",")}`);
+  await ready(page); await settle(page);
+  await expect(page.getByTestId("surface-link")).toContainText(/linked to vertex 321, 0\.0 mm/);
+  await expect(page.locator('[data-readout="link"]')).toContainText(/linked to vertex 321/);
+  expect(await readoutValue(page, "speech-t", "surface")).toBeCloseTo(lh.t, 2);
+  expect(await readoutValue(page, "speech-z", "surface")).toBeCloseTo(lh.z, 2);
+  // right hemisphere vertex 641, by the same route (Surface preset this time)
+  const rh = ORACLE.rh[641];
+  await page.goto(`${href}?p=surface&c=${rh.world.map((v) => v.toFixed(4)).join(",")}`);
+  await ready(page); await settle(page);
+  await expect(page.locator('[data-readout="link"]')).toContainText(/linked to vertex 641, 0\.0 mm/);
+  expect(await readoutValue(page, "speech-t", "surface")).toBeCloseTo(rh.t, 2);
+  expect(await readoutValue(page, "speech-z", "surface")).toBeCloseTo(rh.z, 2);
+  // the origin is 5 mm from the nearest sphere (centres x = ∓30, r = 25): outside the 3 mm radius
+  await page.goto(`${href}?p=hybrid&c=0,0,0`);
+  await ready(page); await settle(page);
+  await expect(page.getByTestId("surface-link")).toContainText(/no vertex within 3 mm/);
+  await expect(page.locator('.readout-layer[data-readout="speech-t"][data-pane="surface"]')).toHaveCount(0);
+  await page.screenshot({ path: "test-results/stage5-oracle-link.png", fullPage: true });
 });
 
 test("a visible field without a surface representation is an honest empty state, never a projection", async ({ page }) => {

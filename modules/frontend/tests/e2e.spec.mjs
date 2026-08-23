@@ -141,7 +141,7 @@ test("threshold and window are independent, reorder and presentation survive a U
   await expect(page.locator(".pill.warn")).toHaveCount(0);
   // inspector tabs
   await page.getByRole("tab", { name: "Provenance" }).click();
-  await expect(page.locator(".prov-node.unknown")).toHaveCount(1); // the retained unknown operation
+  await expect(page.locator(".prov-node.unknown")).toHaveCount(2); // the retained unknown operations: org.example.lab/smooth and (Stage 5) org.example.julia/surface-projection
   await page.getByRole("tab", { name: "Analysis" }).click();
   await expect(page.locator(".facts-panel")).toContainText("n = 26");
 });

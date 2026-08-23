@@ -68,10 +68,7 @@ final case class Loaded(
 
   /** The first declared surface of a hemisphere ("left" | "right") whose geometry decoded. */
   def surface(hemisphere: String): Option[(SurfaceDecl, SurfaceGeometry)] =
-    manifest.raw.hcursor.downField("surfaces").values.toList.flatten
-      .flatMap(j => j.hcursor.get[String]("id").toOption)
-      .flatMap(surfaces.get)
-      .find(_._1.hemisphere == hemisphere)
+    manifest.surfaces.map(_.id).flatMap(surfaces.get).find(_._1.hemisphere == hemisphere)
 
   def hasSurfaces: Boolean = surfaces.nonEmpty
 
@@ -145,46 +142,30 @@ object Loaded:
     case "right" | "rh" | "r" => "right"
     case other => other
 
-  /** `surfaces[]` from the manifest (read from `raw` until the typed projection carries it). */
+  /** `surfaces[]` from the manifest, hemispheres normalised. */
   def surfaceDecls(m: Manifest): List[SurfaceDecl] =
-    m.raw.hcursor.downField("surfaces").values.toList.flatten.flatMap { j =>
-      val c = j.hcursor
-      for
-        id <- c.get[String]("id").toOption
-        asset <- c.get[String]("asset").toOption
-      yield SurfaceDecl(
-        id,
-        asset,
-        c.get[String]("domain").getOrElse(""),
-        normaliseHemisphere(c.get[String]("hemisphere").getOrElse("")),
-        c.get[String]("kind").getOrElse(""),
-        c.get[String]("label").getOrElse(id)
-      )
-    }
+    m.surfaces.map(s =>
+      SurfaceDecl(s.id, s.asset, s.domain, normaliseHemisphere(s.hemisphere), s.kind, s.label)
+    )
 
-  /** `representations[] {kind: "surface", asset, surface, hemisphere}` per field id, from `raw`. A
-    * representation missing its `surface` is ignored: it cannot be displayed anywhere.
+  /** `representations[] {kind: "surface", asset, surface, hemisphere}` per field id. A
+    * representation missing its `surface` is ignored: it cannot be displayed anywhere. The
+    * hemisphere defaults to the declared surface's.
     */
   def surfaceReps(m: Manifest): Map[String, List[SurfaceRep]] =
     val decls = surfaceDecls(m).map(d => d.id -> d).toMap
-    m.raw.hcursor.downField("resultFields").values.toList.flatten.flatMap { j =>
-      val c = j.hcursor
-      c.get[String]("id").toOption.map { id =>
-        id -> c.downField("representations").values.toList.flatten.flatMap { r =>
-          val rc = r.hcursor
-          for
-            kind <- rc.get[String]("kind").toOption if kind == "surface"
-            asset <- rc.get[String]("asset").toOption
-            surface <- rc.get[String]("surface").toOption
-          yield SurfaceRep(
-            asset,
-            surface,
-            normaliseHemisphere(
-              rc.get[String]("hemisphere").toOption
-                .orElse(decls.get(surface).map(_.hemisphere)).getOrElse("")
-            )
+    m.resultFields.map { f =>
+      f.id -> f.representations.flatMap { r =>
+        for
+          _ <- Option.when(r.kind == "surface")(())
+          surface <- r.surface
+        yield SurfaceRep(
+          r.asset,
+          surface,
+          normaliseHemisphere(
+            r.hemisphere.orElse(decls.get(surface).map(_.hemisphere)).getOrElse("")
           )
-        }
+        )
       }
     }.toMap
 

@@ -875,10 +875,13 @@ representations, read from `Manifest.raw` until the typed projection lands).
   links, 10 mm does not, a pick links back at 0 mm); `e2e-stage5.spec.mjs`
   covers preset switching without identity change, linked picks both ways,
   the empty state, URL/saved-view/presentation round trips of proportions and
-  camera, disposal across preset cycles and navigation, and narrow layouts —
-  runnable once the reference bundle carries `lh-pial`/`rh-pial` and surface
-  representations of `speech-t`/`speech-z` (the Julia oracle's vertex values
-  become the pick tolerance then).
+  camera, disposal across preset cycles and navigation, narrow layouts, and —
+  against the merged reference bundle (`lh-pial`/`rh-pial` icospheres,
+  `speech-t`/`speech-z` surface representations) — a URL cursor at a Julia
+  oracle probe vertex links at 0.0 mm and reads the oracle's vertex values in
+  the status bar, while the origin (5 mm off the nearest sphere) reports "no
+  vertex within 3 mm". `scripts/e2e.sh` runs all 15 browser scenarios green
+  through the Julia producer gate.
 
 Not done here: atlas lookup; the Hybrid artboard visual pass (design README);
 topology/coordinate-identity rejection and the derivation-receipt gate live
