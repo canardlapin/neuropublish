@@ -846,6 +846,11 @@ the upstream findings.
 - content-security policy, signed-URL review, rate limits, and upload quotas;
 - sensitivity and identifier scanning with safe refusal messages;
 - protocol migration, compatibility, fuzz, and adversarial reference tests;
+- an adversarial producer in the conformance suite: a client that declares
+  digests it does not own, reuses another tenant's object keys, swaps
+  manifests after commit, tampers presigned transfers, and polls out of
+  interval — the Stage 2 review found the cross-tenant manifest overwrite
+  precisely because the honest Julia producer could never exercise it;
 - Playwright browser matrix and fixed visual fixtures;
 - accessibility audit;
 - browser memory and large-map load budgets;
