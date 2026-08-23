@@ -42,6 +42,38 @@ Set `NP_STATIC_DIR=modules/frontend/dist` (after `npm run build`) to have the
 backend serve the page itself, which is what the `view` URL printed by `push`
 expects.
 
+### Backend environment (Stage 4)
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `NP_DATA_DIR` | `data` | Root of every local store (layout below) |
+| `NP_PORT` | `8080` | Listen port; the base URL is `http://127.0.0.1:$NP_PORT` |
+| `NP_WORKSPACE` / `NP_PROJECT` | `rotman` / `sherlock` | Bootstrap workspace and project (ADR 0004: one workspace in the alpha) |
+| `NP_OWNER_EMAIL` / `NP_OWNER_PASSWORD` | `owner@example.org` / `owner-dev-password` | Local identity-provider user created as `owner` of the bootstrap workspace on first start; `scripts/e2e.sh` signs in with these |
+| `NP_STATIC_DIR` | unset | Built frontend to serve with SPA fallback |
+| `NP_LEGACY_TOKEN` | unset | **Deprecated.** The Stage 1 static bearer token (server side; the CLI's `NP_TOKEN` is unrelated). When set it still publishes and reads everywhere with no identity; leave it unset except for legacy clients. Removed once every client uses `npub login` or a publisher credential. |
+
+Projects are private: every read needs a signed-in workspace member (session
+cookie `np_session`, 24 h, HttpOnly, SameSite=Lax; or an `npub login` user
+token) or that project's publisher credential. Credential management and the
+audit log need an owner or admin. `/api/v1/share/{secret}` and its rendition
+routes are the only anonymous reads. Sessions and device codes live in the
+server that issued them (device codes in memory).
+
+Data-dir layout — one JSON document per record, secrets stored as SHA-256 only,
+passwords as salted PBKDF2-HMAC-SHA256:
+
+```
+<data>/projects/<ws>/<project>.json    revisions/<rev>.json    objects/sha256/..    renditions/<rev>/
+<data>/users/<userId>.json             users/identities/<issuer>/<sha256(subject)>.json
+<data>/members/<ws>.json               workspace members with roles owner|admin|member|viewer
+<data>/sessions/<sha256(cookie)>.json  tokens/<sha256(user token)>.json
+<data>/credentials/<id>.json           credentials/by-hash/<sha256(secret)>.json
+<data>/views/<viewId>.json             links/<id>.json    links/by-hash/<sha256(secret)>.json
+<data>/provenance/<rev>.json           cached provenance read model (a pure function of the manifest)
+<data>/audit/<ws>.jsonl                append-only audit log (login, publish, share, credential, device approve)
+```
+
 ## Upstream Scala libraries
 
 ScalaFIM (and through it Intaglio, image4s, zarr4s, …) is consumed as an exact
