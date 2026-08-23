@@ -525,6 +525,34 @@ hand-written fixture for provenance content; it does not wait for the R track.
 - the complete definition-of-done flow in the product definition passes
   locally.
 
+### Status (2026-08-22)
+
+Built on the Stage 1/3 spine (Stage 2 still deferred). Identity is the
+built-in **local provider** (email + PBKDF2 password, bootstrapped from
+`NP_OWNER_EMAIL`/`NP_OWNER_PASSWORD`) behind the `Identity` algebra; the
+device-code flow, sessions, user tokens, credentials, and share links are
+provider-independent, so an OIDC provider is a swap, not a redesign. Verified
+by `scripts/e2e.sh` (device login approved from a separate session, credential
+scoping, push with the stored token) and eight Playwright scenarios:
+
+| Criterion | Evidence |
+| --- | --- |
+| heterogeneous AR(1)/AR(2) cohort | provenance endpoint groups receipts per facet (`shared=false`, 22 × AR(2), 4 × AR(1)); inspector shows "Inputs differ on temporalNoise" with one row per group; a receipt lacking a key forms a `null` group so `shared` is never falsely true |
+| unknown operation | `org.example.lab/smooth` rendered "retained, not interpreted" with a payload download and no actions; `interpretation = unsupported` in the read model |
+| unsupported op cannot execute | no execution surface exists; unsupported nodes carry no buttons (asserted) |
+| saved view leaves the digest unchanged | save + reopen; `GET /revisions/{id}` digest identical before and after |
+| order and presentation survive a saved-view round trip | threshold and layer order restored from `org.neuropublish.view/workspace-state@1` via the same path as the URL |
+| revoking a link | anonymous viewer sees the read-only presentation, explores locally, returns to the saved version; after revoke the link answers 410 while members keep access |
+| headless CLI login approved elsewhere | `npub login` prints URL + code; a separate session approves via `auth/device/approve`; the token lands in `~/.config/npub/credentials.json` (0600) |
+| project-scoped credentials | a credential for `sherlock` used on another project → 403 before any existence check |
+| definition of done | all ten steps of the product definition's first slice pass locally (overview → measures → controls → readouts → facts → save → share → reset → digest) |
+
+Principal rules live in `backend/Auth.scala`; secrets are stored only as
+SHA-256/PBKDF2 hashes (a test walks the data dir for leaks); the deprecated
+static token is `NP_LEGACY_TOKEN` (deliberately not `NP_TOKEN`, which the CLI
+reads). Carried: the Components-artboard visual pass; atlas lookup; surface
+rendition fidelity (Stage 5).
+
 ## Stage 5 — surface, hybrid workspace, and R clients
 
 ### Surface and hybrid display

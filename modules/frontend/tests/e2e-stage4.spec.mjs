@@ -44,7 +44,7 @@ test("provenance shows heterogeneous inputs as groups, never a false shared valu
   await expect(unknown.locator("button")).toHaveCount(0);
 });
 
-test("saved view: save, reopen with order + presentation, update leaves the revision digest unchanged", async ({ page, request }) => {
+test("saved view: save, reopen with order + presentation, update leaves the revision digest unchanged", async ({ page }) => {
   await login(page);
   const href = await openWorkspace(page);
   const digestBefore = (await page.locator(".facts-panel, .meta, body").first().textContent()) || "";
@@ -65,11 +65,11 @@ test("saved view: save, reopen with order + presentation, update leaves the revi
   expect(order.indexOf("speech-z")).toBeLessThan(order.indexOf("speech-t"));
   // revision digest unchanged by saving (API)
   const rev = href.match(/\/r\/([^/]+)/)[1];
-  const detail = await (await request.get(`/api/v1/revisions/${rev}`)).json();
+  const detail = await (await page.request.get(`/api/v1/revisions/${rev}`)).json(); // page.request shares the session cookie
   expect(detail.digest).toMatch(/^sha256:/);
   await page.goto("/w/rotman/p/sherlock");
   await ready(page);
-  const after = await (await request.get(`/api/v1/revisions/${rev}`)).json();
+  const after = await (await page.request.get(`/api/v1/revisions/${rev}`)).json();
   expect(after.digest).toBe(detail.digest);
 });
 

@@ -10,7 +10,18 @@ const colourPixels = (page) => page.locator("#volume canvas").evaluate((c) => {
   return n;
 });
 
-test.beforeEach(async ({ page }) => { page.on("pageerror", (e) => { throw e; }); });
+async function login(page) {
+  await page.goto("/login");
+  const form = page.getByTestId("login-form");
+  await form.locator("input[type=email], input[name=email]").fill("owner@example.org");
+  await form.locator("input[type=password]").fill("owner-dev-password");
+  await form.locator("button[type=submit], button").first().click();
+  await page.waitForURL(/\/w\//);
+}
+test.beforeEach(async ({ page }) => {
+  page.on("pageerror", (e) => { throw e; });
+  await login(page); // projects are private from Stage 4 on
+});
 
 test("project overview leads to the current revision's workspace", async ({ page }) => {
   await page.goto("/w/rotman/p/sherlock");
