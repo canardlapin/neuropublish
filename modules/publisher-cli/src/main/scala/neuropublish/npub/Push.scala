@@ -6,37 +6,23 @@ import fs2.io.file.{Files, Path}
 import neuropublish.api.*
 import neuropublish.protocol.Sha256
 import neuropublish.protocol.json.Manifest
-import org.http4s.Uri
-import org.http4s.ember.client.EmberClientBuilder
-import sttp.tapir.client.http4s.Http4sClientInterpreter
 
 object Push:
   def run(
       dir: Path,
-      server: String,
+      api: Api,
       ws: String,
       project: String,
       parent: Option[String],
       message: Option[String],
-      token: String
+      token: String,
+      out: String => IO[Unit] = IO.println
   ): IO[ExitCode] =
-    val out = (s: String) => IO.println(s)
-    EmberClientBuilder.default[IO].build.use { client =>
-      val base =
-        Some(Uri.fromString(server).getOrElse(throw PushError(s"--server is not a URL: $server")))
-      val interp = Http4sClientInterpreter[IO]()
-      def call[S, I, E, O](
-          ep: sttp.tapir.Endpoint[S, I, E, O, Any],
-          sec: S,
-          in: I
-      ): IO[Either[E, O]] =
-        val (req, handle) = interp.toSecureRequestThrowDecodeFailures(ep, base).apply(sec).apply(in)
-        client.run(req).use(handle)
-
+    val flow =
       for
         manifestBytes <- Files[IO].readAll(dir / "manifest.json").compile.to(Array)
         parsed <- IO.fromEither(Manifest.parse(manifestBytes).leftMap(m =>
-          PushError(s"manifest rejected: $m")
+          CliError(s"manifest rejected: $m")
         ))
         (digest, manifest) = parsed
         _ <- out(
@@ -50,13 +36,13 @@ object Push:
         )
         byDigest = hashed.toMap
         resolved <- manifest.assets.traverse { a =>
-          IO.fromOption(byDigest.get(a.digest.render))(PushError(
+          IO.fromOption(byDigest.get(a.digest.render))(CliError(
             s"asset ${a.id} ${a.digest.render} not found under ${dir / "assets"}"
           )).map(a -> _)
         }
         _ <- out(f"hashing     ${resolved.length} assets  ok")
         inv = manifest.assets.map(a => AssetInventory(a.digest.render, a.size, a.mediaType))
-        created <- call(
+        created <- api.orFail(api.secured(
           Protocol.createUploadSession,
           token,
           (
@@ -64,23 +50,21 @@ object Push:
             project,
             CreateUploadSession(digest.render, manifestBytes.length.toLong, parent, inv)
           )
-        )
-          .flatMap(r => IO.fromEither(r.leftMap(e => PushError(s"${e.code}: ${e.message}"))))
+        ))
         _ <- out(
           s"negotiating upload session ${created.sessionId}  ${created.missing.length} of ${inv.length} objects missing"
         )
         _ <- created.missing.traverse_ { m =>
           val (_, (p, bytes)) = resolved.find(_._1.digest.render == m.digest).get
-          call(Protocol.uploadObject, token, (created.sessionId, m.digest, bytes))
+          api.secured(Protocol.uploadObject, token, (created.sessionId, m.digest, bytes))
             .flatMap(r =>
-              IO.fromEither(r.leftMap(e => PushError(s"upload ${p.fileName}: ${e.message}")))
+              IO.fromEither(r.leftMap(e => CliError(s"upload ${p.fileName}: ${e.message}")))
             ) *>
             out(s"uploading   ${p.fileName}  ${bytes.length} bytes  ok")
         }
-        _ <- call(Protocol.uploadManifest, token, (created.sessionId, manifestBytes)).flatMap(r =>
-          IO.fromEither(r.leftMap(e => PushError(e.message)))
-        )
-        result <- call(Protocol.commit, token, (created.sessionId, CommitRequest(message)))
+        _ <- api.secured(Protocol.uploadManifest, token, (created.sessionId, manifestBytes))
+          .flatMap(r => IO.fromEither(r.leftMap(e => CliError(e.message))))
+        result <- api.secured(Protocol.commit, token, (created.sessionId, CommitRequest(message)))
         code <- result match
           case Right(c) =>
             out(s"committing  parent ${c.parent.getOrElse("(none)")} -> ${c.revisionId}  ok") *>
@@ -93,12 +77,4 @@ object Push:
             ).as(ExitCode.Error)
           case Left(e) => out(s"error       ${e.code}: ${e.message}").as(ExitCode.Error)
       yield code
-    }.handleErrorWith {
-      case PushError(m) => IO.println(s"error       $m").as(ExitCode.Error)
-      case e: java.net.ConnectException =>
-        IO.println(s"error       cannot reach $server (${e.getMessage})").as(ExitCode.Error)
-      case e =>
-        IO.println(s"error       ${e.getClass.getSimpleName}: ${e.getMessage}").as(ExitCode.Error)
-    }
-
-final case class PushError(message: String) extends RuntimeException(message)
+    flow.handleErrorWith(e => out(s"error       ${Api.describe(api.server)(e)}").as(ExitCode.Error))

@@ -215,6 +215,7 @@ lazy val publisherCli = project
       "com.monovore" %% "decline-effect" % Versions.decline,
       "org.http4s" %% "http4s-ember-client" % Versions.http4s,
       "com.softwaremill.sttp.tapir" %% "tapir-http4s-client" % Versions.tapir,
+      "com.softwaremill.sttp.tapir" %% "tapir-http4s-server" % Versions.tapir % Test,
       "org.typelevel" %% "munit-cats-effect" % Versions.munitCatsEffect % Test
     )
   )

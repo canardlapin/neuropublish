@@ -24,10 +24,19 @@ Aliases are `np`-prefixed because ScalaFIM's build, loaded by source pin into th
 ## Running the thin spine by hand
 
 ```
-sbt backend/run                       # http://127.0.0.1:8080, token "dev-token", project rotman/sherlock
-NP_TOKEN=dev-token sbt "publisherCli/run push modules/conformance/fixtures/reference --project rotman/sherlock"
+sbt backend/run                       # http://127.0.0.1:8080, project rotman/sherlock
+sbt "publisherCli/run login"          # prints a URL and code; approve it in the browser, once
+sbt "publisherCli/run push modules/conformance/fixtures/reference --project rotman/sherlock"
 cd modules/frontend && npm run dev    # http://127.0.0.1:5173/w/rotman/p/sherlock (talks to :8080)
 ```
+
+`npub login` stores a user token in `$NPUB_CONFIG_DIR/credentials.json`
+(default `~/.config/npub/credentials.json`, mode 0600), keyed by `--server`.
+`push` resolves its bearer as `--token` (discouraged) → `NP_TOKEN` → that file.
+Batch jobs should not use a personal login: create a project-scoped credential
+with `npub credential create --project rotman/sherlock --name hpc-nightly` and
+export its one-time secret as `NP_TOKEN`. `npub whoami` and `npub logout`
+inspect and clear the stored entry.
 
 Set `NP_STATIC_DIR=modules/frontend/dist` (after `npm run build`) to have the
 backend serve the page itself, which is what the `view` URL printed by `push`
