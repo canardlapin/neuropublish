@@ -24,7 +24,7 @@ object LifecycleSpike:
   private lazy val model: ViewerModel =
     val space = VolumeSpace(NeuroSpace(Vector(16, 16, 16)))
     val vol = NeuroVol.fromLinearChecked(
-      PrimitiveBuffers.tabulate[Double](space.nVoxels)(i => (i % 97).toDouble),
+      NArrayUtil.tabulate[Double](space.nVoxels)(i => (i % 97).toDouble),
       space.toNeuroSpace
     ).fold(e => throw IllegalStateException(e.toString), identity)
     ViewerModel.unsafe(
