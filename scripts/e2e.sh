@@ -95,12 +95,23 @@ $CLI push modules/conformance/fixtures/reference \
   --server "http://127.0.0.1:$PORT" --project rotman/sherlock --message "e2e" | tee "$DATA/push.log"
 grep -q "^view " "$DATA/push.log"
 
-echo "== second push with a stale parent must be rejected"
-if $CLI push modules/conformance/fixtures/reference \
+echo "== re-pushing the identical bundle is a no-op (already published as the head)"
+$CLI push modules/conformance/fixtures/reference \
+  --server "http://127.0.0.1:$PORT" --project rotman/sherlock > "$DATA/push-same.log" 2>&1
+grep -q "^unchanged " "$DATA/push-same.log" || { cat "$DATA/push-same.log"; exit 1; }
+
+echo "== a changed bundle pushed with a stale parent must be rejected"
+rm -rf "$DATA/bundle2"; cp -R modules/conformance/fixtures/reference "$DATA/bundle2"
+python3 - "$DATA/bundle2/manifest.json" <<'PY'
+import json, sys
+p = sys.argv[1]; m = json.load(open(p)); m["title"] = m["title"] + " (stale-parent probe)"
+json.dump(m, open(p, "w"), indent=2)
+PY
+if $CLI push "$DATA/bundle2" \
   --server "http://127.0.0.1:$PORT" --project rotman/sherlock > "$DATA/push2.log" 2>&1; then
   echo "stale push unexpectedly succeeded"; cat "$DATA/push2.log"; exit 1
 fi
-grep -q "current head is" "$DATA/push2.log"
+grep -q "current head is" "$DATA/push2.log" || { cat "$DATA/push2.log"; exit 1; }
 
 echo "== wait for ingestion (worker mode reports pending until renditions exist)"
 REV=$(grep "^revision " "$DATA/push.log" | grep -oE '/r/[a-z0-9]+' | head -1 | cut -c4-)

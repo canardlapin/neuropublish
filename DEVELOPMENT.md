@@ -114,8 +114,7 @@ database-backed server) and the MinIO suite (`S3Suite`) use Testcontainers and
 a fresh database / bucket per test. They `assume` Docker: without a reachable
 daemon they report as skipped, never failed — unless `NP_TEST_REQUIRE_DOCKER=1`
 (or `CI=true`) is set, in which case a missing daemon fails the suite, so a CI
-run can never go green by skipping them. Set `NP_TEST_REQUIRE_DOCKER=1` in the
-CI workflow.
+run can never go green by skipping them (`.github/workflows/ci.yml` sets it).
 
 Schema notes (ADR 0004): every project-scoped table carries `workspace_id`
 with a composite foreign key `(workspace_id, project_id) → projects`, and every

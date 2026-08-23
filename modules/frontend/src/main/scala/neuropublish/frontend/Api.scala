@@ -59,7 +59,9 @@ final class Api(base: String)(using ExecutionContext):
     */
   private def fetchUrl(url: String): Future[dom.Response] =
     val absolute = url.startsWith("http://") || url.startsWith("https://")
-    val ours = base.nonEmpty && url.startsWith(base + "/")
+    // ours: the API base, or the page's own origin when the backend serves the page (base = "")
+    val ours = (base.nonEmpty && url.startsWith(base + "/")) ||
+      url.startsWith(dom.window.location.origin + "/")
     if absolute && !ours then
       val r = new dom.RequestInit {}
       r.method = "GET".asInstanceOf[dom.HttpMethod]
