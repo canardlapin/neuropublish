@@ -27,7 +27,7 @@
       "maximum": 2147483647
     },
     "topology": {
-      "description": "Manifest-local id of the surface asset whose triangle array defines the domain's topology; it must be one of the `surfaces[]` entries on this domain.",
+      "description": "The `asset` of a `surfaces[]` entry on this domain (an `assets[].id`, not a `surfaces[].id`): the GIFTI whose triangle array defines the domain's topology and whose bytes the structural fingerprint is recomputed from. The entry must carry the payload's hemisphere.",
       "type": "string",
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
     }

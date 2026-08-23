@@ -85,8 +85,10 @@ object VertexFieldRendition:
     if n <= 0 then Left("vertexCount must be positive")
     else if geometry.vertexCount != n then
       Left(s"field has $n vertices but the surface has ${geometry.vertexCount}")
-    else if payload.length != n * 4 then
-      Left(s"payload has ${payload.length} bytes, expected ${n * 4}")
+    else if n.toLong * 4L > Int.MaxValue.toLong then
+      Left("field too large for a single rendition payload")
+    else if payload.length.toLong != n.toLong * 4L then
+      Left(s"payload has ${payload.length} bytes, expected ${n.toLong * 4L}")
     else
       val values = new Array[Double](n)
       var i = 0

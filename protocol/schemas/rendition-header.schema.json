@@ -49,12 +49,13 @@
       "additionalProperties": false
     },
     "surfaceMeshHeader": {
-      "description": "One hemisphere's triangle mesh. `topologyIdentity` is ScalaFIM's stable key of the ordered faces (16 lowercase hex); a decoder proves it rebuilt the same topology. The protocol-level domain key (ADR 0005 surface-vertices/v1) is verified at ingestion, not carried here.",
+      "description": "One hemisphere's triangle mesh in world coordinates (RAS+ mm): ingestion applies the GIFTI's CoordinateSystemTransformMatrix before writing the positions, so `surfaceToWorld` is the identity and `sourceTransform` records what was applied. `space` is the surface-vertices domain's space id (a reader refuses to link a surface with a volume of another space). `topologyIdentity` is ScalaFIM's stable key of the ordered faces (16 lowercase hex, the reference implementation's seeded hash); `faceDigest` is the SHA-256 of the payload's face bytes (little-endian int32 ordinals, face order), the stable identity a decoder proves. The protocol-level domain key (ADR 0005 surface-vertices/v1) is verified at ingestion, not carried here.",
       "type": "object",
       "required": [
         "profile",
         "hemisphere",
         "kind",
+        "space",
         "vertexCount",
         "faceCount",
         "surfaceToWorld",
@@ -65,11 +66,35 @@
         "profile": { "const": "org.neuropublish.rendition/surface-mesh@0" },
         "hemisphere": { "type": "string", "enum": ["left", "right"] },
         "kind": { "type": "string", "minLength": 1 },
+        "space": { "type": "string", "minLength": 1 },
         "vertexCount": { "type": "integer", "minimum": 1 },
         "faceCount": { "type": "integer", "minimum": 1 },
         "surfaceToWorld": { "$ref": "#/$defs/affine" },
         "coordinateSystem": { "const": "RAS+" },
         "topologyIdentity": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+        "faceDigest": {
+          "oneOf": [{ "type": "null" }, { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }]
+        },
+        "sourceTransform": {
+          "description": "The GIFTI CoordinateSystemTransformMatrix applied at ingestion (provenance); null when the source carried none.",
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["matrix"],
+              "properties": {
+                "matrix": { "$ref": "#/$defs/affine" },
+                "dataSpace": { "type": ["string", "null"] },
+                "transformedSpace": { "type": ["string", "null"] }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "anatomicalStructurePrimary": {
+          "description": "The GIFTI's AnatomicalStructurePrimary metadata as written (CortexLeft, CortexRight), verified against the declared hemisphere at ingestion; null when absent.",
+          "type": ["string", "null"]
+        },
         "source": { "$ref": "#/$defs/source" }
       },
       "additionalProperties": false
