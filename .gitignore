@@ -25,3 +25,6 @@ local.sbt
 .DS_Store
 .idea/
 .vscode/
+
+# agent worktrees and local session files
+.claude/

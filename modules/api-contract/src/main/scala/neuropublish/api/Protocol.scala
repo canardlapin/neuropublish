@@ -108,7 +108,9 @@ object Protocol:
       StatusCode.BadRequest
     ).and(jsonBody[ApiError].description("invalid request or manifest")))
   )
-  private val secured = base.securityIn(auth.bearer[Option[String]]()).securityIn(cookie[Option[String]]("np_session")).errorOut(errors)
+  private val secured = base.securityIn(
+    auth.bearer[Option[String]]()
+  ).securityIn(cookie[Option[String]]("np_session")).errorOut(errors)
 
   val createUploadSession = secured.post
     .in("workspaces" / path[String]("workspace") / "projects" / path[String]("project") /
@@ -139,22 +141,18 @@ object Protocol:
 
   val project = secured.get
     .in("workspaces" / path[String]("workspace") / "projects" / path[String]("project"))
-    
     .out(jsonBody[ProjectSummary])
 
   val revision = secured.get
     .in("revisions" / path[String]("revision"))
-    
     .out(jsonBody[RevisionDetail])
 
   val renditionHeader = secured.get
     .in("revisions" / path[String]("revision") / "renditions" / path[String]("asset") / "header")
-    
     .out(stringBody)
 
   val renditionPayload = secured.get
     .in("revisions" / path[String]("revision") / "renditions" / path[String]("asset") / "payload")
-    
     .out(byteArrayBody)
 
   val all: List[AnyEndpoint] = List(
