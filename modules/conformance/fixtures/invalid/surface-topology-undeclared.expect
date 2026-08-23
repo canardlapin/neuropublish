@@ -1,1 +1,1 @@
-/domains/1/descriptor/payload/topology: topology asset 'speech-t' is not declared in surfaces[] on this domain
+/domains/1/descriptor/payload/topology: topology 'speech-t' is not the asset of any surfaces[] entry on this domain (topology names a surfaces[].asset, not a surfaces[].id)

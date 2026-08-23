@@ -307,7 +307,7 @@ const VOLUME_GRID_SCHEMA = (
 const SURFACE_VERTICES_SCHEMA = (
     id = "org.neuropublish.domain/surface-vertices",
     version = "1.0",
-    digest = "sha256:686d9b2e17090e776c3a876f470e83dc874638c10b3dc67a4e4fad27a31c9232",
+    digest = "sha256:2adc4285db8d257af4aa4e54272631451b7103d1a124b83544dc0814f85487e8",
 )
 const RECEIPT_SCHEMA = (
     id = "org.bbuchsbaum.fmrireg/analysis-receipt",

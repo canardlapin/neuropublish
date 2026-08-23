@@ -84,7 +84,7 @@
         "descriptor": {
           "id": "org.neuropublish.domain/surface-vertices",
           "version": "1.0",
-          "digest": "sha256:686d9b2e17090e776c3a876f470e83dc874638c10b3dc67a4e4fad27a31c9232"
+          "digest": "sha256:2adc4285db8d257af4aa4e54272631451b7103d1a124b83544dc0814f85487e8"
         },
         "size": 642,
         "structuralFingerprint": "sha256:87c510fe0b22b14c009afcf8833601f7c54d5714a86d08fb7b60b7938c2934c4"
@@ -93,7 +93,7 @@
         "schema": {
           "id": "org.neuropublish.domain/surface-vertices",
           "version": "1.0",
-          "digest": "sha256:686d9b2e17090e776c3a876f470e83dc874638c10b3dc67a4e4fad27a31c9232"
+          "digest": "sha256:2adc4285db8d257af4aa4e54272631451b7103d1a124b83544dc0814f85487e8"
         },
         "payload": {
           "space": "fsaverage5",
@@ -110,7 +110,7 @@
         "descriptor": {
           "id": "org.neuropublish.domain/surface-vertices",
           "version": "1.0",
-          "digest": "sha256:686d9b2e17090e776c3a876f470e83dc874638c10b3dc67a4e4fad27a31c9232"
+          "digest": "sha256:2adc4285db8d257af4aa4e54272631451b7103d1a124b83544dc0814f85487e8"
         },
         "size": 642,
         "structuralFingerprint": "sha256:3701cb541fdad954cc8a4b83ea4e059a42dfefbd7b0bb22b91b12d2bc32a4105"
@@ -119,7 +119,7 @@
         "schema": {
           "id": "org.neuropublish.domain/surface-vertices",
           "version": "1.0",
-          "digest": "sha256:686d9b2e17090e776c3a876f470e83dc874638c10b3dc67a4e4fad27a31c9232"
+          "digest": "sha256:2adc4285db8d257af4aa4e54272631451b7103d1a124b83544dc0814f85487e8"
         },
         "payload": {
           "space": "MNI152NLin2009cAsym",
