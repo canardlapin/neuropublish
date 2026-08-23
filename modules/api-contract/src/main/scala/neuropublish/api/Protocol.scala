@@ -18,7 +18,16 @@ final case class CreateUploadSession(
     parent: Option[String],
     assets: List[AssetInventory]
 )
-final case class UploadInstruction(digest: String, url: String)
+
+/** How to send one object. Stage 2: a signed object-store PUT (method/headers from the store);
+  * Stage 1: the control plane.
+  */
+final case class UploadInstruction(
+    digest: String,
+    url: String,
+    method: String = "PUT",
+    headers: Map[String, String] = Map.empty
+)
 final case class Limits(maxObjectBytes: Long, maxObjects: Int, maxSessionBytes: Long)
 final case class UploadSessionCreated(
     sessionId: String,
@@ -53,6 +62,16 @@ final case class RenditionRef(
     headerUrl: String,
     payloadUrl: String
 )
+
+/** Ingestion state of a revision: "pending" | "running" | "ready" | "failed"; `error` only when
+  * failed.
+  */
+final case class IngestionStatus(
+    status: String,
+    updatedAt: String,
+    error: Option[String] = None,
+    attempts: Int = 0
+)
 final case class RevisionDetail(
     id: String,
     workspace: String,
@@ -62,11 +81,22 @@ final case class RevisionDetail(
     message: Option[String],
     committedAt: String,
     manifest: Json,
-    renditions: List[RenditionRef]
+    renditions: List[RenditionRef],
+    ingestion: Option[IngestionStatus] = None
 )
 
 /** Error body; `head` is populated on a stale-parent rejection so the publisher can re-push. */
-final case class ApiError(code: String, message: String, head: Option[String] = None)
+/** One admission problem, addressed by JSON Pointer into the manifest ("" = whole document). */
+final case class Problem(pointer: String, message: String, level: String = "error")
+
+/** Error body; `head` on a stale-parent rejection; `problems` carries accumulated admission errors.
+  */
+final case class ApiError(
+    code: String,
+    message: String,
+    head: Option[String] = None,
+    problems: Option[List[Problem]] = None
+)
 
 object Protocol:
   given Codec[AssetInventory] = deriveCodec
@@ -79,6 +109,8 @@ object Protocol:
   given Codec[RevisionSummary] = deriveCodec
   given Codec[ProjectSummary] = deriveCodec
   given Codec[RenditionRef] = deriveCodec
+  given Codec[IngestionStatus] = deriveCodec
+  given Codec[Problem] = deriveCodec
   given Codec[RevisionDetail] = deriveCodec
   given Codec[ApiError] = deriveCodec
 
