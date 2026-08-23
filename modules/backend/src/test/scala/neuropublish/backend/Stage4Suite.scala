@@ -17,9 +17,10 @@ import org.http4s.implicits.*
 import scala.concurrent.duration.*
 
 /** Stage 4 exit criteria: identity, device flow, credentials, saved views, share links, provenance,
-  * audit — against the routes in-process, with no static token configured.
+  * audit — against the routes in-process, with no static token configured. Parameterized over the
+  * record stores: [[Stage4Suite]] runs it on the local fs, `PgStage4Suite` on PostgreSQL.
   */
-class Stage4Suite extends CatsEffectSuite:
+abstract class Stage4Spec(factory: ServerFactory) extends CatsEffectSuite:
   override def munitIOTimeout: Duration = 2.minutes
   private val fixtures = List("modules/conformance/fixtures", "../conformance/fixtures")
     .map(Path(_)).find(p => java.nio.file.Files.isDirectory(p.toNioPath)).get
@@ -28,9 +29,7 @@ class Stage4Suite extends CatsEffectSuite:
   private val password = "owner-dev-password"
 
   private def server = ResourceFunFixture(
-    Files[IO].tempDirectory.evalMap(dir =>
-      Server.build(dir, key, "http://test", owner, password, legacyToken = None).map(_.orNotFound)
-    )
+    factory.build(key, "http://test", owner, password, legacyToken = None).map(_.app)
   )
 
   private type Auth = Request[IO] => Request[IO]
@@ -142,17 +141,15 @@ class Stage4Suite extends CatsEffectSuite:
       yield assertEquals(after.status, Status.Unauthorized)
   }
 
-  private def serverWithDir = ResourceFunFixture(
-    Files[IO].tempDirectory.evalMap(dir =>
-      Server.build(dir, key, "http://test", owner, password, legacyToken = None)
-        .map(r => (dir, r.orNotFound))
-    )
+  private def serverWithStores = ResourceFunFixture(
+    factory.build(key, "http://test", owner, password, legacyToken = None)
   )
 
-  serverWithDir.test(
-    "secrets on disk are hashes: no clear password, session, token, or link secret"
+  serverWithStores.test(
+    "stored secrets are hashes: no clear password, session, token, or link secret"
   ) {
-    (dir, app) =>
+    srv =>
+      val app = srv.app
       for
         c <- login(app)
         codes <- post(app, "/api/v1/auth/device", DeviceStart("npub"), anon).flatMap(
@@ -181,18 +178,13 @@ class Stage4Suite extends CatsEffectSuite:
           CreateShareLink(None),
           cookie(c)
         ).flatMap(decode[ShareLinkCreated])
-        texts <- Files[IO].walk(dir).filter(p =>
-          p.toString.endsWith(".json") || p.toString.endsWith(".jsonl")
-        ).evalMap(p => Files[IO].readUtf8(p).compile.string).compile.toList
-        all = texts.mkString("\n")
-        _ = assert(!all.contains(password), "clear password on disk")
-        _ = assert(!all.contains(c), "session secret on disk")
-        _ = assert(!all.contains(tok.token.get), "user token on disk")
-        _ = assert(!all.contains(cred.secret), "credential secret on disk")
-        _ = assert(!all.contains(link.secret), "link secret on disk")
-        userFiles <- Files[IO].list(dir / "users").filter(_.toString.endsWith(".json"))
-          .evalMap(p => Files[IO].readUtf8(p).compile.string).compile.toList
-      yield assert(userFiles.exists(_.contains("pbkdf2-hmac-sha256")), userFiles)
+        all <- srv.storedText
+        _ = assert(!all.contains(password), "clear password stored")
+        _ = assert(!all.contains(c), "session secret stored")
+        _ = assert(!all.contains(tok.token.get), "user token stored")
+        _ = assert(!all.contains(cred.secret), "credential secret stored")
+        _ = assert(!all.contains(link.secret), "link secret stored")
+      yield assert(all.contains("pbkdf2-hmac-sha256"), "no PBKDF2 password hash stored")
   }
 
   server.test("device flow: start, poll pending, approve from a session, poll granted, push") {
@@ -275,8 +267,11 @@ class Stage4Suite extends CatsEffectSuite:
       )
     yield t.token.get
 
-  serverWithDir.test("user tokens expire after 30 days and are revoked by logout or all at once") {
-    (dir, app) =>
+  serverWithStores.test(
+    "user tokens expire after 30 days and are revoked by logout or all at once"
+  ) {
+    srv =>
+      val app = srv.app
       for
         c <- login(app)
         t1 <- userToken(app, c)
@@ -284,16 +279,12 @@ class Stage4Suite extends CatsEffectSuite:
         ok <- get(app, "/api/v1/auth/me", bearer(t1))
         _ = assertEquals(ok.status, Status.Ok)
         // the stored record carries an expiry 30 days out
-        rec <- JsonFiles.read[UserTokenRecord](dir / "tokens" / s"${Secrets.sha256Hex(t1)}.json")
+        exp <- srv.tokenExpiry(t1).map(_.get)
         now <- IO.realTimeInstant
-        exp = java.time.Instant.parse(rec.get.expiresAt.get)
         _ = assert(exp.isAfter(now.plusSeconds(29 * 86400)) &&
           exp.isBefore(now.plusSeconds(31 * 86400)))
         // an expired token is a generic 401
-        _ <- JsonFiles.write(
-          dir / "tokens" / s"${Secrets.sha256Hex(t1)}.json",
-          rec.get.copy(expiresAt = Some(now.minusSeconds(1).toString))
-        )
+        _ <- srv.setTokenExpiry(t1, now.minusSeconds(1))
         expired <- get(app, "/api/v1/auth/me", bearer(t1))
         _ = assertEquals(expired.status, Status.Unauthorized)
         e <- decode[ApiError](expired)
@@ -580,17 +571,14 @@ class Stage4Suite extends CatsEffectSuite:
   private val ownerB = "owner-b@example.org"
   private val passwordB = "owner-b-password"
   private def twoWorkspaces = ResourceFunFixture(
-    Files[IO].tempDirectory.evalMap(dir =>
-      Server.build(
-        dir,
-        key,
-        "http://test",
-        owner,
-        password,
-        legacyToken = None,
-        extra = List(Server.Bootstrap(keyB, ownerB, passwordB))
-      ).map(_.orNotFound)
-    )
+    factory.build(
+      key,
+      "http://test",
+      owner,
+      password,
+      legacyToken = None,
+      extra = List(Server.Bootstrap(keyB, ownerB, passwordB))
+    ).map(_.app)
   )
 
   twoWorkspaces.test(
@@ -798,3 +786,5 @@ class Stage4Suite extends CatsEffectSuite:
     assert(Routes.openApiYaml.contains("/share/{secret}"))
     assert(Routes.openApiYaml.contains("/revisions/{revision}/provenance"))
   }
+
+class Stage4Suite extends Stage4Spec(ServerFactory.Local)

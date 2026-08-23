@@ -10,6 +10,7 @@ object Versions {
   val apispec = "0.11.9"
   val doobie = "1.0.0-RC9"
   val flyway = "11.8.2"
+  val testcontainers = "0.43.0"
   val decline = "2.5.0"
   val laminar = "17.2.1"
   val waypoint = "9.0.0"

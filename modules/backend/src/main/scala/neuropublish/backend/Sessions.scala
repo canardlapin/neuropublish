@@ -2,23 +2,13 @@ package neuropublish.backend
 
 import cats.effect.{IO, Ref}
 import fs2.io.file.{Files, Path}
-import io.circe.Codec
-import io.circe.generic.semiauto.*
 import java.time.Instant
 import scala.concurrent.duration.*
 
-/** Browser sessions: the cookie carries a random secret; only its SHA-256 is stored under
-  * `<data>/sessions/<sha256>.json` with the user id and expiry.
-  */
-final case class SessionRecord(userId: String, createdAt: String, expiresAt: String)
-object SessionRecord:
-  given Codec[SessionRecord] = deriveCodec
-
-final class Sessions(dir: Path):
-  val lifetime: FiniteDuration = 24.hours
+/** Local-fs [[Sessions]]: `<data>/sessions/<sha256(cookie)>.json`. */
+final class LocalSessions(dir: Path) extends Sessions:
   private def file(hash: String) = dir / s"$hash.json"
 
-  /** Returns the clear secret (for the cookie) — never stored. */
   def create(userId: String): IO[(String, Instant)] =
     for
       secret <- Secrets.token(32)
@@ -44,25 +34,12 @@ final class Sessions(dir: Path):
   def revoke(secret: String): IO[Unit] =
     Files[IO].deleteIfExists(file(Secrets.sha256Hex(secret))).void
 
-/** User tokens minted by the device flow; `<data>/tokens/<sha256>.json`. A token lives
-  * [[UserTokens.lifetime]] from minting (`expiresAt`; a record without one predates expiry and is
-  * treated as expired) and can be revoked one at a time (logout) or all at once per user.
-  */
-final case class UserTokenRecord(
-    userId: String,
-    client: String,
-    createdAt: String,
-    expiresAt: Option[String]
-)
-object UserTokenRecord:
-  given Codec[UserTokenRecord] = deriveCodec
-
-final class UserTokens(dir: Path):
-  val lifetime: FiniteDuration = 30.days
+/** Local-fs [[UserTokens]]: `<data>/tokens/<sha256(token)>.json`. */
+final class LocalUserTokens(dir: Path) extends UserTokens:
   private def file(hash: String) = dir / s"$hash.json"
   def mint(userId: String, client: String): IO[String] =
     for
-      secret <- Secrets.token(32).map("npu_" + _)
+      secret <- Secrets.token(32).map(UserTokens.Prefix + _)
       now <- IO.realTimeInstant
       exp = now.plusMillis(lifetime.toMillis)
       _ <- JsonFiles.write(
@@ -71,7 +48,6 @@ final class UserTokens(dir: Path):
       )
     yield secret
 
-  /** The live token a secret names; an expired one is deleted and answered as unknown. */
   def resolve(secret: String): IO[Option[UserTokenRecord]] =
     val p = file(Secrets.sha256Hex(secret))
     JsonFiles.read[UserTokenRecord](p).flatMap {
@@ -86,7 +62,6 @@ final class UserTokens(dir: Path):
   def revoke(secret: String): IO[Unit] =
     Files[IO].deleteIfExists(file(Secrets.sha256Hex(secret))).void
 
-  /** Revoke every token of one user. */
   def revokeAll(userId: String): IO[Int] =
     Files[IO].exists(dir).flatMap {
       case false => IO.pure(0)

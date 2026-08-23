@@ -374,6 +374,29 @@ to close before the freeze:
   failure state visible on the revision;
 - audit events and delayed orphan cleanup.
 
+#### Status (2026-08-23)
+
+Persistence landed: `modules/domain` holds the store algebras and records
+(`RevisionStore`, `Identity`, `Members`, `Sessions`, `UserTokens`,
+`Credentials`, `Views`, `ShareLinks`, `Audit`); `modules/persistence` holds the
+Flyway migrations (`V1__workspaces` … `V7__ingestion_jobs`, the tables of
+architecture "Persistence" with ADR 0004's composite foreign keys and the
+`stored_objects` / `workspace_assets` / `catalog_assets` split), Doobie
+implementations of every algebra, and a `Reindex` service. `Server.build`
+selects PostgreSQL when `NP_DATABASE_URL` is set (migrating at start) and the
+local-fs stores otherwise; `neuropublish.backend.Main reindex` rebuilds the
+read model from stored manifests. Commit is one transaction with a row lock on
+the project (parent-must-be-head CAS) that also enqueues an `ingestion_jobs`
+row (`pending|running|ready|failed`; claim by `FOR UPDATE SKIP LOCKED`) for the
+worker. Verified under Testcontainers PostgreSQL (suites skip without Docker):
+composite FK rejects a cross-workspace revision; two concurrent commits with the
+same parent yield one head and one stale rejection; `reindex` on an emptied
+projection reproduces it row for row; two workspaces never cross at the store
+level, and `RoutesSuite`/`Stage4Suite` (including the two-workspace isolation
+test) run unchanged against the database-backed server. Not yet: durable
+`upload_sessions` (table exists; sessions are still in memory), the worker
+process itself, orphan cleanup, row-level security (deferred per ADR 0004).
+
 ### Neutrality proof
 
 A tiny Julia program that does not use Neuropublish Scala classes must create a

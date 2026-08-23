@@ -165,7 +165,10 @@ final class Publication(
                                     head
                                   )))
                                 case Right(rec) =>
-                                  ingestion.publish(id, rec.id) *> sessions.update(_ - id) *>
+                                  // the read model (analyses, result_fields, revision_assets);
+                                  // `reindex` rebuilds it from the stored bytes if this fails
+                                  revisions.index(rec, manifest) *>
+                                    ingestion.publish(id, rec.id) *> sessions.update(_ - id) *>
                                     IO.pure(Right(CommitResult(
                                       rec.id,
                                       digest.render,

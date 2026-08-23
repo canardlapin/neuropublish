@@ -67,8 +67,53 @@ subset of the manifest (no provenance, no method payloads, no open records).
 `/api/v1/share/{secret}` and its rendition routes are the only anonymous reads. Sessions and device codes live in the
 server that issued them (device codes in memory).
 
-Data-dir layout — one JSON document per record, secrets stored as SHA-256 only,
-passwords as salted PBKDF2-HMAC-SHA256:
+### PostgreSQL (Stage 2)
+
+Set `NP_DATABASE_URL` and every record store (projects, revisions, users,
+members, sessions, tokens, credentials, views, links, audit, the read model)
+moves from the JSON files to PostgreSQL; unset, the local-fs layout below stays
+the default (`scripts/e2e.sh` uses it). Objects and renditions remain under
+`NP_DATA_DIR` either way until the S3 object store lands.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `NP_DATABASE_URL` | unset | JDBC URL, e.g. `jdbc:postgresql://127.0.0.1:5432/neuropublish`. When set, Flyway runs `modules/persistence/src/main/resources/db/migration/V*.sql` at start. |
+| `NP_DATABASE_USER` / `NP_DATABASE_PASSWORD` | `neuropublish` / empty | Connection credentials |
+| `NP_DATABASE_POOL` | `8` | Hikari pool size |
+
+A local database for development, no compose file needed:
+
+```
+docker run -d --name np-postgres -p 5432:5432 \
+  -e POSTGRES_USER=neuropublish -e POSTGRES_PASSWORD=neuropublish -e POSTGRES_DB=neuropublish \
+  postgres:16-alpine
+export NP_DATABASE_URL=jdbc:postgresql://127.0.0.1:5432/neuropublish
+export NP_DATABASE_USER=neuropublish NP_DATABASE_PASSWORD=neuropublish
+sbt backend/run                       # migrates, then serves over PostgreSQL
+sbt "backend/run reindex"             # rebuild analyses / result_fields / revision_assets from the stored manifests, then exit
+```
+
+`reindex` walks every revision, reads its manifest bytes from the object store
+by digest, and re-projects the read model (the manifest is the source of truth;
+`derived_representations`, the worker's output, is left alone). It exits 1 and
+names the revisions whose manifest bytes were missing.
+
+The PostgreSQL suites (`persistence/test`, and `PgRoutesSuite` /
+`PgStage4Suite` in `backend/test`, which run the route suites over the
+database-backed server) use Testcontainers and a fresh database per test. They
+`assume` Docker: without a reachable daemon they report as skipped, never failed.
+
+Schema notes (ADR 0004): every child table carries `workspace_id` with a
+composite foreign key `(workspace_id, project_id) → projects`; `stored_objects`
+(physical bytes) is separate from `workspace_assets` (who may reference a
+digest) and `catalog_assets` (public templates); `ingestion_jobs` is the
+worker's queue — a commit enqueues one `pending` row per revision, a worker
+claims with `UPDATE … WHERE id = (SELECT … WHERE status = 'pending' … FOR UPDATE
+SKIP LOCKED) RETURNING …` and ends on `ready` or `failed` (or back to `pending`
+to retry). `neuropublish.persistence.IngestionJobs` is that contract in code.
+
+Data-dir layout (the default, `NP_DATABASE_URL` unset) — one JSON document per
+record, secrets stored as SHA-256 only, passwords as salted PBKDF2-HMAC-SHA256:
 
 ```
 <data>/projects/<ws>/<project>.json    revisions/<rev>.json    objects/sha256/..    renditions/<rev>/
@@ -100,8 +145,10 @@ implicit sibling checkout; a clean consumer must resolve from the pin alone.
 
 See `docs/architecture.md`. Stage 0 scaffolds `protocol-core`, `protocol-json`,
 `viewer-state`, `api-contract`, `rendition` (cross JVM/JS), `viewer-laminar`,
-`frontend` (JS), and `backend`, `publisher-cli`, `conformance` (JVM). `domain`,
-`semantic-registry`, `persistence`, and `ingestion` arrive with Stages 1–2.
+`frontend` (JS), and `backend`, `publisher-cli`, `conformance` (JVM). Stage 2
+adds `domain` (the store algebras and records, package `neuropublish.backend`,
+so the http4s `backend` and the Doobie `persistence` module share them without a
+cycle) and `persistence`; `semantic-registry` and `ingestion` are still to come.
 
 ## Fixtures
 
