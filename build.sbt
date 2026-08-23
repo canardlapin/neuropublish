@@ -198,10 +198,46 @@ lazy val frontend = project
 // JVM-only modules
 // ---------------------------------------------------------------------------
 
-// http4s + Tapir control-plane service.
+// Store algebras and records shared by the backend and its persistence implementations
+// (package `neuropublish.backend`; kept tiny so `persistence` never depends on http4s).
+lazy val domain = project
+  .in(file("modules/domain"))
+  .dependsOn(apiContract.jvm)
+  .settings(commonSettings)
+  .settings(
+    name := "neuropublish-domain",
+    libraryDependencies ++= Seq(
+      "org.typelevel" %% "cats-effect" % Versions.catsEffect,
+      "io.circe" %% "circe-generic" % Versions.circe
+    )
+  )
+
+// PostgreSQL implementations of the domain stores: Flyway migrations, Doobie repositories,
+// `reindex`. Tests need Docker (Testcontainers) and skip themselves without it.
+lazy val persistence = project
+  .in(file("modules/persistence"))
+  .dependsOn(domain)
+  .settings(commonSettings)
+  .settings(
+    name := "neuropublish-persistence",
+    libraryDependencies ++= Seq(
+      "org.tpolecat" %% "doobie-core" % Versions.doobie,
+      "org.tpolecat" %% "doobie-hikari" % Versions.doobie,
+      "org.tpolecat" %% "doobie-postgres" % Versions.doobie,
+      "org.tpolecat" %% "doobie-postgres-circe" % Versions.doobie,
+      "org.flywaydb" % "flyway-core" % Versions.flyway,
+      "org.flywaydb" % "flyway-database-postgresql" % Versions.flyway,
+      "org.typelevel" %% "munit-cats-effect" % Versions.munitCatsEffect % Test,
+      "com.dimafeng" %% "testcontainers-scala-munit" % Versions.testcontainers % Test,
+      "com.dimafeng" %% "testcontainers-scala-postgresql" % Versions.testcontainers % Test
+    )
+  )
+
+// http4s + Tapir control-plane service. `test->test` on persistence shares the Testcontainers
+// PostgreSQL fixture so the route suites also run against the database-backed server.
 lazy val backend = project
   .in(file("modules/backend"))
-  .dependsOn(apiContract.jvm, rendition.jvm)
+  .dependsOn(apiContract.jvm, rendition.jvm, domain, persistence % "compile->compile;test->test")
   .settings(commonSettings)
   .settings(
     name := "neuropublish-backend",
@@ -293,6 +329,8 @@ lazy val root = project
     rendition.js,
     viewerLaminar,
     frontend,
+    domain,
+    persistence,
     backend,
     ingestion,
     publisherCli,

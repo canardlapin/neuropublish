@@ -1,7 +1,6 @@
 package neuropublish.ingestion
 
 import cats.effect.IO
-import cats.syntax.all.*
 import java.time.Instant
 import neuropublish.backend.*
 import neuropublish.protocol.Sha256

@@ -7,8 +7,8 @@ import io.circe.syntax.*
 import neuropublish.api.AuditEvent
 import neuropublish.api.Stage4.given
 
-/** Append-only audit log, one JSONL file per workspace: `<data>/audit/<workspace>.jsonl`. */
-final class Audit(dir: Path, mutex: Mutex[IO]):
+/** Local-fs [[Audit]]: one JSONL file per workspace, `<data>/audit/<workspace>.jsonl`. */
+final class LocalAudit(dir: Path, mutex: Mutex[IO]) extends Audit:
   private def file(ws: String) = dir / s"$ws.jsonl"
 
   def record(
@@ -22,7 +22,7 @@ final class Audit(dir: Path, mutex: Mutex[IO]):
     if !Ids.valid(workspace) then IO.unit
     else
       for
-        id <- Secrets.token(9).map(t => "a-" + t.filter(_.isLetterOrDigit).take(10))
+        id <- Audit.newId
         now <- IO.realTimeInstant
         ev = AuditEvent(id, now.toString, actor, action, workspace, project, subject, detail)
         _ <- mutex.lock.surround(JsonFiles.appendLine(file(workspace), ev.asJson.noSpaces))
@@ -35,5 +35,5 @@ final class Audit(dir: Path, mutex: Mutex[IO]):
         io.circe.parser.decode[AuditEvent](l).toOption
       ))
 
-object Audit:
-  def localFs(root: Path): IO[Audit] = Mutex[IO].map(m => new Audit(root / "audit", m))
+object LocalAudit:
+  def apply(root: Path): IO[Audit] = Mutex[IO].map(m => new LocalAudit(root / "audit", m))

@@ -24,11 +24,11 @@ class GcSuite extends CatsEffectSuite:
   private val key = ProjectKey("rotman", "sherlock")
   private val token = "t"
 
-  final case class Env(app: HttpApp[IO], stores: Server.Stores, data: Path)
+  final case class Env(app: HttpApp[IO], stores: Server.Storage, data: Path)
   private val env = ResourceFunFixture(
     Files[IO].tempDirectory.evalMap { dir =>
-      val stores = Server.localStores(dir)
-      Server.build(dir, key, "http://test", legacyToken = Some(token), stores = Some(stores))
+      val stores = Server.localStorage(dir)
+      Server.build(dir, key, "http://test", legacyToken = Some(token), storage = Some(stores))
         .map(r => Env(r.orNotFound, stores, dir))
     }
   )
@@ -77,7 +77,7 @@ class GcSuite extends CatsEffectSuite:
     yield r
 
   private def gc(e: Env, dryRun: Boolean, now: Instant, olderThan: FiniteDuration = 24.hours) =
-    Audit.localFs(e.data).flatMap(a =>
+    LocalAudit(e.data).flatMap(a =>
       Gc.run(
         e.data,
         e.stores.objects,
@@ -112,7 +112,7 @@ class GcSuite extends CatsEffectSuite:
       _ <- e.stores.objects.exists(Sha256.unsafe(r.digest.stripPrefix("sha256:"))).map(assert(_))
       after <- e.stores.objects.list.compile.toList
       _ = assertEquals(after.length, 6)
-      audit <- Audit.localFs(e.data).flatMap(_.list("rotman"))
+      audit <- LocalAudit(e.data).flatMap(_.list("rotman"))
     yield assert(audit.exists(_.action == "gc"), audit.map(_.action))
   }
 

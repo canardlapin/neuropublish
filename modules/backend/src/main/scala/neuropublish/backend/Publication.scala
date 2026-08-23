@@ -232,7 +232,9 @@ final class Publication(
               head
             )))
           case Right(rec) =>
-            sessions.remove(s.id).as(Right(CommitResult(
+            // the read model (analyses, result_fields, revision_assets); `reindex` rebuilds it
+            // from the stored bytes if this fails
+            revisions.index(rec, manifest) *> sessions.remove(s.id).as(Right(CommitResult(
               rec.id,
               digest.render,
               rec.parent,

@@ -1,56 +1,21 @@
 package neuropublish.backend
 
-import cats.effect.{IO, Ref}
+import cats.effect.IO
 import cats.effect.std.Mutex
-import cats.syntax.all.*
 import fs2.io.file.{Files, Path}
-import io.circe.{Codec, Decoder, Encoder}
+import io.circe.Codec
 import io.circe.generic.semiauto.*
 import io.circe.syntax.*
 import neuropublish.protocol.Sha256
 
-final case class ProjectKey(workspace: String, project: String):
-  def render = s"$workspace/$project"
-
-final case class RevisionRecord(
-    id: String,
-    workspace: String,
-    project: String,
-    parent: Option[String],
-    manifestDigest: String,
-    message: Option[String],
-    committedAt: String
-)
-object RevisionRecord:
-  given Codec[RevisionRecord] = deriveCodec
-
-/** Stale-parent rejection carries the current head so the publisher can re-push. */
-final case class StaleParent(head: Option[String])
-
-/** Projects and their linear revision history. Every row is workspace-scoped (ADR 0004). Stage 2
-  * replaces the file implementation with PostgreSQL behind the same algebra.
+/** The local-fs [[RevisionStore]]: `<data>/projects/<ws>/<project>.json` holds the head and the
+  * history, `<data>/revisions/<id>.json` one record per revision. One mutex serializes commits.
   */
-trait RevisionStore:
-  def createProject(key: ProjectKey): IO[Unit]
-  def projectExists(key: ProjectKey): IO[Boolean]
-  def head(key: ProjectKey): IO[Option[String]]
-  def revisions(key: ProjectKey): IO[List[RevisionRecord]]
-  def revision(id: String): IO[Option[RevisionRecord]]
-
-  /** Append iff `parent` equals the current head; atomic per project. */
-  def commit(
-      key: ProjectKey,
-      parent: Option[String],
-      manifestDigest: Sha256,
-      message: Option[String],
-      committedAt: String
-  ): IO[Either[StaleParent, RevisionRecord]]
-
-object RevisionStore:
+object LocalRevisionStore:
   private final case class ProjectFile(head: Option[String], revisions: List[RevisionRecord])
   private given Codec[ProjectFile] = deriveCodec
 
-  def localFs(root: Path): IO[RevisionStore] =
+  def apply(root: Path): IO[RevisionStore] =
     Mutex[IO].map(m => new LocalFs(root, m))
 
   final class LocalFs(root: Path, mutex: Mutex[IO]) extends RevisionStore:
@@ -119,8 +84,3 @@ object RevisionStore:
             }
         }
       }
-
-object RevisionId:
-  /** Short, stable, content-derived: first 7 hex of sha256(project, ordinal, manifest digest). */
-  def of(key: ProjectKey, ordinal: Int, manifestDigest: Sha256): String =
-    Sha256.of(s"${key.render}\n$ordinal\n${manifestDigest.hex}".getBytes("UTF-8")).hex.take(12)

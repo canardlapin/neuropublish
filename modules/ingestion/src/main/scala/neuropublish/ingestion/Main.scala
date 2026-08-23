@@ -2,7 +2,7 @@ package neuropublish.ingestion
 
 import cats.effect.{ExitCode, IO, IOApp}
 import fs2.io.file.Path
-import neuropublish.backend.{RevisionStore, Server}
+import neuropublish.backend.{LocalRevisionStore, Server}
 import scala.concurrent.duration.*
 
 /** The ingestion worker process. Shares the control plane's storage configuration (NP_DATA_DIR and
@@ -15,8 +15,8 @@ object Main extends IOApp:
     val data = Path(env.getOrElse("NP_DATA_DIR", "data"))
     val poll = env.get("NP_WORKER_POLL").flatMap(_.toIntOption).getOrElse(2).seconds
     val once = args.contains("--once")
-    Server.stores(data, env).use { st =>
-      RevisionStore.localFs(data).flatMap { revisions =>
+    Server.storage(data, env).use { st =>
+      LocalRevisionStore(data).flatMap { revisions =>
         val worker = Worker(st.objects, st.renditions, st.queue, revisions)
         IO.println(
           s"neuropublish ingestion worker; data $data; objects ${st.describe}; poll $poll"

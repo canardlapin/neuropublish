@@ -1,7 +1,6 @@
 package neuropublish.npub
 
 import cats.effect.{ExitCode, IO, Ref}
-import cats.syntax.all.*
 import fs2.io.file.{Files, Path}
 import munit.CatsEffectSuite
 import neuropublish.backend.{ProjectKey, Server}

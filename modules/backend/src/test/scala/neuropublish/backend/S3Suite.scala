@@ -69,12 +69,12 @@ class S3Suite extends CatsEffectSuite:
         _ <- Resource.eval(s3.ensureBucket)
         dir <- Files[IO].tempDirectory
         http <- EmberClientBuilder.default[IO].build
-        stores = Server.localStores(dir, mode).copy(
+        stores = Server.localStorage(dir, mode).copy(
           objects = s3,
           renditions = RenditionStore.of(s3, dir)
         )
         app <- Resource.eval(
-          Server.build(dir, key, "http://test", owner, password, None, Nil, Some(stores))
+          Server.build(dir, key, "http://test", owner, password, None, Nil, storage = Some(stores))
         )
       yield Env(app.orNotFound, s3, http, dir)).use(f)
 

@@ -14,17 +14,17 @@ import org.http4s.headers.Authorization
 import org.http4s.{AuthScheme, Credentials}
 import org.http4s.implicits.*
 
-/** Stage 1 exit criteria, exercised against the routes in-process. */
-class RoutesSuite extends CatsEffectSuite:
+/** Stage 1 exit criteria, exercised against the routes in-process; parameterized over the record
+  * stores ([[RoutesSuite]] local fs, `PgRoutesSuite` PostgreSQL).
+  */
+abstract class RoutesSpec(factory: ServerFactory) extends CatsEffectSuite:
   private val fixtures = List("modules/conformance/fixtures", "../conformance/fixtures")
     .map(Path(_)).find(p => java.nio.file.Files.isDirectory(p.toNioPath)).get
   private val key = ProjectKey("rotman", "sherlock")
   private val token = "t"
 
   private def server = ResourceFunFixture(
-    Files[IO].tempDirectory.evalMap(dir =>
-      Server.build(dir, token, key, "http://test").map(_.orNotFound)
-    )
+    factory.build(key, "http://test", legacyToken = Some(token)).map(_.app)
   )
 
   private def auth(r: Request[IO]) =
@@ -179,3 +179,5 @@ class RoutesSuite extends CatsEffectSuite:
     assert(Routes.openApiYaml.contains("/upload-sessions"))
     assert(Routes.openApiYaml.contains("/revisions/{revision}"))
   }
+
+class RoutesSuite extends RoutesSpec(ServerFactory.Local)

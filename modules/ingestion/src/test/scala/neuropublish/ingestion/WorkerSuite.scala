@@ -25,14 +25,14 @@ class WorkerSuite extends CatsEffectSuite:
   private val key = ProjectKey("rotman", "sherlock")
   private val token = "t"
 
-  final case class Env(app: HttpApp[IO], stores: Server.Stores, data: Path, worker: Worker)
+  final case class Env(app: HttpApp[IO], stores: Server.Storage, data: Path, worker: Worker)
   private val env = ResourceFunFixture(
     Files[IO].tempDirectory.evalMap { dir =>
-      val stores = Server.localStores(dir, IngestionMode.Worker)
+      val stores = Server.localStorage(dir, IngestionMode.Worker)
       for
         routes <-
-          Server.build(dir, key, "http://test", legacyToken = Some(token), stores = Some(stores))
-        revisions <- RevisionStore.localFs(dir)
+          Server.build(dir, key, "http://test", legacyToken = Some(token), storage = Some(stores))
+        revisions <- LocalRevisionStore(dir)
       yield Env(
         routes.orNotFound,
         stores,

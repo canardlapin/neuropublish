@@ -4,39 +4,14 @@ import cats.effect.IO
 import fs2.io.file.Path
 import io.circe.Codec
 import io.circe.generic.semiauto.*
-import java.time.Instant
-import neuropublish.api.ShareLinkSummary
 
-/** Read-only share links: a random bearer secret (only its SHA-256 stored) naming one immutable
-  * saved-view version; optional expiry; revocable. `<data>/links/<id>.json` and
-  * `<data>/links/by-hash/<sha256>.json`.
-  */
-final case class ShareLinkRecord(
-    id: String,
-    workspace: String,
-    project: String,
-    view: String,
-    version: Int,
-    secretHash: String,
-    createdAt: String,
-    createdBy: String,
-    expiresAt: Option[String],
-    revokedAt: Option[String]
-):
-  def summary: ShareLinkSummary =
-    ShareLinkSummary(id, view, version, createdAt, createdBy, expiresAt, revokedAt)
-  def usable(now: Instant): Boolean =
-    revokedAt.isEmpty && expiresAt.forall(e => Instant.parse(e).isAfter(now))
-object ShareLinkRecord:
-  given Codec[ShareLinkRecord] = deriveCodec
-
-final class ShareLinks(dir: Path):
+/** Local-fs [[ShareLinks]]: `<data>/links/<id>.json` and `<data>/links/by-hash/<sha256>.json`. */
+final class LocalShareLinks(dir: Path) extends ShareLinks:
   private final case class HashRef(id: String)
   private given Codec[HashRef] = deriveCodec
   private def file(id: String) = dir / s"$id.json"
   private def hashFile(hash: String) = dir / "by-hash" / s"$hash.json"
 
-  /** Returns the record and the clear 32-character secret (never stored). */
   def create(
       view: ViewRecord,
       version: Int,
@@ -44,8 +19,8 @@ final class ShareLinks(dir: Path):
       expiresInDays: Option[Int]
   ): IO[(ShareLinkRecord, String)] =
     for
-      id <- Secrets.token(9).map(t => "l-" + t.filter(_.isLetterOrDigit).take(10))
-      secret <- Secrets.token(24) // 24 bytes → 32 url-safe chars
+      id <- ShareLinks.newId
+      secret <- ShareLinks.newSecret
       now <- IO.realTimeInstant
       exp = expiresInDays.map(d => now.plusSeconds(d.toLong * 86400).toString)
       rec = ShareLinkRecord(
@@ -67,7 +42,6 @@ final class ShareLinks(dir: Path):
   def get(id: String): IO[Option[ShareLinkRecord]] =
     if !Ids.valid(id) then IO.none else JsonFiles.read[ShareLinkRecord](file(id))
 
-  /** The link a presented secret names, whatever its state. */
   def resolve(secret: String): IO[Option[ShareLinkRecord]] =
     if secret.length > 128 then IO.none
     else
