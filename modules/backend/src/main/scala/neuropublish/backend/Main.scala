@@ -57,7 +57,7 @@ object Main extends IOApp:
         IO.println("reindex needs NP_DATABASE_URL: the local-fs stores keep no read model")
           .as(ExitCode(2))
       case Some(cfg) =>
-        (PgStores.resource(cfg), Server.storage(data, env)).tupled.use { (pg, st) =>
+        (PgStores.resource(cfg), Server.storage(data, env, db)).tupled.use { (pg, st) =>
           pg.reindex(st.objects.get).run.flatMap(r =>
             IO.println(
               s"reindex: ${r.scanned} revisions scanned, ${r.indexed} indexed" +
@@ -79,19 +79,32 @@ object Main extends IOApp:
       case Left(m) => IO.println(s"error  $m").as(ExitCode(2))
       case Right(d) =>
         val stores = db.fold(Resource.eval(Server.Stores.localFs(data)))(Server.Stores.postgres)
-        (stores, Server.storage(data, env)).tupled.use { (rs, st) =>
-          for
+        (stores, Server.storage(data, env, db)).tupled.use { (rs, st) =>
+          (for
             now <- IO.realTimeInstant
-            r <- Gc.run(data, st.objects, st.renditions, st.sessions, rs.audit, d, dry, now)
+            r <- Gc.run(
+              rs.revisions,
+              st.objects,
+              st.renditions,
+              st.sessions,
+              st.assets,
+              rs.audit,
+              d,
+              dry,
+              now
+            )
             _ <- IO.println(
               s"gc${if dry then " (dry run)" else ""}  ${r.scanned} objects scanned, ${r.referenced} referenced, ${r.deleted.length} orphaned${
                   if dry then "" else " and deleted"
-                }, ${r.renditionsDeleted.length} stale rendition sets"
+                }, ${r.renditionsDeleted.length} stale rendition sets, ${r.sessionsDropped} abandoned upload sessions"
             )
             _ <- r.deleted.traverse_(d =>
               IO.println(s"  ${if dry then "would delete" else "deleted"}  ${d.render}")
             )
-          yield ExitCode.Success
+          yield ExitCode.Success).recoverWith { case e: Throwable =>
+            // refuse rather than delete on a partial view of what is referenced
+            IO.println(s"gc refused: ${e.getMessage}").as(ExitCode(1))
+          }
         }
 
   private def serve(env: Map[String, String], data: Path, db: Option[DbConfig]): IO[Unit] =
@@ -105,7 +118,7 @@ object Main extends IOApp:
     val ownerEmail = env.getOrElse("NP_OWNER_EMAIL", Server.DefaultOwnerEmail)
     val ownerPassword = env.getOrElse("NP_OWNER_PASSWORD", Server.DefaultOwnerPassword)
     val stores = db.fold(Resource.eval(Server.Stores.localFs(data)))(Server.Stores.postgres)
-    (stores, Server.storage(data, env)).tupled.use { (s, st) =>
+    (stores, Server.storage(data, env, db)).tupled.use { (s, st) =>
       Server.build(s, data, key, base, ownerEmail, ownerPassword, legacy, Nil, Some(st)).flatMap {
         api =>
           val app = static.fold(api)(dir => api <+> Server.spa(dir))
@@ -202,23 +215,32 @@ object Server:
     Storage(
       objects(data),
       RenditionStore.LocalFs(data),
-      // adapter point: an IngestionQueue over persistence.IngestionJobs (`ingestion_jobs`) and an
-      // UploadSessions over `upload_sessions` when NP_DATABASE_URL is set
-      IngestionQueue.LocalFs(data / "queue"),
-      UploadSessions(data / "upload-sessions"),
-      WorkspaceAssets(data / "workspace-assets"),
+      LocalIngestionQueue(data / "queue"),
+      LocalUploadSessions(data / "upload-sessions"),
+      LocalWorkspaceAssets(data / "workspace-assets"),
       mode,
       s"local $data/objects"
     )
 
-  /** S3 mode when NP_S3_BUCKET is set, else local; NP_INGESTION picks the ingestion mode. */
-  def storage(data: Path, env: Map[String, String]): Resource[IO, Storage] =
+  /** S3 mode when NP_S3_BUCKET is set, else local; NP_INGESTION picks the ingestion mode. With `db`
+    * (NP_DATABASE_URL) the queue, upload sessions, and the workspace asset registry live in
+    * PostgreSQL, so the only local state left is the data dir of local object mode. The worker's
+    * `Main` builds its storage here too, so producer and consumer always agree.
+    */
+  def storage(data: Path, env: Map[String, String], db: Option[DbConfig]): Resource[IO, Storage] =
     val mode = Ingestion.modeFromEnv(env)
+    val local = localStorage(data, mode)
+    val records: Resource[IO, Storage] = db match
+      case None => Resource.pure(local)
+      case Some(cfg) =>
+        PgStores.resource(cfg).map(pg =>
+          local.copy(queue = pg.queue, sessions = pg.uploadSessions, assets = pg.workspaceAssets)
+        )
     ObjectStore.S3Config.fromEnv(env) match
-      case None => Resource.pure(localStorage(data, mode))
+      case None => records
       case Some(c) =>
-        ObjectStore.s3(c).evalTap(_.ensureBucket).map(s3 =>
-          localStorage(data, mode).copy(
+        (records, ObjectStore.s3(c).evalTap(_.ensureBucket)).mapN((st, s3) =>
+          st.copy(
             objects = s3,
             renditions = RenditionStore.of(s3, data),
             describe = s"s3 ${c.endpoint.getOrElse("aws")}/${c.bucket}"

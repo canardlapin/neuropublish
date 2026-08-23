@@ -36,10 +36,19 @@ trait ShareLinks:
       createdBy: String,
       expiresInDays: Option[Int]
   ): IO[(ShareLinkRecord, String)]
-  def get(id: String): IO[Option[ShareLinkRecord]]
 
-  /** The link a presented secret names, whatever its state. */
-  def resolve(secret: String): IO[Option[ShareLinkRecord]]
+  /** The link `id` of `workspace`, or None when it belongs to another workspace. */
+  def get(workspace: String, id: String): IO[Option[ShareLinkRecord]]
+
+  /** Unscoped resolution of a bare id — only for `/links/{id}` routes, which authorize on the
+    * record's workspace before using it.
+    */
+  def resolveId(id: String): IO[Option[ShareLinkRecord]]
+
+  /** The link a presented secret names, whatever its state (global by nature: the secret is the
+    * only thing an anonymous viewer presents).
+    */
+  def resolveSecret(secret: String): IO[Option[ShareLinkRecord]]
   def list(key: ProjectKey): IO[List[ShareLinkRecord]]
   def revoke(id: String): IO[Option[ShareLinkRecord]]
 

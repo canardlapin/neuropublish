@@ -19,7 +19,7 @@ Aliases are `np`-prefixed because ScalaFIM's build, loaded by source pin into th
 | `sbt "publisherCli/run validate modules/conformance/fixtures/reference"` | `npub validate` on the reference bundle |
 | `cd modules/frontend && npm install && npm run dev` | Vite dev server with live Scala.js linking |
 | `cd modules/frontend && npm run test:browser` | Playwright lifecycle tests in Chromium against `spike.html` (starts Vite itself) |
-| `scripts/e2e.sh` | Stage 1 + 3 proof: build frontend, start a backend on a temp data dir, `npub push` the reference bundle, assert the stale-parent rejection and digest, render in Chromium |
+| `scripts/e2e.sh` | End-to-end proof: build the frontend, start a backend on a temp data dir, `npub login` through the device flow, mint a project credential and prove it cannot cross projects, `npub push` the reference bundle, assert the stale-parent rejection and digest, wait for ingestion, render in Chromium, then publish a second revision from the Julia producer. `NP_E2E_MODE=full` adds PostgreSQL + MinIO containers and the separate ingestion worker; `NP_KEEP_DATA=1` keeps the temp dir; `NP_PORT` (default 8090) picks the port |
 
 ## Running the thin spine by hand
 
@@ -33,6 +33,10 @@ cd modules/frontend && npm run dev    # http://127.0.0.1:5173/w/rotman/p/sherloc
 `npub login` stores a user token in `$NPUB_CONFIG_DIR/credentials.json`
 (default `~/.config/npub/credentials.json`, mode 0600), keyed by `--server`.
 `push` resolves its bearer as `--token` (discouraged) → `NP_TOKEN` → that file.
+`push --parent <revision>` names the head the new revision builds on; omit it for
+the first revision of a project. A push whose parent is no longer the head is
+rejected with the current head (exit 1), and `push` prints the `--parent` to
+re-run with.
 Batch jobs should not use a personal login: create a project-scoped credential
 with `npub credential create --project rotman/sherlock --name hpc-nightly` and
 export its one-time secret as `NP_TOKEN`. `npub whoami` and `npub logout`
@@ -53,7 +57,7 @@ expects.
 | `NP_OWNER_EMAIL` / `NP_OWNER_PASSWORD` | `owner@example.org` / `owner-dev-password` | Local identity-provider user created as `owner` of the bootstrap workspace on first start; `scripts/e2e.sh` signs in with these |
 | `NP_STATIC_DIR` | unset | Built frontend to serve with SPA fallback |
 | `NP_S3_BUCKET` | unset | S3 mode when set: objects and renditions live in this bucket, uploads and rendition reads are presigned. With `NP_S3_ENDPOINT` (MinIO or any S3-compatible service; unset = AWS), `NP_S3_REGION` (`us-east-1`), `NP_S3_ACCESS_KEY` / `NP_S3_SECRET_KEY` (unset = SDK default chain), `NP_S3_PATH_STYLE=true` (MinIO). Unset = objects under `<data>/objects`, proxied through the control plane. |
-| `NP_INGESTION` | `inline` | `inline` derives renditions inside the commit (an unreadable asset fails the push); `worker` enqueues and returns — run `scripts/worker.sh` beside the backend, the revision shows `ingestion.status` pending/running/ready/failed |
+| `NP_INGESTION` | `inline` | `inline` derives renditions inside the commit (an unreadable asset fails the push); `worker` enqueues and returns — run `scripts/worker.sh` beside the backend. The job-level `ingestion.status` on a revision is `pending` / `running` / `ready` / `failed` (with `error` and `attempts`); each entry of `renditions[]` carries its own `status`, which is only `ready` / `pending` / `failed` (a rendition either exists, is awaited, or its job gave up). A revision is `ready` only when every volume rendition exists; a revision with missing renditions and no job is reported `failed` ("no ingestion job"), never ready by absence. |
 | `NP_LEGACY_TOKEN` | unset | **Deprecated.** The Stage 1 static bearer token (server side; the CLI's `NP_TOKEN` is unrelated). When set it still publishes and reads everywhere with no identity; leave it unset except for legacy clients. Removed once every client uses `npub login` or a publisher credential. |
 
 Projects are private: every read needs a signed-in workspace member (session
@@ -72,16 +76,20 @@ server that issued them (device codes in memory).
 ### PostgreSQL (Stage 2)
 
 Set `NP_DATABASE_URL` and every record store (projects, revisions, users,
-members, sessions, tokens, credentials, views, links, audit, the read model)
+members, sessions, tokens, credentials, views, links, audit, the read model,
+the ingestion queue, upload sessions, and the per-workspace asset registry)
 moves from the JSON files to PostgreSQL; unset, the local-fs layout below stays
-the default (`scripts/e2e.sh` uses it). Objects and renditions remain under
-`NP_DATA_DIR` either way until the S3 object store lands.
+the default (`scripts/e2e.sh` uses it). Objects and renditions live under
+`NP_DATA_DIR` unless `NP_S3_BUCKET` is set, so a PostgreSQL + S3 deployment has
+no local state at all except the provenance cache (`<data>/provenance`, a pure
+function of the manifest). The ingestion worker (`scripts/worker.sh`) reads the
+same `NP_DATABASE_*` variables and therefore consumes the same queue.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `NP_DATABASE_URL` | unset | JDBC URL, e.g. `jdbc:postgresql://127.0.0.1:5432/neuropublish`. When set, Flyway runs `modules/persistence/src/main/resources/db/migration/V*.sql` at start. |
 | `NP_DATABASE_USER` / `NP_DATABASE_PASSWORD` | `neuropublish` / empty | Connection credentials |
-| `NP_DATABASE_POOL` | `8` | Hikari pool size |
+| `NP_DATABASE_POOL` | `8` | Hikari `maximumPoolSize` (applied through `HikariConfig`); the worker opens its own pool of the same size |
 
 A local database for development, no compose file needed:
 
@@ -102,24 +110,48 @@ names the revisions whose manifest bytes were missing.
 
 The PostgreSQL suites (`persistence/test`, and `PgRoutesSuite` /
 `PgStage4Suite` in `backend/test`, which run the route suites over the
-database-backed server) use Testcontainers and a fresh database per test. They
-`assume` Docker: without a reachable daemon they report as skipped, never failed.
+database-backed server) and the MinIO suite (`S3Suite`) use Testcontainers and
+a fresh database / bucket per test. They `assume` Docker: without a reachable
+daemon they report as skipped, never failed — unless `NP_TEST_REQUIRE_DOCKER=1`
+(or `CI=true`) is set, in which case a missing daemon fails the suite, so a CI
+run can never go green by skipping them. Set `NP_TEST_REQUIRE_DOCKER=1` in the
+CI workflow.
 
-Schema notes (ADR 0004): every child table carries `workspace_id` with a
-composite foreign key `(workspace_id, project_id) → projects`; `stored_objects`
-(physical bytes) is separate from `workspace_assets` (who may reference a
-digest) and `catalog_assets` (public templates); `ingestion_jobs` is the
-worker's queue — a commit enqueues one `pending` row per revision, a worker
-claims with `UPDATE … WHERE id = (SELECT … WHERE status = 'pending' … FOR UPDATE
-SKIP LOCKED) RETURNING …` and ends on `ready` or `failed` (or back to `pending`
-to retry). `neuropublish.persistence.IngestionJobs` is that contract in code.
+Schema notes (ADR 0004): every project-scoped table carries `workspace_id`
+with a composite foreign key `(workspace_id, project_id) → projects`, and every
+revision-scoped table (`analyses`, `result_fields`, `revision_assets`,
+`derived_representations`, `saved_views`, `ingestion_jobs`) a composite
+`(workspace_id, revision_id) → revisions (workspace_id, id)` (V8), so no row
+can claim one workspace while pointing at another's record; `revisions.parent`
+is constrained to the same project (`(project_id, parent) → revisions
+(project_id, id)`). Bare-id lookups in the store algebras take the workspace
+(`revision(workspace, id)`, `views.get(workspace, id)`, …); the only unscoped
+lookups are `resolveId` (for the `/revisions/{id}`-style routes, which
+authorize on the record's workspace before using it) and `resolveSecret` (a
+presented bearer secret). `stored_objects` (physical bytes) is separate from
+`workspace_assets` (who may reference a digest) and `catalog_assets` (public
+templates). A commit is one transaction: head CAS, revision insert, projections
+(`analyses`, `result_fields`, `revision_assets`, pruned to the manifest), and
+the ingestion job.
+
+`ingestion_jobs` is the worker's queue: a worker-mode commit enqueues one
+`pending` row per revision; a worker claims with `UPDATE … WHERE id = (SELECT …
+WHERE (status = 'pending' AND available_at <= now) OR (status = 'running' AND
+locked_at < now - 10 min) … FOR UPDATE SKIP LOCKED) RETURNING …`, counting the
+attempt; a failure sets `available_at = now + 2s·2^(attempts-1)` while attempts
+< 3 and `failed` after that; success is `ready`. A job still `running` after
+the 10-minute lease belongs to a dead worker and is claimed again.
+`neuropublish.persistence.IngestionJobs` is that contract in code; the local-fs
+queue (`<data>/queue`) implements the same lease with a `<rev>.claim` file
+(claimant + timestamp; a stale claim is renamed aside and re-created, so
+exactly one reclaimer wins).
 
 Data-dir layout (the default, `NP_DATABASE_URL` unset) — one JSON document per
 record, secrets stored as SHA-256 only, passwords as salted PBKDF2-HMAC-SHA256:
 
 ```
 <data>/projects/<ws>/<project>.json    revisions/<rev>.json    objects/sha256/..    renditions/<rev>/
-<data>/users/<userId>.json             users/identities/<issuer>/<sha256(subject)>.json
+<data>/users/<userId>.json             users/identities/<issuer>/<sha256(lower-cased subject)>.json
 <data>/members/<ws>.json               workspace members with roles owner|admin|member|viewer
 <data>/sessions/<sha256(cookie)>.json  tokens/<sha256(user token)>.json
 <data>/credentials/<id>.json           credentials/by-hash/<sha256(secret)>.json
@@ -137,16 +169,39 @@ docker run --rm -p 9000:9000 -e MINIO_ROOT_USER=minio -e MINIO_ROOT_PASSWORD=min
 export NP_S3_BUCKET=neuropublish NP_S3_ENDPOINT=http://127.0.0.1:9000 NP_S3_ACCESS_KEY=minio \
        NP_S3_SECRET_KEY=minio-secret NP_S3_PATH_STYLE=true NP_INGESTION=worker
 sbt backend/run            # creates the bucket if absent; commit enqueues ingestion
-scripts/worker.sh          # = sbt ingestion/run; same NP_DATA_DIR and NP_S3_* as the backend
+scripts/worker.sh          # = sbt ingestion/run; same NP_DATA_DIR, NP_S3_* and NP_DATABASE_* as the backend
 scripts/worker.sh --once   # drain the queue and exit
 ```
 
+The worker claims jobs from whichever queue the backend produces into (the
+`ingestion_jobs` table with `NP_DATABASE_URL`, `<data>/queue` without), so the
+two processes must share those variables. Several workers may run at once;
+a worker that dies mid-job loses its claim after the 10-minute lease.
+
+Direct transfers never write a committed object. In S3 mode the session
+response carries presigned PUTs into `staging/<session>/<digest>` (Content-
+Length, Content-Type and `x-amz-checksum-sha256` are signed) and a presigned
+manifest PUT into the same staging area; at commit the control plane verifies
+every staged object's size and SHA-256 (the provider's checksum echo is trusted
+only on AWS itself, i.e. when `NP_S3_ENDPOINT` is unset; an S3-compatible
+endpoint is always re-hashed by a streamed pass), server-side-copies it onto
+its `sha256/<2>/<64>` key, and only then registers the digest to the workspace.
+A stale-parent rejection registers nothing. In local mode the control plane
+hashes every proxied upload itself, so a verified object is registered as it
+lands (a resumed push skips it). `GET /api/v1/upload-sessions/{id}` re-issues
+instructions for whatever the session still lacks (signed URLs expire after an
+hour). A stored manifest whose bytes no longer hash to the revision's digest
+is refused everywhere it is read (`503 integrity`, worker job error, `gc`
+refusal) — never used silently.
+
 `npub push` is unchanged: it follows the `UploadInstruction`s the session
-returns (presigned PUTs in S3 mode) and the presigned manifest URL, four
-objects at a time, three attempts each; rerunning an interrupted push never
-retransmits objects the server already holds. The viewer receives 15-minute
-presigned GETs for renditions; the control-plane rendition routes answer 307
-to the same URLs.
+returns and the manifest URL, four objects at a time, three attempts each;
+rerunning an interrupted push re-negotiates a session and, in local mode,
+never retransmits objects the server already verified (in S3 mode a new
+session has a new staging area, so only committed objects are skipped). The
+viewer receives 15-minute presigned GETs for renditions (fetched without
+credentials; they are on another origin); the control-plane rendition routes
+answer 307 to the same URLs. Every API response is `Cache-Control: no-store`.
 
 Orphan cleanup, never automatic:
 
@@ -155,16 +210,27 @@ sbt "backend/run gc --older-than 24h --dry-run"   # list what would go
 sbt "backend/run gc --older-than 24h"             # delete; audit event per workspace
 ```
 
-An object is removed only when no committed manifest references it, no
-unfinished upload session younger than the threshold declares it, and the
-object itself is older than the threshold.
+`gc` enumerates every revision through the configured store (PostgreSQL or
+the local files) and refuses to run when it cannot, or when a stored manifest
+fails its integrity check. It first drops upload sessions older than the
+threshold (and their staging areas), then deletes an object only when no
+committed manifest references it, no remaining session declares it, and the
+object itself is older than the threshold — recomputing the reference set
+immediately before each deletion, so a commit racing the run keeps its
+objects. A deleted digest is unregistered from every workspace; renditions of
+revisions that no longer exist are removed. Deletion is immediate; there is no
+recycle bin yet. `--dry-run` reports the same and changes nothing (the audit
+event is `gc.dry-run`).
 
-Tests: `S3Suite` runs MinIO through Testcontainers and is skipped when Docker
-is unavailable; `ingestion/test` and `GcSuite` use the local queue and store.
+Tests: `S3Suite` runs MinIO through Testcontainers (skipped without Docker,
+failed with `NP_TEST_REQUIRE_DOCKER=1`); `ingestion/test` and `GcSuite` use
+the local queue and store.
 
-Extra data-dir entries: `queue/<rev>.json` (ingestion jobs),
-`upload-sessions/<id>.json` (+ `.manifest` in local mode),
+Extra data-dir entries in local mode: `queue/<rev>.json` (+ `<rev>.claim`
+while a worker holds it), `upload-sessions/<id>.json` (+ `.manifest`),
 `workspace-assets/<ws>/<hex>` (which workspace may see a digest as present).
+With `NP_DATABASE_URL` these live in `ingestion_jobs`, `upload_sessions` and
+`workspace_assets` instead.
 
 ## Upstream Scala libraries
 

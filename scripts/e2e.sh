@@ -1,7 +1,16 @@
 #!/usr/bin/env bash
-# Stage 1 end-to-end proof: build the frontend, start the backend with a fresh
-# data directory, `npub push` the reference bundle, open the returned project
-# in Chromium, and assert two overlays render. Usage: scripts/e2e.sh
+# End-to-end proof: build the frontend, start the backend on a fresh data
+# directory, sign in with `npub login` (device flow approved from a second
+# session), mint a project credential and prove it cannot cross projects,
+# `npub push` the reference bundle, reject a stale-parent push, wait for
+# ingestion, drive the browser scenarios in Chromium, and publish a second
+# revision from the Julia producer (ADR 0001).
+#
+#   scripts/e2e.sh                  local mode: local-fs stores, inline ingestion
+#   NP_E2E_MODE=full scripts/e2e.sh PostgreSQL + MinIO containers (Docker), presigned
+#                                   transfers, and the separate ingestion worker
+#   NP_PORT=8090                    backend port (default 8090; must be free)
+#   NP_KEEP_DATA=1                  keep the temp data dir and logs on exit
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PORT="${NP_PORT:-8090}"

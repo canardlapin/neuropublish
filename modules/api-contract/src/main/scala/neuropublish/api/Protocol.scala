@@ -115,7 +115,7 @@ object Protocol:
   given Codec[ApiError] = deriveCodec
 
   val limits: Limits = Limits(
-    maxObjectBytes = 2L * 1024 * 1024 * 1024,
+    maxObjectBytes = 1L * 1024 * 1024 * 1024,
     maxObjects = 10_000,
     maxSessionBytes = 50L * 1024 * 1024 * 1024
   )
@@ -151,6 +151,13 @@ object Protocol:
     .out(statusCode(StatusCode.Created).and(jsonBody[UploadSessionCreated]))
     .description(
       "Negotiate an upload: declares the manifest digest and asset inventory; returns what is missing."
+    )
+
+  val refreshUploadSession = secured.get
+    .in("upload-sessions" / path[String]("session"))
+    .out(jsonBody[UploadSessionCreated])
+    .description(
+      "Re-issue upload instructions for the digests this session still lacks (signed URLs expire)."
     )
 
   val uploadObject = secured.put
@@ -190,6 +197,7 @@ object Protocol:
   val all: List[AnyEndpoint] = List(
     Endpoints.health,
     createUploadSession,
+    refreshUploadSession,
     uploadObject,
     uploadManifest,
     commit,

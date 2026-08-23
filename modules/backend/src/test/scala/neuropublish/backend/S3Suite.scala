@@ -31,11 +31,6 @@ class S3Suite extends CatsEffectSuite:
   private val owner = "owner@example.org"
   private val password = "owner-dev-password"
 
-  private def dockerAvailable: Boolean =
-    scala.util.Try(org.testcontainers.DockerClientFactory.instance().isDockerAvailable).getOrElse(
-      false
-    )
-
   private val minio: Resource[IO, ObjectStore.S3Config] =
     Resource.make(IO.blocking {
       val c = GenericContainer(
@@ -60,9 +55,15 @@ class S3Suite extends CatsEffectSuite:
 
   final case class Env(app: HttpApp[IO], store: ObjectStore.S3, http: Client[IO], data: Path)
 
-  /** In-process control plane over a MinIO bucket, a data dir, and a plain HTTP client. */
+  private val otherWs = ProjectKey("lab-b", "proj")
+  private val otherOwner = "b@x.org"
+  private val otherPassword = "pw-for-b"
+
+  /** In-process control plane over a MinIO bucket, a data dir, and a plain HTTP client; two
+    * workspaces, each with its own owner.
+    */
   private def withS3(mode: IngestionMode = IngestionMode.Inline)(f: Env => IO[Unit]): IO[Unit] =
-    IO(assume(dockerAvailable, "Docker is not available; skipping the MinIO suite")) *>
+    IO(neuropublish.persistence.PgTestDatabase.requireDocker("the MinIO suite")) *>
       (for
         cfg <- minio
         s3 <- ObjectStore.s3(cfg)
@@ -74,7 +75,16 @@ class S3Suite extends CatsEffectSuite:
           renditions = RenditionStore.of(s3, dir)
         )
         app <- Resource.eval(
-          Server.build(dir, key, "http://test", owner, password, None, Nil, storage = Some(stores))
+          Server.build(
+            dir,
+            key,
+            "http://test",
+            owner,
+            password,
+            None,
+            List(Server.Bootstrap(otherWs, otherOwner, otherPassword)),
+            storage = Some(stores)
+          )
         )
       yield Env(app.orNotFound, s3, http, dir)).use(f)
 
@@ -87,8 +97,8 @@ class S3Suite extends CatsEffectSuite:
     app.run(auth(Request[IO](Method.GET, Uri.unsafeFromString(path))))
   private def post[B: io.circe.Encoder](app: HttpApp[IO], path: String, body: B, auth: Auth) =
     app.run(auth(Request[IO](Method.POST, Uri.unsafeFromString(path)).withEntity(body.asJson)))
-  private def login(app: HttpApp[IO]): IO[String] =
-    post(app, "/api/v1/auth/login", LoginRequest(owner, password), anon).map(r =>
+  private def login(app: HttpApp[IO], email: String = owner, pw: String = password): IO[String] =
+    post(app, "/api/v1/auth/login", LoginRequest(email, pw), anon).map(r =>
       r.cookies.find(_.name == "np_session").get.content
     )
   private def bytes(p: String) = Files[IO].readAll(fixtures / p).compile.to(Array)
@@ -102,7 +112,13 @@ class S3Suite extends CatsEffectSuite:
         .putHeaders(Headers(m.headers.toList.map((k, v) => Header.Raw(CIString(k), v))))
     http.run(req).use(r => r.body.compile.drain.as(r.status))
 
-  private def negotiate(env: Env, auth: Auth, manifest: Array[Byte], parent: Option[String]) =
+  private def negotiate(
+      env: Env,
+      auth: Auth,
+      manifest: Array[Byte],
+      parent: Option[String],
+      project: ProjectKey = key
+  ) =
     for
       assets <- assetIds.traverse(id => bytes(s"reference/assets/$id.nii").map(id -> _))
       inv = assets.map((_, b) =>
@@ -110,7 +126,7 @@ class S3Suite extends CatsEffectSuite:
       )
       created <- post(
         env.app,
-        s"/api/v1/workspaces/rotman/projects/sherlock/upload-sessions",
+        s"/api/v1/workspaces/${project.workspace}/projects/${project.project}/upload-sessions",
         CreateUploadSession(Sha256.of(manifest).render, manifest.length.toLong, parent, inv),
         auth
       )
@@ -129,6 +145,13 @@ class S3Suite extends CatsEffectSuite:
         (s, assets) <- negotiate(env, cookie(c), manifest, None)
         _ = assertEquals(s.missing.length, assets.length)
         _ = assert(s.missing.forall(_.url.contains("X-Amz-Signature")), s.missing.map(_.url))
+        // signed PUTs address the session's staging area, never a committed key
+        _ = assert(
+          s.missing.forall(_.url.contains(s"/staging/${s.sessionId}/")),
+          s.missing.map(_.url)
+        )
+        _ = assert(s.missing.forall(m => !m.url.contains("/sha256/")), s.missing.map(_.url))
+        _ = assert(s.manifestUrl.contains(s"/staging/${s.sessionId}/"), s.manifestUrl)
         _ = assert(
           s.missing.forall(_.headers.keys.exists(_.equalsIgnoreCase("x-amz-checksum-sha256")))
         )
@@ -137,17 +160,34 @@ class S3Suite extends CatsEffectSuite:
           val body = assets.map(_._2).find(b => Sha256.of(b).render == m.digest).get
           follow(env.http, m, body).map(st => assert(st.isSuccess, s"PUT ${m.digest}: $st"))
         }
+        // staged, not committed: a half-finished upload is invisible to readers
         _ <- assets.traverse_ { (_, b) =>
-          env.store.stat(Sha256.of(b)).map(st =>
+          env.store.stagedStat(s.sessionId, Sha256.of(b)).map(st =>
             assertEquals(st.map(_.size), Some(b.length.toLong))
-          )
+          ) *> env.store.exists(Sha256.of(b)).map(x => assert(!x, "not committed yet"))
         }
+        // a refresh re-issues nothing for staged objects
+        refreshed <- get(env.app, s"/api/v1/upload-sessions/${s.sessionId}", cookie(c)).flatMap(
+          decode[UploadSessionCreated]
+        )
+        _ = assertEquals(refreshed.missing, Nil)
         _ <- follow(env.http, UploadInstruction("m", s.manifestUrl), manifest).map(st =>
           assert(st.isSuccess, s"manifest PUT: $st")
         )
         committed <- commit(env, cookie(c), s.sessionId)
         _ = assertEquals(committed.status, Status.Created)
+        _ = assertEquals(
+          committed.headers.get(org.typelevel.ci.CIString("Cache-Control")).map(_.head.value),
+          Some("no-store")
+        )
         r <- decode[CommitResult](committed)
+        _ <- assets.traverse_ { (_, b) =>
+          env.store.stat(Sha256.of(b)).map(st =>
+            assertEquals(st.map(_.size), Some(b.length.toLong))
+          )
+        }
+        staging <- env.store.listBlobs(s"staging/${s.sessionId}/").compile.toList
+        _ = assertEquals(staging, Nil, "staging is cleared after commit")
         detail <- get(env.app, s"/api/v1/revisions/${r.revisionId}", cookie(c)).flatMap(
           decode[RevisionDetail]
         )
@@ -168,7 +208,92 @@ class S3Suite extends CatsEffectSuite:
         ))
         // the next session reports nothing missing: the workspace owns every digest now
         (again, _) <- negotiate(env, cookie(c), manifest, Some(r.revisionId))
-      yield assertEquals(again.missing, Nil)
+        _ = assertEquals(again.missing, Nil)
+        // ...but the identical bytes are still "missing" for another workspace (ADR 0004)
+        cb <- login(env.app, otherOwner, otherPassword)
+        (other, _) <- negotiate(env, cookie(cb), manifest, None, otherWs)
+        _ = assertEquals(other.missing.length, assets.length)
+        _ = assert(other.missing.forall(_.url.contains(s"/staging/${other.sessionId}/")))
+      yield ()
+    }
+  }
+
+  test("a tampered signed PUT is refused, and no signed URL can write a committed key") {
+    withS3() { env =>
+      for
+        c <- login(env.app)
+        manifest <- bytes("reference/manifest.json")
+        (s, assets) <- negotiate(env, cookie(c), manifest, None)
+        t1 = assets.find(_._1 == "t1").get._2
+        m = s.missing.find(_.digest == Sha256.of(t1).render).get
+        // body of another length: Content-Length is signed
+        // (the client sends its real Content-Length; the signed one differs)
+        shorter <- follow(
+          env.http,
+          m.copy(headers = m.headers.filterNot(_._1.equalsIgnoreCase("content-length"))),
+          t1.dropRight(10)
+        )
+        _ = assert(!shorter.isSuccess, s"length tamper accepted: $shorter")
+        // same length, different bytes: the checksum header is signed and the provider checks it
+        wrong = t1.clone()
+        _ = wrong(100) = (wrong(100) + 1).toByte
+        altered <- follow(env.http, m, wrong)
+        _ = assert(!altered.isSuccess, s"body tamper accepted: $altered")
+        // a different media type: signed as well
+        retyped <- follow(
+          env.http,
+          m.copy(headers =
+            m.headers.map((k, v) =>
+              k -> (if k.equalsIgnoreCase("content-type") then "text/plain" else v)
+            )
+          ),
+          t1
+        )
+        _ = assert(!retyped.isSuccess, s"content-type tamper accepted: $retyped")
+        // the signed URL cannot be bent to a committed key
+        committedKey =
+          m.url.replace(s"/staging/${s.sessionId}/", "/sha256/" + Sha256.of(t1).hex.take(2) + "/")
+        forged <- follow(env.http, m.copy(url = committedKey), t1)
+        _ = assert(!forged.isSuccess, s"forged key accepted: $forged")
+        planted <- env.store.exists(Sha256.of(t1))
+      yield assert(!planted)
+    }
+  }
+
+  test("a stored manifest whose bytes no longer hash to the record's digest is refused on read") {
+    withS3(IngestionMode.Worker) { env =>
+      for
+        c <- login(env.app)
+        manifest <- bytes("reference/manifest.json")
+        (s, assets) <- negotiate(env, cookie(c), manifest, None)
+        _ <- s.missing.traverse_(m =>
+          follow(env.http, m, assets.map(_._2).find(b => Sha256.of(b).render == m.digest).get)
+        )
+        _ <- follow(env.http, UploadInstruction("m", s.manifestUrl), manifest)
+        r <- commit(env, cookie(c), s.sessionId).flatMap(decode[CommitResult])
+        // worker mode: committed, renditions pending
+        pending <- get(
+          env.app,
+          s"/api/v1/revisions/${r.revisionId}",
+          cookie(c)
+        ).flatMap(decode[RevisionDetail])
+        _ = assertEquals(pending.ingestion.map(_.status), Some("pending"))
+        // an operator-level overwrite of the committed manifest object (no client can do this)
+        md = Sha256.unsafe(r.digest.stripPrefix("sha256:"))
+        _ <- env.store.putBlob(
+          ObjectStore.key(md),
+          "{\"tampered\":true}".getBytes("UTF-8"),
+          "application/json"
+        )
+        read <- get(env.app, s"/api/v1/revisions/${r.revisionId}", cookie(c))
+        _ = assertEquals(read.status, Status.ServiceUnavailable)
+        e <- decode[ApiError](read)
+        _ = assertEquals(e.code, "integrity")
+        // what the worker reads goes through the same check
+        revisions <- LocalRevisionStore(env.data)
+        rec <- revisions.resolveId(r.revisionId).map(_.get)
+        refused <- Derivation.manifestOf(env.store, rec).attempt
+      yield assert(refused.left.exists(_.isInstanceOf[IntegrityError]), refused.toString)
     }
   }
 
@@ -183,9 +308,10 @@ class S3Suite extends CatsEffectSuite:
         t1 = s.missing.find(_.digest == Sha256.of(assets.find(_._1 == "t1").get._2).render).get
         // the signed PUT carries the checksum, so the provider itself may refuse the bytes...
         st <- follow(env.http, t1, wrong)
-        // ...and if it did not, plant them under the digest key anyway: commit must still catch it
+        // ...and if it did not, plant them in the session's staging area anyway: commit hashes
+        // every staged object (an S3-compatible endpoint's checksum echo is not trusted)
         _ <- env.store.putBlob(
-          ObjectStore.key(Sha256.unsafe(t1.digest.stripPrefix("sha256:"))),
+          env.store.stagingKey(s.sessionId, Sha256.unsafe(t1.digest.stripPrefix("sha256:"))),
           wrong,
           "application/octet-stream"
         )

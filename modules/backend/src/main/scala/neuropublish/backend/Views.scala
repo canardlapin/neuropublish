@@ -27,12 +27,14 @@ final class LocalViews(dir: Path, mutex: Mutex[IO]) extends Views:
       _ <- JsonFiles.write(file(id), rec)
     yield rec
 
-  def get(id: String): IO[Option[ViewRecord]] =
+  def resolveId(id: String): IO[Option[ViewRecord]] =
     if !Ids.valid(id) then IO.none else JsonFiles.read[ViewRecord](file(id))
+  def get(workspace: String, id: String): IO[Option[ViewRecord]] =
+    resolveId(id).map(_.filter(_.workspace == workspace))
 
   def update(id: String, state: Json, savedBy: String): IO[Option[ViewRecord]] =
     mutex.lock.surround {
-      get(id).flatMap {
+      resolveId(id).flatMap {
         case None => IO.none
         case Some(v) =>
           IO.realTimeInstant.flatMap { now =>

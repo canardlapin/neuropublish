@@ -8,6 +8,7 @@ import java.time.Instant
 import munit.CatsEffectSuite
 import neuropublish.api.*
 import neuropublish.api.Protocol.given
+import neuropublish.api.Stage4.given
 import neuropublish.backend.*
 import neuropublish.protocol.Sha256
 import org.http4s.{AuthScheme, Credentials, HttpApp, Method, Request, Status, Uri}
@@ -116,7 +117,7 @@ class WorkerSuite extends CatsEffectSuite:
       _ = assertEquals(idle, None)
       d1 <- detail(e.app, r.revisionId)
       _ = assertEquals(d1.ingestion.map(_.status), Some("ready"))
-      _ = assertEquals(d1.ingestion.map(_.attempts), Some(0))
+      _ = assertEquals(d1.ingestion.map(_.attempts), Some(1)) // attempts are counted on claim
       _ = assertEquals(d1.renditions.map(_.status).distinct, List("ready"))
       hdr2 <- e.app.run(auth(Request[IO](
         Method.GET,
@@ -159,16 +160,113 @@ class WorkerSuite extends CatsEffectSuite:
       yield assertEquals(head.head, Some(r.revisionId))
   }
 
-  test("the queue hands a job to exactly one claimant") {
-    Files[IO].tempDirectory.use { dir =>
-      val q = IngestionQueue.LocalFs(dir / "queue")
+  env.test("a tampered stored manifest is refused by the worker and recorded on the job") { e =>
+    for
+      r <- push(e.app)
+      md = Sha256.unsafe(r.digest.stripPrefix("sha256:"))
+      _ <- JsonFiles.writeBytes(
+        e.data / "objects" / "sha256" / md.hex.take(2) / md.hex,
+        "{\"tampered\":true}".getBytes("UTF-8")
+      )
+      now <- IO.realTimeInstant
+      _ <- e.worker.runOnce(now)
+      job <- e.stores.queue.status(r.revisionId)
+    yield
+      assertEquals(job.map(_.status), Some("pending"))
+      assert(job.flatMap(_.error).exists(_.contains("IntegrityError")), job.flatMap(_.error))
+  }
+
+  env.test("a revision with no job and missing renditions is failed, never ready by absence") {
+    e =>
       for
-        _ <- q.enqueue("rev-a")
+        r <- push(e.app)
+        _ <- Files[IO].delete(e.data / "queue" / s"${r.revisionId}.json")
+        d <- detail(e.app, r.revisionId)
+      yield
+        assertEquals(d.ingestion.map(_.status), Some("failed"))
+        assertEquals(d.ingestion.flatMap(_.error), Some("no ingestion job"))
+  }
+
+  env.test("a share link cannot be minted while the revision's ingestion is pending or failed") {
+    e =>
+      for
+        r <- push(e.app, junk = Some("speech-t"))
+        cookie <- e.app.run(Request[IO](Method.POST, uri"/api/v1/auth/login").withEntity(
+          LoginRequest(Server.DefaultOwnerEmail, Server.DefaultOwnerPassword).asJson
+        )).map(_.cookies.find(_.name == "np_session").get.content)
+        v <- e.app.run(Request[IO](
+          Method.POST,
+          Uri.unsafeFromString(s"/api/v1/revisions/${r.revisionId}/views")
+        ).addCookie("np_session", cookie).withEntity(
+          SaveView("v", io.circe.Json.obj("layers" -> io.circe.Json.arr())).asJson
+        )).flatMap(decode[SavedViewDetail])
+        mint = e.app.run(Request[IO](
+          Method.POST,
+          Uri.unsafeFromString(s"/api/v1/views/${v.id}/versions/1/links")
+        ).addCookie("np_session", cookie).withEntity(CreateShareLink(None).asJson))
+        pending <- mint
+        _ = assertEquals(pending.status, Status.BadRequest)
+        _ <- decode[ApiError](pending).map(a => assert(a.message.contains("pending"), a.message))
+        t0 <- IO.realTimeInstant
+        _ <- e.worker.runOnce(t0)
+        _ <- e.worker.runOnce(t0.plusSeconds(10))
+        _ <- e.worker.runOnce(t0.plusSeconds(100))
+        failed <- mint
+        _ = assertEquals(failed.status, Status.BadRequest)
+        msg <- decode[ApiError](failed).map(_.message)
+      yield assert(msg.contains("failed"), msg)
+  }
+
+  test("the queue hands a job to exactly one of two racing claimants") {
+    Files[IO].tempDirectory.use { dir =>
+      val q = LocalIngestionQueue(dir / "queue")
+      for
+        _ <- q.enqueue("rotman", "rev-a")
         now <- IO.realTimeInstant
-        both <- (q.claim(now), q.claim(now)).parTupled
-        _ = assertEquals(List(both._1, both._2).flatten.map(_.revisionId), List("rev-a"))
+        // both claimants hold the same pending snapshot: the race is on the claim file alone
+        job <- q.status("rev-a").map(_.get)
+        (a, b) <- (q.tryClaim(job, now, "w-a"), q.tryClaim(job, now, "w-b")).parTupled
+        winners = List(a, b).flatten
+        _ = assertEquals(
+          winners.map(j => (j.revisionId, j.status, j.attempts)),
+          List(("rev-a", "running", 1))
+        )
+        claim <- q.claimOf("rev-a")
+        _ = assertEquals(claim.map(_.claimant), Some(if a.isDefined then "w-a" else "w-b"))
+        none <- q.claim(now, "w-c") // still running inside the lease
+        _ = assertEquals(none, None)
         _ <- q.complete("rev-a")
         st <- q.status("rev-a")
-      yield assertEquals(st.map(_.status), Some("ready"))
+        gone <- q.claimOf("rev-a")
+      yield
+        assertEquals(st.map(_.status), Some("ready"))
+        assertEquals(gone, None)
+    }
+  }
+
+  test("a running job whose claim is older than the lease is reclaimed, counting the attempt") {
+    Files[IO].tempDirectory.use { dir =>
+      val q = LocalIngestionQueue(dir / "queue")
+      for
+        _ <- q.enqueue("rotman", "rev-a")
+        t0 <- IO.realTimeInstant
+        first <- q.claim(t0, "dead-worker")
+        _ = assertEquals(first.map(_.attempts), Some(1))
+        held <- q.claim(t0.plusSeconds(60), "w-b")
+        _ = assertEquals(held, None)
+        reclaimed <- q.claim(t0.plus(IngestionQueue.Lease).plusSeconds(1), "w-b")
+        _ = assertEquals(reclaimed.map(j => (j.status, j.attempts)), Some(("running", 2)))
+        claim <- q.claimOf("rev-a")
+        _ = assertEquals(claim.map(_.claimant), Some("w-b"))
+        // a retryable failure backs off from the failure time; the third attempt is terminal
+        failed <- q.fail("rev-a", "boom", t0)
+        _ = assertEquals(
+          failed.map(j => (j.status, j.attempts, j.nextAttemptAt)),
+          Some(("pending", 2, Some(t0.plus(IngestionQueue.backoff(2)).toString)))
+        )
+        third <- q.claim(t0.plusSeconds(10), "w-c")
+        _ = assertEquals(third.map(_.attempts), Some(3))
+        last <- q.fail("rev-a", "boom", t0.plusSeconds(11))
+      yield assertEquals(last.map(j => (j.status, j.nextAttemptAt)), Some(("failed", None)))
     }
   }

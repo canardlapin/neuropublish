@@ -106,12 +106,13 @@ final class PgCredentials(xa: Transactor[IO]) extends Credentials:
       secret
     )
 
-  def get(id: String)
-      : IO[Option[CredentialRecord]] = (select ++ fr"WHERE c.id = $id").query[Row].option.map(_.map(
-    _.record
-  )).transact(xa)
+  private def byId(id: String): IO[Option[CredentialRecord]] =
+    (select ++ fr"WHERE c.id = $id").query[Row].option.map(_.map(_.record)).transact(xa)
+  def get(workspace: String, id: String): IO[Option[CredentialRecord]] =
+    (select ++ fr"WHERE c.workspace_id = $workspace AND c.id = $id").query[Row].option
+      .map(_.map(_.record)).transact(xa)
 
-  def resolve(secret: String): IO[Option[CredentialRecord]] =
+  def resolveSecret(secret: String): IO[Option[CredentialRecord]] =
     (select ++ fr"WHERE c.secret_hash = ${Secrets.sha256Hex(secret)}")
       .query[Row].option.map(_.map(_.record)).transact(xa)
 
@@ -125,7 +126,7 @@ final class PgCredentials(xa: Transactor[IO]) extends Credentials:
     IO.realTimeInstant.flatMap { now =>
       sql"""UPDATE publisher_credentials SET revoked_at = $now
             WHERE id = $id AND revoked_at IS NULL""".update.run.transact(xa)
-    } *> get(id)
+    } *> byId(id)
 
 object PgCredentials:
   final case class Row(

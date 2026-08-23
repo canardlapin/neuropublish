@@ -19,20 +19,27 @@ final case class ObjectStat(size: Long, lastModified: Instant, checksumSha256: O
   * does not, and the control plane then proxies uploads itself.
   */
 trait Presigning:
-  /** A PUT the client can perform with no credentials; `headers` are part of the signature and must
-    * be sent verbatim. The provider verifies the declared SHA-256 when it supports the checksum
-    * header; commit verifies it regardless ([[ObjectStore.verify]]).
+  /** A PUT the client can perform with no credentials, into the session's staging area
+    * ([[ObjectStore.stagingKey]]) — never a committed content-addressed key, so no client can
+    * overwrite bytes another revision relies on. `headers` are part of the signature and must be
+    * sent verbatim: Content-Length and `x-amz-checksum-sha256` are signed, so a provider that
+    * honours the checksum refuses mismatching bytes at upload; commit verifies regardless
+    * ([[ObjectStore.verifyStaged]]).
     */
   def presignPut(
+      session: String,
       digest: Sha256,
       size: Long,
       mediaType: String,
       ttl: FiniteDuration
   ): IO[UploadInstruction]
 
-  /** A PUT for bytes whose size is declared but whose headers the client need not echo (manifest).
+  /** A staged PUT for the manifest: the size is signed (the client sends Content-Length anyway);
+    * the digest is verified by hashing the bytes at commit, since the publisher CLI sends this URL
+    * with no extra headers.
     */
-  def presignPlainPut(digest: Sha256, ttl: FiniteDuration): IO[String]
+  def presignManifestPut(session: String, digest: Sha256, size: Long, ttl: FiniteDuration)
+      : IO[String]
   def presignGet(digest: Sha256, ttl: FiniteDuration): IO[String]
 
   /** Signed GET for a non-content-addressed key (renditions). */
@@ -51,10 +58,12 @@ trait ObjectStore:
   /** Every stored digest with its stat (garbage collection). */
   def list: fs2.Stream[IO, (Sha256, ObjectStat)]
 
-  /** Commit-time verification of an object the client may have written directly: the size must
-    * equal `declaredSize` and the bytes must hash to `digest`. A store that validated the digest on
-    * write ([[ObjectStore.LocalFs]]) only needs the size check; a direct-write store uses provider
-    * checksum evidence when present and otherwise streams the object once.
+  /** Copy the object to `target` without holding it in memory; false when absent. */
+  def getToFile(digest: Sha256, target: Path): IO[Boolean]
+
+  /** Commit-time verification of a committed object: the size must equal `declaredSize`. Every
+    * write to a committed key is made by the server after hashing ([[put]], [[promote]]), so the
+    * digest holds by construction.
     */
   def verify(digest: Sha256, declaredSize: Long): IO[Either[String, Unit]] =
     stat(digest).map {
@@ -67,10 +76,56 @@ trait ObjectStore:
   /** Present when the store can sign direct transfers. */
   def presigning: Option[Presigning] = None
 
-  /** Non-content-addressed blobs under `key` (derived renditions). */
+  // ---- session staging (direct-transfer mode): clients write here, never to committed keys
+
+  /** The only key a client's signed PUT may write: scoped to its upload session. */
+  def stagingKey(session: String, digest: Sha256): String = s"staging/$session/${digest.hex}"
+  def stagedStat(session: String, digest: Sha256): IO[Option[ObjectStat]] =
+    statBlob(stagingKey(session, digest))
+  def getStaged(session: String, digest: Sha256): IO[Option[Array[Byte]]] =
+    getBlob(stagingKey(session, digest))
+
+  /** Size and SHA-256 of a staged object: provider checksum evidence when the store trusts it,
+    * otherwise one streamed pass over the bytes. Left = why it cannot be committed.
+    */
+  def verifyStaged(session: String, digest: Sha256, declaredSize: Long): IO[Either[String, Unit]] =
+    stagedStat(session, digest).flatMap {
+      case None => IO.pure(Left(s"${digest.render} was not uploaded"))
+      case Some(st) if st.size != declaredSize =>
+        IO.pure(Left(s"${digest.render}: ${st.size} bytes stored, $declaredSize declared"))
+      case Some(_) =>
+        getStaged(session, digest).map {
+          case None => Left(s"${digest.render} was not uploaded")
+          case Some(bytes) =>
+            val actual = Sha256.of(bytes)
+            if actual.hex == digest.hex then Right(())
+            else Left(s"${digest.render}: stored bytes hash to ${actual.render}")
+        }
+    }
+
+  /** Server-side copy of a verified staged object onto its committed key (a no-op when the
+    * committed object already exists: identical bytes by digest).
+    */
+  def promote(session: String, digest: Sha256): IO[Unit] =
+    exists(digest).flatMap {
+      case true => IO.unit
+      case false =>
+        getStaged(session, digest).flatMap {
+          case None => IO.raiseError(IllegalStateException(s"${digest.render} is not staged"))
+          case Some(bytes) =>
+            put(digest, bytes).flatMap(r => IO.fromEither(r.leftMap(IllegalStateException(_))))
+        }
+    }
+
+  /** Drop everything a session staged (after commit, or by gc for an abandoned session). */
+  def deleteStaging(session: String): IO[Unit] =
+    listBlobs(s"staging/$session/").evalMap(deleteBlob).compile.drain
+
+  /** Non-content-addressed blobs under `key` (derived renditions, staging). */
   def putBlob(key: String, bytes: Array[Byte], mediaType: String): IO[Unit]
   def getBlob(key: String): IO[Option[Array[Byte]]]
-  def blobExists(key: String): IO[Boolean]
+  def statBlob(key: String): IO[Option[ObjectStat]]
+  def blobExists(key: String): IO[Boolean] = statBlob(key).map(_.isDefined)
   def deleteBlob(key: String): IO[Unit]
 
   /** Keys under `prefix`. */
@@ -109,21 +164,20 @@ object ObjectStore:
       if actual.hex != expected.hex then
         IO.pure(Left(s"digest mismatch: declared ${expected.render}, received ${actual.render}"))
       else writeAtomic(path(expected), bytes)
+    private def statPath(p: Path): IO[Option[ObjectStat]] =
+      (Files[IO].size(p), Files[IO].getLastModifiedTime(p)).mapN((sz, t) =>
+        Some(ObjectStat(sz, Instant.ofEpochMilli(t.toMillis), None))
+      ).recover { case _: java.nio.file.NoSuchFileException => None }
     def exists(digest: Sha256): IO[Boolean] = Files[IO].exists(path(digest))
-    def stat(digest: Sha256): IO[Option[ObjectStat]] =
-      val p = path(digest)
-      Files[IO].exists(p).flatMap {
-        case false => IO.none
-        case true =>
-          (Files[IO].size(p), Files[IO].getLastModifiedTime(p)).mapN((sz, t) =>
-            Some(ObjectStat(sz, Instant.ofEpochMilli(t.toMillis), None))
-          )
-      }
-    def get(digest: Sha256): IO[Option[Array[Byte]]] =
-      Files[IO].exists(path(digest)).flatMap {
-        case false => IO.none
-        case true => Files[IO].readAll(path(digest)).compile.to(Array).map(Some(_))
-      }
+    def stat(digest: Sha256): IO[Option[ObjectStat]] = statPath(path(digest))
+    def get(digest: Sha256): IO[Option[Array[Byte]]] = JsonFiles.readBytes(path(digest))
+    def getToFile(digest: Sha256, target: Path): IO[Boolean] =
+      Files[IO].copy(
+        path(digest),
+        target,
+        fs2.io.file.CopyFlags(fs2.io.file.CopyFlag.ReplaceExisting)
+      )
+        .as(true).recover { case _: java.nio.file.NoSuchFileException => false }
     def delete(digest: Sha256): IO[Unit] = Files[IO].deleteIfExists(path(digest)).void
     def list: fs2.Stream[IO, (Sha256, ObjectStat)] =
       val base = root / "sha256"
@@ -138,17 +192,9 @@ object ObjectStore:
 
     def putBlob(key: String, bytes: Array[Byte], mediaType: String): IO[Unit] =
       // blobs are overwritable (a rendition re-derived after a retry)
-      val p = blobPath(key)
-      val tmp = p.parent.get / s"${p.fileName}.${java.util.UUID.randomUUID().toString.take(8)}.part"
-      Files[IO].createDirectories(p.parent.get) *>
-        fs2.Stream.emits(bytes).through(Files[IO].writeAll(tmp)).compile.drain *>
-        Files[IO].move(tmp, p, fs2.io.file.CopyFlags(fs2.io.file.CopyFlag.ReplaceExisting))
-    def getBlob(key: String): IO[Option[Array[Byte]]] =
-      Files[IO].exists(blobPath(key)).flatMap {
-        case false => IO.none
-        case true => Files[IO].readAll(blobPath(key)).compile.to(Array).map(Some(_))
-      }
-    def blobExists(key: String): IO[Boolean] = Files[IO].exists(blobPath(key))
+      JsonFiles.writeBytes(blobPath(key), bytes)
+    def getBlob(key: String): IO[Option[Array[Byte]]] = JsonFiles.readBytes(blobPath(key))
+    def statBlob(key: String): IO[Option[ObjectStat]] = statPath(blobPath(key))
     def deleteBlob(key: String): IO[Unit] = Files[IO].deleteIfExists(blobPath(key)).void
     def listBlobs(prefix: String): fs2.Stream[IO, String] =
       val base = root / "blobs"
@@ -172,7 +218,11 @@ object ObjectStore:
       accessKey: Option[String],
       secretKey: Option[String],
       pathStyle: Boolean
-  )
+  ):
+    /** Provider-echoed `x-amz-checksum-sha256` is evidence only on AWS itself; an S3-compatible
+      * endpoint may store the header without checking it, so commit hashes the bytes instead.
+      */
+    def trustProviderChecksum: Boolean = endpoint.isEmpty
   object S3Config:
     def fromEnv(env: Map[String, String]): Option[S3Config] =
       env.get("NP_S3_BUCKET").map(_.trim).filter(_.nonEmpty).map(bucket =>
@@ -196,7 +246,8 @@ object ObjectStore:
   final class S3 private[ObjectStore] (
       client: software.amazon.awssdk.services.s3.S3AsyncClient,
       presigner: software.amazon.awssdk.services.s3.presigner.S3Presigner,
-      bucket: String
+      bucket: String,
+      trustProviderChecksum: Boolean
   ) extends ObjectStore:
     import software.amazon.awssdk.core.async.{AsyncRequestBody, AsyncResponseTransformer}
     import software.amazon.awssdk.services.s3.model.*
@@ -253,7 +304,59 @@ object ObjectStore:
     def exists(digest: Sha256): IO[Boolean] = head(key(digest)).map(_.isDefined)
     def stat(digest: Sha256): IO[Option[ObjectStat]] = head(key(digest))
     def get(digest: Sha256): IO[Option[Array[Byte]]] = readKey(key(digest))
+    def getToFile(digest: Sha256, target: Path): IO[Boolean] =
+      notFound(io(client.getObject(
+        GetObjectRequest.builder().bucket(bucket).key(key(digest)).build(),
+        AsyncResponseTransformer.toFile[GetObjectResponse](target.toNioPath)
+      ))).map(_.isDefined)
     def delete(digest: Sha256): IO[Unit] = remove(key(digest))
+
+    /** Stream `k` once and hash it. */
+    private def hashKey(k: String): IO[String] =
+      io(client.getObject(
+        GetObjectRequest.builder().bucket(bucket).key(k).build(),
+        AsyncResponseTransformer.toPublisher[GetObjectResponse]()
+      )).flatMap { pub =>
+        fs2.interop.flow.fromPublisher[IO](
+          org.reactivestreams.FlowAdapters.toFlowPublisher(pub),
+          64
+        )
+          .fold(java.security.MessageDigest.getInstance("SHA-256")) { (md, bb) =>
+            md.update(bb); md
+          }
+          .compile.lastOrError
+          .map(md => md.digest().map(b => "%02x".format(b & 0xff)).mkString)
+      }
+
+    override def verifyStaged(session: String, digest: Sha256, declaredSize: Long)
+        : IO[Either[String, Unit]] =
+      val k = stagingKey(session, digest)
+      head(k).flatMap {
+        case None => IO.pure(Left(s"${digest.render} was not uploaded"))
+        case Some(st) if st.size != declaredSize =>
+          IO.pure(Left(s"${digest.render}: ${st.size} bytes stored, $declaredSize declared"))
+        case Some(ObjectStat(_, _, Some(sum))) if trustProviderChecksum =>
+          IO.pure(
+            if sum == b64(digest) then Right(())
+            else Left(s"${digest.render}: stored checksum differs from the declared digest")
+          )
+        case Some(_) =>
+          hashKey(k).map(hex =>
+            if hex == digest.hex then Right(())
+            else Left(s"${digest.render}: stored bytes hash to sha256:$hex")
+          )
+      }
+
+    /** Server-side copy: the committed key is written only by the control plane. */
+    override def promote(session: String, digest: Sha256): IO[Unit] =
+      exists(digest).flatMap {
+        case true => IO.unit
+        case false =>
+          io(client.copyObject(
+            CopyObjectRequest.builder().sourceBucket(bucket).sourceKey(stagingKey(session, digest))
+              .destinationBucket(bucket).destinationKey(key(digest)).build()
+          )).void
+      }
     def list: fs2.Stream[IO, (Sha256, ObjectStat)] =
       keys("sha256/").flatMap { o =>
         val hex = o.key().split('/').last
@@ -262,47 +365,17 @@ object ObjectStore:
         else fs2.Stream.empty
       }
 
-    override def verify(digest: Sha256, declaredSize: Long): IO[Either[String, Unit]] =
-      stat(digest).flatMap {
-        case None => IO.pure(Left(s"${digest.render} was not uploaded"))
-        case Some(st) if st.size != declaredSize =>
-          IO.pure(Left(s"${digest.render}: ${st.size} bytes stored, $declaredSize declared"))
-        case Some(ObjectStat(_, _, Some(sum))) =>
-          IO.pure(
-            if sum == b64(digest) then Right(())
-            else Left(s"${digest.render}: stored checksum differs from the declared digest")
-          )
-        case Some(_) =>
-          // no provider checksum evidence: hash the object once, streaming
-          io(client.getObject(
-            GetObjectRequest.builder().bucket(bucket).key(key(digest)).build(),
-            AsyncResponseTransformer.toPublisher[GetObjectResponse]()
-          )).flatMap { pub =>
-            fs2.interop.flow.fromPublisher[IO](
-              org.reactivestreams.FlowAdapters.toFlowPublisher(pub),
-              64
-            )
-              .fold(java.security.MessageDigest.getInstance("SHA-256")) { (md, bb) =>
-                md.update(bb); md
-              }
-              .compile.lastOrError
-              .map(md => md.digest().map(b => "%02x".format(b & 0xff)).mkString)
-          }.map(hex =>
-            if hex == digest.hex then Right(())
-            else Left(s"${digest.render}: stored bytes hash to sha256:$hex")
-          )
-      }
-
     override def presigning: Option[Presigning] = Some(new Presigning {
       private def dur(ttl: FiniteDuration) = java.time.Duration.ofMillis(ttl.toMillis)
       def presignPut(
+          session: String,
           digest: Sha256,
           size: Long,
           mediaType: String,
           ttl: FiniteDuration
       ): IO[UploadInstruction] = IO.blocking {
-        val req = PutObjectRequest.builder().bucket(bucket).key(key(digest)).contentLength(size)
-          .contentType(mediaType).checksumSHA256(b64(digest)).build()
+        val req = PutObjectRequest.builder().bucket(bucket).key(stagingKey(session, digest))
+          .contentLength(size).contentType(mediaType).checksumSHA256(b64(digest)).build()
         val p = presigner.presignPutObject(
           PutObjectPresignRequest.builder().signatureDuration(dur(ttl)).putObjectRequest(
             req
@@ -313,8 +386,10 @@ object ObjectStore:
           .map((k, v) => k -> v.asScala.mkString(","))
         UploadInstruction(digest.render, p.url().toString, "PUT", headers)
       }
-      def presignPlainPut(digest: Sha256, ttl: FiniteDuration): IO[String] = IO.blocking {
-        val req = PutObjectRequest.builder().bucket(bucket).key(key(digest)).build()
+      def presignManifestPut(session: String, digest: Sha256, size: Long, ttl: FiniteDuration)
+          : IO[String] = IO.blocking {
+        val req = PutObjectRequest.builder().bucket(bucket).key(stagingKey(session, digest))
+          .contentLength(size).build()
         presigner.presignPutObject(
           PutObjectPresignRequest.builder().signatureDuration(dur(ttl)).putObjectRequest(
             req
@@ -334,7 +409,7 @@ object ObjectStore:
     def putBlob(k: String, bytes: Array[Byte], mediaType: String): IO[Unit] =
       write(k, bytes, mediaType, None)
     def getBlob(k: String): IO[Option[Array[Byte]]] = readKey(k)
-    def blobExists(k: String): IO[Boolean] = head(k).map(_.isDefined)
+    def statBlob(k: String): IO[Option[ObjectStat]] = head(k)
     def deleteBlob(k: String): IO[Unit] = remove(k)
     def listBlobs(prefix: String): fs2.Stream[IO, String] = keys(prefix).map(_.key())
 
@@ -376,4 +451,4 @@ object ObjectStore:
           .serviceConfiguration(serviceConf)
         c.endpoint.fold(b)(e => b.endpointOverride(java.net.URI.create(e))).build()
       })
-      (client, presigner).mapN(new S3(_, _, c.bucket))
+      (client, presigner).mapN(new S3(_, _, c.bucket, c.trustProviderChecksum))

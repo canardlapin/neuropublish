@@ -34,26 +34,19 @@ object RenditionStore:
     private def dir(rev: String) = root / "renditions" / rev
     def headerPath(rev: String, asset: String): Path = dir(rev) / s"$asset.json"
     def payloadPath(rev: String, asset: String): Path = dir(rev) / s"$asset.f32"
-    private def read(p: Path): IO[Option[Array[Byte]]] =
-      Files[IO].exists(p).flatMap {
-        case false => IO.none
-        case true => Files[IO].readAll(p).compile.to(Array).map(Some(_))
-      }
-    private def writeAtomic(p: Path, bytes: Array[Byte]): IO[Unit] =
-      val tmp = p.parent.get / s"${p.fileName}.${java.util.UUID.randomUUID().toString.take(8)}.part"
-      Files[IO].createDirectories(p.parent.get) *>
-        fs2.Stream.emits(bytes).through(Files[IO].writeAll(tmp)).compile.drain *>
-        Files[IO].move(tmp, p, fs2.io.file.CopyFlags(fs2.io.file.CopyFlag.ReplaceExisting))
     def write(rev: String, asset: String, header: String, payload: Array[Byte]): IO[Unit] =
       // payload last: `ready` keys on it, so a reader never sees a header without bytes
-      writeAtomic(headerPath(rev, asset), header.getBytes("UTF-8")) *>
-        writeAtomic(payloadPath(rev, asset), payload)
+      JsonFiles.writeBytes(headerPath(rev, asset), header.getBytes("UTF-8")) *>
+        JsonFiles.writeBytes(payloadPath(rev, asset), payload)
     def ready(rev: String, asset: String): IO[Boolean] = Files[IO].exists(payloadPath(rev, asset))
-    def header(rev: String, asset: String): IO[Option[Array[Byte]]] = read(headerPath(rev, asset))
-    def payload(rev: String, asset: String): IO[Option[Array[Byte]]] = read(payloadPath(rev, asset))
+    def header(rev: String, asset: String): IO[Option[Array[Byte]]] =
+      JsonFiles.readBytes(headerPath(rev, asset))
+    def payload(rev: String, asset: String): IO[Option[Array[Byte]]] =
+      JsonFiles.readBytes(payloadPath(rev, asset))
     def delete(rev: String): IO[Unit] =
-      Files[IO].exists(dir(rev)).flatMap(if _ then Files[IO].deleteRecursively(dir(rev))
-      else IO.unit)
+      Files[IO].deleteRecursively(dir(rev)).recover {
+        case _: java.nio.file.NoSuchFileException => ()
+      }
     def revisions: fs2.Stream[IO, String] =
       val base = root / "renditions"
       fs2.Stream.eval(Files[IO].exists(base)).flatMap {

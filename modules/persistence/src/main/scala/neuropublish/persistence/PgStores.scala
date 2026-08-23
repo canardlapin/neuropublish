@@ -16,7 +16,9 @@ final class PgStores(val xa: Transactor[IO]):
   val views: PgViews = PgViews(xa)
   val links: PgShareLinks = PgShareLinks(xa)
   val audit: PgAudit = PgAudit(xa)
-  val jobs: IngestionJobs.Service = IngestionJobs.Service(xa)
+  val queue: PgIngestionQueue = PgIngestionQueue(xa)
+  val uploadSessions: PgUploadSessions = PgUploadSessions(xa)
+  val workspaceAssets: PgWorkspaceAssets = PgWorkspaceAssets(xa)
 
   /** `manifestBytes` fetches a manifest from the object store by digest. */
   def reindex(manifestBytes: Sha256 => IO[Option[Array[Byte]]]): Reindex =

@@ -18,15 +18,19 @@ object Main extends IOApp:
     val data = Path(env.getOrElse("NP_DATA_DIR", "data"))
     val poll = env.get("NP_WORKER_POLL").flatMap(_.toIntOption).getOrElse(2).seconds
     val once = args.contains("--once")
-    // Same store selection as the control plane: PostgreSQL when NP_DATABASE_URL is set, else local-fs.
-    val revisionsR: Resource[IO, neuropublish.backend.RevisionStore] = DbConfig.fromEnv(env) match
+    // Same store selection as the control plane: PostgreSQL when NP_DATABASE_URL is set (queue,
+    // revisions, sessions), else local-fs under NP_DATA_DIR.
+    val db = DbConfig.fromEnv(env)
+    val revisionsR: Resource[IO, neuropublish.backend.RevisionStore] = db match
       case Some(cfg) => Server.Stores.postgres(cfg).map(_.revisions)
       case None => Resource.eval(LocalRevisionStore(data))
-    (Server.storage(data, env), revisionsR).tupled.use { (st, revisions) =>
+    (Server.storage(data, env, db), revisionsR).tupled.use { (st, revisions) =>
       IO.unit.flatMap { _ =>
         val worker = Worker(st.objects, st.renditions, st.queue, revisions)
         IO.println(
-          s"neuropublish ingestion worker; data $data; objects ${st.describe}; poll $poll"
+          s"neuropublish ingestion worker ${Worker.defaultName}; data $data; objects ${st.describe}; queue ${
+              db.fold("local-fs")(_ => "postgresql")
+            }; poll $poll"
         ) *>
           (if once then worker.drain(IO.realTimeInstant).void
            else

@@ -331,14 +331,16 @@ The producer adapter creates a staging bundle. `npub pack`:
 ### 2. Create an upload session
 
 ```http
-POST /api/v1/upload-sessions
+POST /api/v1/workspaces/{workspace}/projects/{project}/upload-sessions
 ```
 
-The request supplies the target project, parent revision (required unless
-the project has no revisions), manifest digest, and asset
-digest/size/media-type inventory. The response supplies the session ID and
-signed upload instructions for missing objects. The API declares maximum
-object size, object count, and total session size from its first version.
+The project is the path; the request body supplies the parent revision
+(required unless the project has no revisions), manifest digest and size, and
+the asset digest/size/media-type inventory. The response supplies the session
+ID and signed upload instructions for missing objects, and
+`GET /api/v1/upload-sessions/{id}` re-issues them for whatever is still
+missing. The API declares maximum object size, object count, and total session
+size from its first version.
 
 Cross-workspace deduplication must not become an asset-existence oracle. The
 server may reuse bytes internally while returning a response that does not
@@ -354,9 +356,14 @@ control plane verifies size and checksum at commit. Without one — tests and
 `scripts/e2e.sh` — the same URL shape points at the control plane, which
 proxies the bytes.)
 
-The CLI streams missing objects to S3-compatible storage with bounded FS2
-concurrency, checksums, resumable multipart upload where warranted, and clear
-progress. The application server does not proxy the payload.
+The CLI streams missing objects to S3-compatible storage with bounded
+concurrency (four single PUTs at a time, three attempts each), checksums, and
+clear progress; an interrupted push is resumed by re-negotiating a session,
+which excludes what the server already holds. The application server does not
+proxy the payload. Signed PUTs address a session-scoped staging area, never a
+committed content-addressed key: commit verifies size and SHA-256 of every
+staged object and copies it server-side, so no client can overwrite bytes a
+revision relies on.
 
 ### 4. Commit atomically
 
@@ -378,9 +385,11 @@ Commit enqueues ingestion. Until the worker finishes, the revision is
 committed but its browser representations are marked pending; the interface
 shows that state honestly rather than a blank canvas.
 
-Unfinished sessions expire. Objects not referenced by a committed revision are
-eligible for delayed garbage collection, never immediate deletion during a
-failed commit.
+Unfinished sessions are dropped by `gc` once older than its threshold (their
+signed URLs expire after an hour; the session record itself has no other
+expiry yet). Objects not referenced by a committed revision are eligible for
+garbage collection, never deletion during a failed commit; `gc` runs only when
+an operator invokes it and deletes immediately once an object qualifies.
 
 ## Identity and sharing
 
@@ -609,7 +618,10 @@ saved_view_versions
 share_links
 catalog_assets             # public template/atlas namespace
 publisher_credentials      # non-human principals with project scopes
-upload_sessions
+user_tokens                # hashed `npub login` bearers
+sessions                   # hashed browser session cookies
+upload_sessions            # negotiated uploads until commit (or gc)
+ingestion_jobs             # the worker's leased queue, enqueued in the commit transaction
 audit_events
 ```
 
@@ -635,7 +647,9 @@ The first deployment policy is conservative:
 - share and publisher secrets stored only as hashes where possible;
 - no executable extension schemas or uploaded UI code;
 - audit events for publish, share, revoke, and delete;
-- delayed, recoverable deletion workflows for scientific revisions and assets.
+- deletion workflows for scientific revisions and assets that are operator-
+  driven and auditable (today `gc` deletes unreferenced objects immediately;
+  delayed, recoverable deletion is still to be designed).
 
 Object storage remains behind an S3-compatible algebra. Public cloud and
 institutional deployments can select different regions or providers without

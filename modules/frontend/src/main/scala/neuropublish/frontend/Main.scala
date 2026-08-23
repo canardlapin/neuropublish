@@ -1,7 +1,7 @@
 package neuropublish.frontend
 
 import com.raquo.laminar.api.L.*
-import neuropublish.api.SavedViewDetail
+import neuropublish.api.{RevisionDetail, SavedViewDetail}
 import neuropublish.protocol.json.Manifest
 import neuropublish.viewer.{ViewUrl, Workspace, WorkspaceState}
 import org.scalajs.dom
@@ -41,9 +41,33 @@ object Main:
     /** Member routes: a 401 on a private project goes to sign-in; everything else is shown. */
     def fail(e: Throwable): Unit = e match
       case ApiFailure(401, _, _) => toLogin()
+      case IngestionFailed(m) => status.set(s"ingestion-failed: $m")
       case _ => status.set(s"error: ${e.getMessage}")
 
     def show(el: HtmlElement): Unit = { content.set(Some(el)); status.set("ready") }
+
+    /** A revision whose renditions are still being derived is polled every 2 s until it is ready; a
+      * failed ingestion is an error (the manifest is there, the canvas is not).
+      */
+    final case class IngestionFailed(message: String) extends RuntimeException(message)
+    def delay(ms: Int): Future[Unit] =
+      val p = scala.concurrent.Promise[Unit]()
+      dom.window.setTimeout(() => p.success(()), ms)
+      p.future
+    def awaitIngestion(id: String): Future[RevisionDetail] =
+      api.revision(id).flatMap { d =>
+        d.ingestion.map(_.status) match
+          case Some("pending") | Some("running") =>
+            status.set("deriving")
+            delay(2000).flatMap(_ => awaitIngestion(id))
+          case Some("failed") =>
+            Future.failed(IngestionFailed(
+              d.ingestion.flatMap(_.error).getOrElse("the browser renditions could not be derived")
+            ))
+          case _ => Future.successful(d)
+      }
+    def loadRevision(ws: String, p: String, id: String): Future[Loaded] =
+      awaitIngestion(id).flatMap(d => Loaded.fromDetail(ws, p, d, api.rendition))
 
     /** Explore page over a loaded revision with `initial` already applied to the store. */
     def explore(l: Loaded, initial: Workspace, saved: Option[SavedViewDetail]): Try[HtmlElement] =
@@ -115,7 +139,7 @@ object Main:
             m => throw RuntimeException(s"This saved view cannot be read by this viewer: $m"),
             identity
           )
-          Loaded.load(api, ws, p, Some(v.revision)).map(l => (v, saved, l))
+          loadRevision(ws, p, v.revision).map(l => (v, saved, l))
         }.onComplete {
           case Success((v, saved, l)) =>
             // same path as the URL: saved state applied onto the revision's recommendations
@@ -126,7 +150,7 @@ object Main:
         }
       case Revision(ws, p, rev) =>
         session.refresh()
-        Loaded.load(api, ws, p, Some(rev)).onComplete {
+        loadRevision(ws, p, rev).onComplete {
           case Success(l) =>
             explore(l, ViewUrl(dom.window.location.search, l.initialWorkspace), None) match
               case Success(el) => show(el)
@@ -140,7 +164,13 @@ object Main:
             api.revision(id).map(d => (s, d.manifest.as[Manifest].toOption.map(m => (d, m))))
           )
         }.onComplete {
-          case Success((s, head)) => show(ProjectPage.render(s, head, session.account))
+          case Success((s, head)) =>
+            show(ProjectPage.render(
+              s,
+              head,
+              session.account,
+              id => api.revision(id).map(_.ingestion)
+            ))
           case Failure(e) => fail(e)
         }
       case _ =>
@@ -157,6 +187,28 @@ object Main:
             cls := "state",
             s match
               case "loading" => div(cls := "skeleton", "Loading revision…")
+              case "deriving" =>
+                div(
+                  cls := "skeleton",
+                  dataAttr("testid") := "ingestion-pending",
+                  "Deriving browser renditions…",
+                  p(
+                    cls := "muted",
+                    "The revision is committed; its volumes are being prepared for the browser. This page refreshes every 2 seconds."
+                  )
+                )
+              case m if m.startsWith("ingestion-failed: ") =>
+                div(
+                  cls := "error",
+                  dataAttr("testid") := "ingestion-failed",
+                  h1("Ingestion failed"),
+                  p(m.stripPrefix("ingestion-failed: ")),
+                  p(
+                    cls := "muted",
+                    "The revision is committed but its browser renditions could not be derived, so there is nothing to draw. Re-run ingestion or push a corrected revision."
+                  ),
+                  a(href := AuthPages.DefaultNext, "Back to project")
+                )
               case "revoked" =>
                 div(
                   cls := "revoked",

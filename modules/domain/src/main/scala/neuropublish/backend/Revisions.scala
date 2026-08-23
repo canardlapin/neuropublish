@@ -17,12 +17,19 @@ final case class RevisionRecord(
     manifestDigest: String,
     message: Option[String],
     committedAt: String
-)
+):
+  def key: ProjectKey = ProjectKey(workspace, project)
 object RevisionRecord:
   given Codec[RevisionRecord] = deriveCodec
 
 /** Stale-parent rejection carries the current head so the publisher can re-push. */
 final case class StaleParent(head: Option[String])
+
+/** Stored bytes that no longer match the digest the record names them by (a tampered or overwritten
+  * object). Never used silently: reads fail with this, and the control plane answers 503
+  * `integrity`.
+  */
+final case class IntegrityError(message: String) extends RuntimeException(message)
 
 /** Projects and their linear revision history. Every row is workspace-scoped (ADR 0004). The
   * local-fs implementation lives in the backend module; the PostgreSQL one in `persistence`.
@@ -32,21 +39,35 @@ trait RevisionStore:
   def projectExists(key: ProjectKey): IO[Boolean]
   def head(key: ProjectKey): IO[Option[String]]
   def revisions(key: ProjectKey): IO[List[RevisionRecord]]
-  def revision(id: String): IO[Option[RevisionRecord]]
 
-  /** Append iff `parent` equals the current head; atomic per project. */
+  /** The revision `id` of `workspace`, or None when it belongs to another workspace. */
+  def revision(workspace: String, id: String): IO[Option[RevisionRecord]]
+
+  /** Unscoped resolution of a bare id — only for the API routes that address a revision by id alone
+    * (`/revisions/{id}`); the caller authorizes on the record's workspace before using it.
+    */
+  def resolveId(id: String): IO[Option[RevisionRecord]]
+
+  /** Every revision of every project (garbage collection needs the complete reference set). */
+  def all: IO[List[RevisionRecord]]
+
+  /** Append iff `parent` equals the current head; atomic per project. The manifest is projected
+    * into the read model (`analyses`, `result_fields`, `revision_assets`, …) and — when `enqueue`
+    * is given — an ingestion job is recorded, both inside the same critical section as the head
+    * update (one transaction in PostgreSQL, the commit mutex locally), so a committed revision
+    * never exists without its job, nor a job without its revision.
+    */
   def commit(
       key: ProjectKey,
       parent: Option[String],
       manifestDigest: Sha256,
       message: Option[String],
-      committedAt: String
+      committedAt: String,
+      manifest: Manifest,
+      enqueue: Option[IngestionQueue]
   ): IO[Either[StaleParent, RevisionRecord]]
 
-  /** Project the committed manifest into the searchable read model (`analyses`, `result_fields`,
-    * `revision_assets`, …). A no-op for stores without a read model; `reindex` rebuilds the same
-    * rows from the stored manifest bytes, so a failure here never loses scientific content.
-    */
+  /** Re-project a stored manifest into the read model (a no-op for stores without one). */
   def index(revision: RevisionRecord, manifest: Manifest): IO[Unit] =
     val _ = (revision, manifest)
     IO.unit

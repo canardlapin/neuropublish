@@ -39,15 +39,17 @@ final class LocalShareLinks(dir: Path) extends ShareLinks:
       _ <- JsonFiles.write(hashFile(rec.secretHash), HashRef(id))
     yield (rec, secret)
 
-  def get(id: String): IO[Option[ShareLinkRecord]] =
+  def resolveId(id: String): IO[Option[ShareLinkRecord]] =
     if !Ids.valid(id) then IO.none else JsonFiles.read[ShareLinkRecord](file(id))
+  def get(workspace: String, id: String): IO[Option[ShareLinkRecord]] =
+    resolveId(id).map(_.filter(_.workspace == workspace))
 
-  def resolve(secret: String): IO[Option[ShareLinkRecord]] =
+  def resolveSecret(secret: String): IO[Option[ShareLinkRecord]] =
     if secret.length > 128 then IO.none
     else
       JsonFiles.read[HashRef](hashFile(Secrets.sha256Hex(secret))).flatMap {
         case None => IO.none
-        case Some(h) => get(h.id)
+        case Some(h) => resolveId(h.id)
       }
 
   def list(key: ProjectKey): IO[List[ShareLinkRecord]] =
@@ -56,7 +58,7 @@ final class LocalShareLinks(dir: Path) extends ShareLinks:
     ))
 
   def revoke(id: String): IO[Option[ShareLinkRecord]] =
-    get(id).flatMap {
+    resolveId(id).flatMap {
       case None => IO.none
       case Some(l) if l.revokedAt.isDefined => IO.pure(Some(l))
       case Some(l) =>

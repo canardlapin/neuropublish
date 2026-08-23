@@ -51,12 +51,26 @@ final class Api(base: String)(using ExecutionContext):
     )
   private def unit(method: String, path: String, body: Option[Json] = None): Future[Unit] =
     call(method, path, body).map(_ => ())
+
+  /** A rendition URL is either an API route (fetched with the session cookie) or a presigned
+    * object-store GET on another origin (fetched with no credentials at all: the signature is the
+    * authorization, and a credentialed cross-origin fetch would be refused by CORS anyway). An
+    * absolute URL is never concatenated onto the API base.
+    */
+  private def fetchUrl(url: String): Future[dom.Response] =
+    val absolute = url.startsWith("http://") || url.startsWith("https://")
+    val ours = base.nonEmpty && url.startsWith(base + "/")
+    if absolute && !ours then
+      val r = new dom.RequestInit {}
+      r.method = "GET".asInstanceOf[dom.HttpMethod]
+      r.credentials = dom.RequestCredentials.omit
+      dom.fetch(url, r).toFuture.flatMap(resp =>
+        if resp.ok then Future.successful(resp) else fail(resp, url)
+      )
+    else call("GET", if ours then url.stripPrefix(base) else url, None)
   private def bytes(url: String): Future[Array[Byte]] =
-    call("GET", url.stripPrefix(base), None).flatMap(_.arrayBuffer().toFuture).map(ab =>
-      new Int8Array(ab).toArray
-    )
-  private def text(url: String): Future[String] =
-    call("GET", url.stripPrefix(base), None).flatMap(_.text().toFuture)
+    fetchUrl(url).flatMap(_.arrayBuffer().toFuture).map(ab => new Int8Array(ab).toArray)
+  private def text(url: String): Future[String] = fetchUrl(url).flatMap(_.text().toFuture)
 
   private def enc(s: String) = js.URIUtils.encodeURIComponent(s)
 

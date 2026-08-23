@@ -35,7 +35,8 @@ abstract class RoutesSpec(factory: ServerFactory) extends CatsEffectSuite:
   private def push(
       app: org.http4s.HttpApp[IO],
       parent: Option[String],
-      substitute: Option[(String, Array[Byte])] = None
+      substitute: Option[(String, Array[Byte])] = None,
+      skip: Option[String] = None
   ) =
     for
       manifest <- bytes("reference/manifest.json")
@@ -57,7 +58,7 @@ abstract class RoutesSpec(factory: ServerFactory) extends CatsEffectSuite:
         ).asJson)))
       _ = assertEquals(created.status, Status.Created)
       s <- created.as[io.circe.Json].map(_.as[UploadSessionCreated].toOption.get)
-      _ <- assets.traverse_ { (id, b) =>
+      _ <- assets.filterNot((id, _) => skip.contains(id)).traverse_ { (id, b) =>
         val body = substitute.filter(_._1 == id).map(_._2).getOrElse(b)
         app.run(auth(Request[IO](
           Method.PUT,
@@ -120,16 +121,60 @@ abstract class RoutesSpec(factory: ServerFactory) extends CatsEffectSuite:
     yield assertEquals(c3.status, Status.Created)
   }
 
-  server.test("a substituted asset fails before commit") { app =>
-    for
-      good <- bytes("reference/assets/speech-z.nii")
-      c <- push(app, None, substitute = Some("speech-t" -> good))
-      _ = assertEquals(c.status, Status.BadRequest)
-      e <- c.as[io.circe.Json].map(_.as[ApiError].toOption.get)
-    yield assert(
-      e.message.contains("was not uploaded") || e.message.contains("digest mismatch"),
-      e.message
-    )
+  server.test("a substituted asset is refused at upload, so commit finds it never uploaded") {
+    app =>
+      for
+        good <- bytes("reference/assets/speech-z.nii")
+        c <- push(app, None, substitute = Some("speech-t" -> good))
+        _ = assertEquals(c.status, Status.BadRequest)
+        e <- c.as[io.circe.Json].map(_.as[ApiError].toOption.get)
+      yield
+        assert(e.message.contains("asset speech-t"), e.message)
+        assert(e.message.contains("was not uploaded"), e.message)
+  }
+
+  server.test(
+    "a never-uploaded asset fails commit as 'was not uploaded'; the PUT of wrong bytes says 'digest mismatch'"
+  ) {
+    app =>
+      for
+        c <- push(app, None, skip = Some("speech-se"))
+        _ = assertEquals(c.status, Status.BadRequest)
+        e <- c.as[io.circe.Json].map(_.as[ApiError].toOption.get)
+        _ = assert(e.message.contains("asset speech-se"), e.message)
+        _ = assert(e.message.contains("was not uploaded"), e.message)
+        _ = assert(!e.message.contains("digest mismatch"), e.message)
+        // the substituted PUT itself is the place that names the mismatch
+        manifest <- bytes("reference/manifest.json")
+        t1 <- bytes("reference/assets/speech-se.nii") // never uploaded above: not yet registered
+        created <- app.run(auth(Request[IO](
+          Method.POST,
+          uri"/api/v1/workspaces/rotman/projects/sherlock/upload-sessions"
+        ).withEntity(CreateUploadSession(
+          Sha256.of(manifest).render,
+          manifest.length.toLong,
+          None,
+          List(AssetInventory(Sha256.of(t1).render, t1.length.toLong, "application/x-nifti"))
+        ).asJson)))
+        s <- created.as[io.circe.Json].map(_.as[UploadSessionCreated].toOption.get)
+        put <- app.run(auth(Request[IO](
+          Method.PUT,
+          Uri.unsafeFromString(
+            s"/api/v1/upload-sessions/${s.sessionId}/objects/${Sha256.of(t1).render}"
+          )
+        ).withEntity(Array.fill[Byte](t1.length)(7))))
+        _ = assertEquals(put.status, Status.BadRequest)
+        pe <- put.as[io.circe.Json].map(_.as[ApiError].toOption.get)
+        // and the session can be re-read for what is still missing
+        again <- app.run(auth(Request[IO](
+          Method.GET,
+          Uri.unsafeFromString(s"/api/v1/upload-sessions/${s.sessionId}")
+        )))
+        _ = assertEquals(again.status, Status.Ok)
+        refreshed <- again.as[io.circe.Json].map(_.as[UploadSessionCreated].toOption.get)
+      yield
+        assert(pe.message.contains("digest mismatch"), pe.message)
+        assertEquals(refreshed.missing.map(_.digest), List(Sha256.of(t1).render))
   }
 
   server.test("unauthenticated mutation and reads are refused (projects are private, Stage 4)") {

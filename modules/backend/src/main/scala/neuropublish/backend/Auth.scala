@@ -85,7 +85,7 @@ final class Authz(
             _.map(Principal.UserToken(_, t)).toRight(unauthorized("invalid token"))
           )
         case None =>
-          credentials.resolve(t).map {
+          credentials.resolveSecret(t).map {
             case Some(c) if c.revokedAt.isEmpty => Right(Principal.Credential(c))
             case _ => Left(unauthorized("invalid token")) // unknown and revoked are the same
           }

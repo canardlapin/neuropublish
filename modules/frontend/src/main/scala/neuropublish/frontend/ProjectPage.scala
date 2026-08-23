@@ -3,6 +3,8 @@ package neuropublish.frontend
 import com.raquo.laminar.api.L.*
 import neuropublish.api.*
 import neuropublish.protocol.json.Manifest
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.Future
 
 /** Project overview: question, current revision, analyses, what changed, warnings (product
   * definition).
@@ -11,7 +13,8 @@ object ProjectPage:
   def render(
       summary: ProjectSummary,
       head: Option[(RevisionDetail, Manifest)],
-      account: HtmlElement
+      account: HtmlElement,
+      ingestionOf: String => Future[Option[IngestionStatus]] = _ => Future.successful(None)
   ): HtmlElement =
     val base = s"/w/${summary.workspace}/p/${summary.project}"
     div(
@@ -64,12 +67,28 @@ object ProjectPage:
           )
         ),
         summary.revisions.reverse.map { r =>
+          // the ingestion state of each revision: a pill for anything not ready
+          val ingestion = Var[Option[IngestionStatus]](
+            head.filter(_._1.id == r.id).flatMap(_._1.ingestion)
+          )
+          if ingestion.now().isEmpty then
+            ingestionOf(r.id).foreach(st => ingestion.set(st))
           div(
             cls := "row revision-row",
+            dataAttr("revision") := r.id,
             a(cls := "mono", href := s"$base/r/${r.id}/view", r.id),
             span(r.message.getOrElse("")),
             span(cls := "muted", r.committedAt.take(19).replace("T", " ")),
-            if summary.head.contains(r.id) then span(cls := "pill accent", "current") else emptyNode
+            if summary.head.contains(r.id) then span(cls := "pill accent", "current")
+            else emptyNode,
+            child.maybe <-- ingestion.signal.map(_.filter(_.status != "ready").map(st =>
+              span(
+                cls := (if st.status == "failed" then "pill warn" else "pill"),
+                dataAttr("ingestion") := st.status,
+                title := st.error.getOrElse(""),
+                if st.status == "failed" then "ingestion failed" else s"renditions ${st.status}"
+              )
+            ))
           )
         }
       )

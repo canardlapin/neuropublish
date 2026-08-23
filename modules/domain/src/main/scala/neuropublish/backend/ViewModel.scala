@@ -37,7 +37,14 @@ object ViewRecord:
 
 trait Views:
   def create(rev: RevisionRecord, name: String, state: Json, owner: String): IO[ViewRecord]
-  def get(id: String): IO[Option[ViewRecord]]
+
+  /** The view `id` of `workspace`, or None when it belongs to another workspace. */
+  def get(workspace: String, id: String): IO[Option[ViewRecord]]
+
+  /** Unscoped resolution of a bare id — only for `/views/{id}` routes, which authorize on the
+    * record's workspace before using it.
+    */
+  def resolveId(id: String): IO[Option[ViewRecord]]
 
   /** Append version n+1; the earlier versions are immutable and stay addressable by links. */
   def update(id: String, state: Json, savedBy: String): IO[Option[ViewRecord]]

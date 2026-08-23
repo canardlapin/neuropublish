@@ -9,9 +9,16 @@ import neuropublish.api.*
 import neuropublish.protocol.ProtocolVersion
 import org.http4s.HttpRoutes
 import sttp.apispec.openapi.circe.yaml.*
+import sttp.model.StatusCode
 import sttp.model.headers.{Cookie, CookieValueWithMeta}
+import sttp.tapir.*
 import sttp.tapir.docs.openapi.OpenAPIDocsInterpreter
-import sttp.tapir.server.http4s.Http4sServerInterpreter
+import sttp.tapir.json.circe.*
+import neuropublish.api.Protocol.given
+import sttp.tapir.generic.auto.*
+import sttp.tapir.server.http4s.{Http4sServerInterpreter, Http4sServerOptions}
+import sttp.tapir.server.interceptor.exception.{ExceptionContext, ExceptionHandler}
+import sttp.tapir.server.model.ValuedEndpointOutput
 
 /** Every endpoint resolves a [[Principal]] first (cookie or bearer) and then applies the rules in
   * [[Authz]]. Share routes are the one exception: they authorize by link secret.
@@ -102,12 +109,16 @@ final class Routes(
     scoped(
       p,
       s"revision $id does not exist",
-      if !Ids.valid(id) then IO.none else revisions.revision(id)
+      if !Ids.valid(id) then IO.none else revisions.resolveId(id)
     )(r => ProjectKey(r.workspace, r.project))
   private def viewOf(p: Principal, id: String): Res[ViewRecord] =
-    scoped(p, s"view $id does not exist", views.get(id))(v => ProjectKey(v.workspace, v.project))
+    scoped(p, s"view $id does not exist", views.resolveId(id))(v =>
+      ProjectKey(v.workspace, v.project)
+    )
   private def linkOf(p: Principal, id: String): Res[ShareLinkRecord] =
-    scoped(p, s"link $id does not exist", links.get(id))(l => ProjectKey(l.workspace, l.project))
+    scoped(p, s"link $id does not exist", links.resolveId(id))(l =>
+      ProjectKey(l.workspace, l.project)
+    )
   private def projectOf(p: Principal, ws: String, proj: String): Res[ProjectKey] = authed(p):
     val key = ProjectKey(ws, proj)
     if !Ids.valid(ws) || !Ids.valid(proj) then
@@ -148,6 +159,13 @@ final class Routes(
       (ws, proj, req) =>
         val key = ProjectKey(ws, proj)
         withE(authz.canPublish(p, key))(_ => pub.createSession(key, req))
+    )
+  private val refresh =
+    Protocol.refreshUploadSession.serverSecurityLogic[Principal, IO](resolve).serverLogic(p =>
+      s =>
+        withE(uploadKey(p, s))(key =>
+          withE(authz.canPublish(p, key))(_ => pub.refreshSession(s))
+        )
     )
   private val putObject =
     Protocol.uploadObject.serverSecurityLogic[Principal, IO](resolve).serverLogic(p =>
@@ -192,7 +210,7 @@ final class Routes(
     p =>
       id =>
         withE(revisionOf(p, id))(r =>
-          withE(authz.canRead(p, ProjectKey(r.workspace, r.project)))(_ => pub.revision(id))
+          withE(authz.canRead(p, ProjectKey(r.workspace, r.project)))(_ => pub.revision(r))
         )
   )
   private def rendition[A](p: Principal, rev: String, f: => Res[A]): Res[A] =
@@ -370,7 +388,7 @@ final class Routes(
             else Left(ApiError("forbidden", "owner or admin role required"))
         }
         withE(admin) { _ =>
-          credentials.get(id).flatMap {
+          credentials.get(ws, id).flatMap {
             case Some(c) if c.key == ProjectKey(ws, proj) =>
               credentials.revoke(id) *>
                 audit.record(
@@ -455,9 +473,16 @@ final class Routes(
             else if req.expiresInDays.exists(_ <= 0) then
               IO.pure(Left(badRequest("expiresInDays must be positive")))
             else
-              // publication policy is checked where the link is minted, not where it is opened
-              val policy = pub.revision(v.revision).map(_.flatMap(rd =>
-                SharedProjection.shareable(rd.manifest).leftMap(badRequest)
+              // publication policy is checked where the link is minted, not where it is opened;
+              // a revision whose renditions are not all derived has nothing to show a viewer yet
+              val policy = pub.revision(v.workspace, v.revision).map(_.flatMap(rd =>
+                rd.ingestion.filter(Ingestion.notReady) match
+                  case Some(st) =>
+                    Left(badRequest(
+                      s"revision ${v.revision} ingestion is ${st.status}" +
+                        st.error.fold("")(e => s": $e") + "; share it once it is ready"
+                    ))
+                  case None => SharedProjection.shareable(rd.manifest).leftMap(badRequest)
               ))
               withE(policy)(_ =>
                 links.create(v, version, u.id, req.expiresInDays).map(Right(_))
@@ -510,15 +535,15 @@ final class Routes(
 
   /** A presented share secret → its link, or 401 (unknown) / 410 (revoked or expired). */
   private def liveLink(secret: String): Res[(ShareLinkRecord, ViewRecord)] =
-    links.resolve(secret).flatMap {
+    links.resolveSecret(secret).flatMap {
       case None => IO.pure(Left(ApiError("unauthorized", "unknown share link")))
       case Some(l) =>
         IO.realTimeInstant.flatMap { now =>
           if !l.usable(now) then
             IO.pure(Left(ApiError("revoked", "this link has been revoked or has expired")))
           else
-            views.get(l.view).map(_.toRight(notFound("the shared view no longer exists")).map(l ->
-              _))
+            views.get(l.workspace, l.view)
+              .map(_.toRight(notFound("the shared view no longer exists")).map(l -> _))
         }
     }
   private val openShare = Stage4.openShare.serverLogic[IO] { secret =>
@@ -526,7 +551,7 @@ final class Routes(
       v.version(l.version) match
         case None => IO.pure(Left(notFound("the shared view version no longer exists")))
         case Some(ver) =>
-          withE(pub.revision(v.revision)) { rd =>
+          withE(pub.revision(v.workspace, v.revision)) { rd =>
             // link viewers fetch renditions through the share routes, never the member routes;
             // in direct (S3) mode a ready rendition is a short-lived signed GET instead
             rd.renditions.traverse(r =>
@@ -569,11 +594,11 @@ final class Routes(
   private val provenance =
     Stage4.provenance.serverSecurityLogic[Principal, IO](resolve).serverLogic(p =>
       rev =>
-        withE(revisionOf(p, rev)) { _ =>
+        withE(revisionOf(p, rev)) { r =>
           ProvenanceModel.cached(
             data,
             rev,
-            pub.revision(rev).flatMap(d =>
+            pub.revision(r).flatMap(d =>
               IO.fromEither(d.leftMap(e => IllegalStateException(e.message)))
             ).map(_.manifest)
           ).map(Right(_))
@@ -630,10 +655,15 @@ final class Routes(
           )
       }
 
-  val routes: HttpRoutes[IO] = signedRenditions <+> Http4sServerInterpreter[IO]().toRoutes(
+  private val interpreter = Http4sServerInterpreter[IO](
+    Http4sServerOptions.customiseInterceptors[IO].exceptionHandler(Routes.exceptionHandler).options
+  )
+
+  val routes: HttpRoutes[IO] = Routes.noStore(signedRenditions <+> interpreter.toRoutes(
     List(
       health,
       create,
+      refresh,
       putObject,
       putManifest,
       commit,
@@ -667,9 +697,62 @@ final class Routes(
       provenance,
       auditLog
     )
-  )
+  ))
 
 object Routes:
+  private val log = org.slf4j.LoggerFactory.getLogger("neuropublish.backend.Routes")
+
+  /** Responses carry presigned URLs and private records: never cache them anywhere. */
+  def noStore(routes: HttpRoutes[IO]): HttpRoutes[IO] =
+    routes.map(_.putHeaders(org.http4s.Header.Raw(
+      org.typelevel.ci.CIString("Cache-Control"),
+      "no-store"
+    )))
+
+  /** Unhandled exceptions → JSON `ApiError`: a missing file is 404 `not_found`; a transient object
+    * store failure (SDK client errors, 5xx, timeouts) is 503 `unavailable`; tampered bytes are 503
+    * `integrity`; anything else stays 500 `internal`, logged with the request path.
+    */
+  val exceptionHandler: ExceptionHandler[IO] =
+    ExceptionHandler.pure[IO] { (ctx: ExceptionContext) =>
+      val out = statusCode.and(jsonBody[ApiError])
+      def reply(status: StatusCode, e: ApiError) = Some(ValuedEndpointOutput(out, (status, e)))
+      val path = ctx.request.pathSegments.mkString("/", "/", "")
+      classify(ctx.e) match
+        case Classified.NotFound =>
+          reply(StatusCode.NotFound, ApiError("not_found", "no such object"))
+        case Classified.Unavailable(m) =>
+          log.warn(s"$path: object store unavailable: $m")
+          reply(StatusCode.ServiceUnavailable, ApiError("unavailable", "object store unavailable"))
+        case Classified.Integrity(m) =>
+          log.error(s"$path: INTEGRITY FAILURE: $m")
+          reply(
+            StatusCode.ServiceUnavailable,
+            ApiError("integrity", "stored bytes failed verification")
+          )
+        case Classified.Internal =>
+          log.error(s"$path: unhandled ${ctx.e.getClass.getName}: ${ctx.e.getMessage}", ctx.e)
+          reply(StatusCode.InternalServerError, ApiError("internal", "internal server error"))
+    }
+
+  enum Classified:
+    case NotFound, Internal
+    case Unavailable(message: String)
+    case Integrity(message: String)
+
+  def classify(e: Throwable): Classified =
+    import software.amazon.awssdk.core.exception.SdkClientException
+    import software.amazon.awssdk.services.s3.model.S3Exception
+    def go(t: Throwable, depth: Int): Classified =
+      t match
+        case _: java.nio.file.NoSuchFileException => Classified.NotFound
+        case i: IntegrityError => Classified.Integrity(i.message)
+        case s: SdkClientException => Classified.Unavailable(s.getMessage)
+        case s: S3Exception if s.statusCode() >= 500 => Classified.Unavailable(s.getMessage)
+        case _: java.util.concurrent.TimeoutException => Classified.Unavailable(t.getMessage)
+        case _ if t.getCause != null && t.getCause != t && depth < 8 => go(t.getCause, depth + 1)
+        case _ => Classified.Internal
+    go(e, 0)
   val openApiYaml: String =
     OpenAPIDocsInterpreter().toOpenAPI(
       Protocol.all ++ Stage4.all,

@@ -26,10 +26,14 @@ object CredentialRecord:
 trait Credentials:
   /** Returns the record and the clear secret, which is never written anywhere. */
   def create(key: ProjectKey, name: String, createdBy: String): IO[(CredentialRecord, String)]
-  def get(id: String): IO[Option[CredentialRecord]]
 
-  /** The credential a presented secret names, revoked or not (the caller decides). */
-  def resolve(secret: String): IO[Option[CredentialRecord]]
+  /** The credential `id` of `workspace`, or None when it belongs to another workspace. */
+  def get(workspace: String, id: String): IO[Option[CredentialRecord]]
+
+  /** The credential a presented secret names, revoked or not (the caller decides). Global by
+    * nature: a bearer secret arrives before any workspace is known.
+    */
+  def resolveSecret(secret: String): IO[Option[CredentialRecord]]
 
   /** Live (unrevoked) credentials of one project. */
   def list(key: ProjectKey): IO[List[CredentialRecord]]

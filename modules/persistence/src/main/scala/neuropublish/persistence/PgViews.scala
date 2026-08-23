@@ -47,7 +47,12 @@ final class PgViews(xa: Transactor[IO]) extends Views:
       List(ViewVersion(1, state, Db.render(now), owner))
     )
 
-  def get(id: String): IO[Option[ViewRecord]] = getC(id).transact(xa)
+  def resolveId(id: String): IO[Option[ViewRecord]] = getC(id).transact(xa)
+  def get(workspace: String, id: String): IO[Option[ViewRecord]] =
+    (selectView ++ fr"WHERE v.workspace_id = $workspace AND v.id = $id").query[Row].option.flatMap {
+      case None => FC.pure(Option.empty[ViewRecord])
+      case Some(r) => versions(id).map(vs => Some(r.record(vs)))
+    }.transact(xa)
 
   def update(id: String, state: Json, savedBy: String): IO[Option[ViewRecord]] =
     IO.realTimeInstant.flatMap { now =>
@@ -129,12 +134,15 @@ final class PgShareLinks(xa: Transactor[IO]) extends ShareLinks:
       secret
     )
 
-  def get(id: String)
+  def resolveId(id: String)
       : IO[Option[ShareLinkRecord]] = (select ++ fr"WHERE l.id = $id").query[Row].option.map(_.map(
     _.record
   )).transact(xa)
+  def get(workspace: String, id: String): IO[Option[ShareLinkRecord]] =
+    (select ++ fr"WHERE l.workspace_id = $workspace AND l.id = $id").query[Row].option
+      .map(_.map(_.record)).transact(xa)
 
-  def resolve(secret: String): IO[Option[ShareLinkRecord]] =
+  def resolveSecret(secret: String): IO[Option[ShareLinkRecord]] =
     if secret.length > 128 then IO.none
     else
       (select ++ fr"WHERE l.secret_hash = ${Secrets.sha256Hex(secret)}")
@@ -150,7 +158,7 @@ final class PgShareLinks(xa: Transactor[IO]) extends ShareLinks:
     IO.realTimeInstant.flatMap { now =>
       sql"UPDATE share_links SET revoked_at = $now WHERE id = $id AND revoked_at IS NULL"
         .update.run.transact(xa)
-    } *> get(id)
+    } *> resolveId(id)
 
 object PgShareLinks:
   final case class Row(

@@ -34,20 +34,22 @@ final class LocalCredentials(dir: Path) extends Credentials:
       _ <- JsonFiles.write(hashFile(hash), HashRef(id))
     yield (rec, secret)
 
-  def get(id: String): IO[Option[CredentialRecord]] =
+  private def byId(id: String): IO[Option[CredentialRecord]] =
     if !Ids.valid(id) then IO.none else JsonFiles.read[CredentialRecord](file(id))
+  def get(workspace: String, id: String): IO[Option[CredentialRecord]] =
+    byId(id).map(_.filter(_.workspace == workspace))
 
-  def resolve(secret: String): IO[Option[CredentialRecord]] =
+  def resolveSecret(secret: String): IO[Option[CredentialRecord]] =
     JsonFiles.read[HashRef](hashFile(Secrets.sha256Hex(secret))).flatMap {
       case None => IO.none
-      case Some(h) => get(h.id)
+      case Some(h) => byId(h.id)
     }
 
   def list(key: ProjectKey): IO[List[CredentialRecord]] =
     JsonFiles.list[CredentialRecord](dir).map(_.filter(c => c.key == key && c.revokedAt.isEmpty))
 
   def revoke(id: String): IO[Option[CredentialRecord]] =
-    get(id).flatMap {
+    byId(id).flatMap {
       case None => IO.none
       case Some(c) if c.revokedAt.isDefined => IO.pure(Some(c))
       case Some(c) =>

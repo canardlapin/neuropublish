@@ -4,13 +4,15 @@ import cats.effect.{IO, Resource}
 import cats.syntax.all.*
 import doobie.*
 import doobie.implicits.*
+import com.zaxxer.hikari.HikariConfig
 import doobie.hikari.HikariTransactor
-import doobie.util.ExecutionContexts
 import java.time.Instant
 import neuropublish.backend.Role
 import org.flywaydb.core.Flyway
 
-/** `NP_DATABASE_URL` (+ `NP_DATABASE_USER` / `NP_DATABASE_PASSWORD`): a JDBC PostgreSQL URL. */
+/** `NP_DATABASE_URL` (+ `NP_DATABASE_USER` / `NP_DATABASE_PASSWORD`): a JDBC PostgreSQL URL;
+  * `NP_DATABASE_POOL` is Hikari's `maximumPoolSize` (default 8).
+  */
 final case class DbConfig(url: String, user: String, password: String, poolSize: Int = 8)
 
 object DbConfig:
@@ -37,16 +39,16 @@ object Database:
     }
 
   def transactor(cfg: DbConfig): Resource[IO, Transactor[IO]] =
-    for
-      ec <- ExecutionContexts.fixedThreadPool[IO](cfg.poolSize)
-      xa <- HikariTransactor.newHikariTransactor[IO](
-        "org.postgresql.Driver",
-        cfg.url,
-        cfg.user,
-        cfg.password,
-        ec
-      )
-    yield xa
+    Resource.eval(IO {
+      val c = new HikariConfig()
+      c.setDriverClassName("org.postgresql.Driver")
+      c.setJdbcUrl(cfg.url)
+      c.setUsername(cfg.user)
+      c.setPassword(cfg.password)
+      c.setMaximumPoolSize(cfg.poolSize)
+      c.setPoolName("neuropublish")
+      c
+    }).flatMap(HikariTransactor.fromHikariConfig[IO](_))
 
 /** Column codecs shared by the stores (each store also imports `doobie.postgres.implicits.*` for
   * `Instant`/`UUID` and `doobie.postgres.circe.jsonb.implicits.*` for `jsonb`). Timestamps are

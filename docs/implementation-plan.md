@@ -520,15 +520,36 @@ with presigned PUT/GET and per-workspace asset registry (no cross-tenant
 existence oracle); `ingestion` worker process with retries and per-revision
 status; `gc --older-than`; `npub inspect`/`pack`.
 
-Carried / watch: `IngestionQueue` and upload sessions stay on local files even
-in PostgreSQL mode (adapter point marked; `gc` is local-read-model only);
-signed object GETs for *link* viewers are 307 redirects to 15-minute presigned
-URLs (bucket CORS still to be configured for a real deployment); an
-intermittent `500` on `GET /revisions/{id}` seen twice under concurrent
-browser load is attributed to the byte-profile scanner having been a
-singleton with mutable depth state (fixed: one scanner per parse, with a
-64-way concurrent test); server errors are now logged (`slf4j-simple`) so
-any recurrence is diagnosable.
+Spine fixes (2026-08-23): the ingestion queue, upload sessions and the
+workspace asset registry are PostgreSQL tables in PostgreSQL mode (V8: leased
+`ingestion_jobs` with `available_at`/`locked_at`, composite
+`(workspace_id, revision_id)` keys on every revision child, `parent` kept in
+its project); the local queue has the same 10-minute lease through a
+`.claim` file; commit + projections + job are one transaction (or one mutex
+section locally); `ingestion.status` is derived from evidence and never
+`ready` by job absence; share links refuse revisions whose ingestion is not
+ready; the viewer shows "Deriving browser renditions…" and polls every 2 s,
+and "Ingestion failed" with the error; `gc` enumerates revisions through the
+store, refuses without a complete reference set, drops abandoned sessions,
+re-checks references before each delete, and unregisters deleted digests;
+every temp-file replacement is an atomic move and every read tolerates a
+vanished file; unhandled exceptions map to 404/503/500 `ApiError`s;
+`NP_DATABASE_POOL` is applied; store lookups are workspace-scoped. Object
+store: signed PUTs go to a session-scoped staging area and commit verifies
+(size + SHA-256; the provider checksum echo is trusted only on AWS) and
+server-side-copies — no client writes a committed key; a digest is registered
+to a workspace only by a successful commit; stored manifests that no longer
+hash to their digest are refused on every read (`503 integrity`);
+`GET /upload-sessions/{id}` re-issues instructions; API responses are
+`no-store`; presigned rendition GETs are fetched without credentials;
+`maxObjectBytes` is 1 GiB; objects are streamed to disk for derivation.
+
+Carried / watch: bucket CORS is still to be configured for a real
+deployment (MinIO reflects any origin, which is why `NP_E2E_MODE=full`
+renders); in S3 mode a re-negotiated session re-uploads objects the previous
+session only staged (committed ones are skipped); upload-session expiry is
+`gc`'s threshold, not a TTL of its own; `NP_TEST_REQUIRE_DOCKER=1` must be
+set in CI so the Docker suites cannot pass by skipping.
 The ScalaFIM `NArray` migration remains queued before Stage 5.
 
 ## Stage 3 — volume scientific workspace

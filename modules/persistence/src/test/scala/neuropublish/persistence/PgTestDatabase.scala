@@ -1,12 +1,14 @@
 package neuropublish.persistence
 
 import cats.effect.{IO, Resource}
-import munit.Assertions.assume
+import munit.Assertions.{assume, fail}
 import org.testcontainers.DockerClientFactory
 import org.testcontainers.containers.PostgreSQLContainer
 
 /** One Testcontainers PostgreSQL per JVM; a fresh, migrated database per test. Without Docker every
-  * caller skips via `assume`, so the suites report "skipped", never "failed".
+  * caller skips via `assume`, so the suites report "skipped", never "failed" — unless
+  * `NP_TEST_REQUIRE_DOCKER=1` or `CI=true` is set, in which case a missing daemon is a failure (so
+  * a CI run can never pass by silently skipping the database and object-store suites).
   */
 object PgTestDatabase:
   val SkipMessage = "Docker is not available: PostgreSQL-backed tests skipped"
@@ -16,6 +18,18 @@ object PgTestDatabase:
     !sys.props.contains("np.test.noDocker") &&
       (try DockerClientFactory.instance().isDockerAvailable
       catch case _: Throwable => false)
+
+  /** Docker-backed suites must run, not skip. */
+  lazy val dockerRequired: Boolean =
+    sys.env.get("NP_TEST_REQUIRE_DOCKER").exists(v => v == "1" || v == "true") ||
+      sys.env.get("CI").exists(_ == "true")
+
+  /** Skip (or fail, when required) unless Docker is reachable. */
+  def requireDocker(what: String): Unit =
+    if !dockerAvailable then
+      if dockerRequired then
+        fail(s"Docker is required (NP_TEST_REQUIRE_DOCKER/CI) but unavailable: $what")
+      else assume(false, s"Docker is not available: $what skipped")
 
   private lazy val container: PostgreSQLContainer[Nothing] =
     val c = new PostgreSQLContainer[Nothing]("postgres:16-alpine")
@@ -44,5 +58,5 @@ object PgTestDatabase:
 
   /** Skips the calling test without Docker; otherwise a migrated, empty database. */
   def fresh: Resource[IO, PgStores] =
-    Resource.eval(IO(assume(dockerAvailable, SkipMessage)) *> createDatabase)
+    Resource.eval(IO(requireDocker("PostgreSQL-backed tests")) *> createDatabase)
       .flatMap(PgStores.resource(_))
