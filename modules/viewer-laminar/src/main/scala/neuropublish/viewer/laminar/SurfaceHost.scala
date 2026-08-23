@@ -14,6 +14,10 @@ import scalafim.surface.view.three.{ThreeCanvasSize, ThreeJsRuntime, ThreeSurfac
   *
   * The model may be absent (a revision with no surface geometry): the pane then holds a live
   * context that draws nothing, so the lifecycle contract is identical with or without data.
+  *
+  * The host outlives its panes: a preset switch disposes the live handle and mounts a new one. The
+  * last reducer state is kept as `snapshot` on dispose and carried into the next `create`, so
+  * zoom, orbit, lighting, and the selection survive Volume → Hybrid → Surface switches.
   */
 final class SurfaceHost(
     three: js.Dynamic,
@@ -22,6 +26,11 @@ final class SurfaceHost(
     linkRadius: SurfaceLinkRadius = SurfaceHost.DefaultLinkRadius
 ) extends RendererHost[SurfaceHost.Live]:
   import SurfaceHost.*
+
+  private var lastState: Option[SurfaceViewerState] = None
+
+  /** The reducer state of the last disposed pane, if any (what the next mount starts from). */
+  def snapshot: Option[SurfaceViewerState] = lastState
 
   def create(canvas: dom.html.Canvas): Live =
     val rt = ThreeJsRuntime
@@ -35,7 +44,11 @@ final class SurfaceHost(
     probe.created += 1
     probe.lastContextState = rt.contextState.toString
     val live = Live(canvas, rt, backend, onLost)
-    initialModel.foreach(m => live.viewer = Some(Viewer(m, SurfaceViewerState.initial(m))))
+    initialModel.foreach { m =>
+      val v = Viewer(m, SurfaceViewerState.initial(m))
+      lastState.foreach(carry(v, _))
+      live.viewer = Some(v)
+    }
     live
 
   /** Replace the model (a colormap or layer-set change needs new `SurfaceLayer`s). Layout, camera,
@@ -48,30 +61,33 @@ final class SurfaceHost(
       for
         v <- r.viewer
         p <- previous
-      do
-        val old = p.state
-        val carried: Vector[SurfaceViewerAction] =
-          Vector(
-            SurfaceViewerAction.SetLayout(old.layout),
-            SurfaceViewerAction.SetViewpoint(old.camera.viewpoint),
-            SurfaceViewerAction.SetProjection(old.camera.projection),
-            SurfaceViewerAction.SetZoom(old.camera.zoom),
-            SurfaceViewerAction.SetOrbit(old.camera.orbit),
-            SurfaceViewerAction.SetLighting(old.lighting)
-          ) ++ old.selection.toVector.map(s => SurfaceViewerAction.Select(s.surface, s.vertex)) ++
-            old.presentations.values.toVector.filter(pr => v.model.layer(pr.id).isDefined).flatMap {
-              pr =>
-                Vector(
-                  SurfaceViewerAction.SetLayerVisible(pr.id, pr.visible),
-                  SurfaceViewerAction.SetLayerOpacity(pr.id, pr.opacity)
-                ) ++ pr.window.map(SurfaceViewerAction.SetLayerWindow(pr.id, _)) ++
-                  pr.threshold.map(SurfaceViewerAction.SetLayerThreshold(pr.id, _))
-            }
-        // a carried action that the new model rejects (e.g. a layout naming a surface that is gone)
-        // is dropped, not reported: the new model's initial state is already valid
-        carried.foreach(a => SurfaceViewer.reduce(v.model, v.state, a).foreach(s => v.state = s))
+      do carry(v, p.state)
       r.plan = None
       scheduleRender(r)
+
+  /** Re-apply an earlier state onto a fresh viewer as actions. A carried action the model rejects
+    * (e.g. a layout naming a surface that is gone) is dropped, not reported: the initial state is
+    * already valid.
+    */
+  private def carry(v: Viewer, old: SurfaceViewerState): Unit =
+    val carried: Vector[SurfaceViewerAction] =
+      Vector(
+        SurfaceViewerAction.SetLayout(old.layout),
+        SurfaceViewerAction.SetViewpoint(old.camera.viewpoint),
+        SurfaceViewerAction.SetProjection(old.camera.projection),
+        SurfaceViewerAction.SetZoom(old.camera.zoom),
+        SurfaceViewerAction.SetOrbit(old.camera.orbit),
+        SurfaceViewerAction.SetLighting(old.lighting)
+      ) ++ old.selection.toVector.map(s => SurfaceViewerAction.Select(s.surface, s.vertex)) ++
+        old.presentations.values.toVector.filter(pr => v.model.layer(pr.id).isDefined).flatMap {
+          pr =>
+            Vector(
+              SurfaceViewerAction.SetLayerVisible(pr.id, pr.visible),
+              SurfaceViewerAction.SetLayerOpacity(pr.id, pr.opacity)
+            ) ++ pr.window.map(SurfaceViewerAction.SetLayerWindow(pr.id, _)) ++
+              pr.threshold.map(SurfaceViewerAction.SetLayerThreshold(pr.id, _))
+        }
+    carried.foreach(a => SurfaceViewer.reduce(v.model, v.state, a).foreach(s => v.state = s))
 
   def resize(r: Live, w: Int, h: Int): Unit =
     if w > 0 && h > 0 && !r.disposed then
@@ -126,26 +142,39 @@ final class SurfaceHost(
         case None => Link.NoGeometry
         case Some(v) if v.model.surfaces.isEmpty => Link.NoGeometry
         case Some(v) =>
+          def geometryError(e: SurfaceViewError): Link =
+            // a permanently bad geometry would otherwise report on every cursor move
+            if !probe.errors.lastOption.contains(e.toString) then probe.errors += e.toString
+            Link.NoGeometry
           val candidates = v.model.surfaces.map { asset =>
             SurfaceWorldLink.nearestVertex(asset.id, asset.geometry, world, linkRadius) match
               case Right(sel) =>
-                val d = SurfaceWorldLink.worldPoint(asset.geometry, sel.vertex).toOption
-                  .map(p => dist(p, world)).getOrElse(0.0)
-                Link.Linked(asset.id, sel.vertex.index, d)
+                // the distance is measured, never assumed: a vertex whose world position cannot
+                // be computed is not a link (nearestVertex already rejects such a transform, so
+                // this branch is a guard, not a path)
+                SurfaceWorldLink.worldPoint(asset.geometry, sel.vertex) match
+                  case Right(p) => Link.Linked(asset.id, sel.vertex.index, dist(p, world))
+                  case Left(e) => geometryError(e)
               case Left(SurfaceViewError.LinkDistanceExceeded(d, _)) => Link.OutOfRange(d)
-              case Left(e) =>
-                // a permanently bad geometry would otherwise report on every cursor move
-                if !probe.errors.lastOption.contains(e.toString) then probe.errors += e.toString
-                Link.NoGeometry
+              case Left(e) => geometryError(e)
           }
           val best = candidates.minBy {
             case Link.Linked(_, _, d) => (0, d)
             case Link.OutOfRange(d) => (1, d)
             case Link.NoGeometry => (2, Double.PositiveInfinity)
           }
-          best match
-            case Link.Linked(s, vtx, _) => dispatch(r, SurfaceViewerAction.Select(s, VertexId(vtx)))
-            case _ => dispatch(r, SurfaceViewerAction.ClearSelection)
+          // only a changed selection schedules a frame: a cursor re-sent at the same vertex (a
+          // remount, a URL restore) must not cost a render
+          val wanted = best match
+            case Link.Linked(s, vtx, _) => Some(SurfaceSelection(s, VertexId(vtx)))
+            case _ => None
+          if wanted != v.state.selection then
+            dispatch(
+              r,
+              wanted.fold(SurfaceViewerAction.ClearSelection)(s =>
+                SurfaceViewerAction.Select(s.surface, s.vertex)
+              )
+            )
           best
 
   /** The readout of the current selection from the last compiled plan (values at the vertex, in
@@ -176,14 +205,17 @@ final class SurfaceHost(
       r.raf = Some(id)
       probe.rafOutstanding += 1
 
-  /** Idempotent: cancels the pending frame, disposes the backend (which disposes the runtime and
-    * forces WebGL context loss), and removes the listener exactly once.
+  /** Idempotent: cancels the pending frame, keeps the reducer state as the next mount's starting
+    * point, disposes the backend (`ThreeSurfaceBackend.dispose` → `ThreeJsRuntime.dispose`, which
+    * forces WebGL context loss through `WEBGL_lose_context`), and removes the listener exactly
+    * once.
     */
   def dispose(r: Live): Unit =
     r.raf.foreach { id => dom.window.cancelAnimationFrame(id); probe.rafOutstanding -= 1 }
     r.raf = None
     if !r.disposed then
       r.disposed = true
+      r.viewer.foreach(v => lastState = Some(v.state))
       r.canvas.removeEventListener("webglcontextlost", r.onLost)
       r.backend.dispose().left.foreach(e => probe.errors += e.toString)
       r.viewer = None

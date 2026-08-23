@@ -30,3 +30,12 @@ class WorkspaceLayoutSuite extends ScalaCheckSuite:
       l.preset == p && l.copy(preset = LayoutPreset.Volume) == WorkspaceLayout.default
     }
   }
+
+  property("a dragged split fraction survives the URL exactly: decode(encode(w)) == w") {
+    forAll(Gen.choose(-0.5, 1.5)) { f =>
+      val base = Workspace(Vector.empty, None, WorkspaceLayout.default, "layers")
+      val dragged = Workspace.reduce(base, Workspace.Action.Layout(Action.ResizeSplit(f)))
+      val back = ViewUrl(ViewUrl.encode(dragged), base)
+      back == dragged && ViewUrl.encode(back) == ViewUrl.encode(dragged)
+    }
+  }
