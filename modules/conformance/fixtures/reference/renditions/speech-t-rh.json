@@ -1,6 +1,6 @@
 {
   "profile" : "org.neuropublish.rendition/vertex-field-f32@0",
-  "surface" : "rh-pial",
+  "surface" : "rh-pial-surface",
   "vertexCount" : 642,
   "summary" : {
     "min" : -5.0,

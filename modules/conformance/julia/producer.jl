@@ -147,7 +147,9 @@ end
 # ---------------------------------------------------------------------------
 # Surfaces: a unit icosahedron subdivided three times (642 vertices, 1280
 # faces), scaled to 25 mm and offset -30 mm (left) / +30 mm (right) in x, in
-# RAS+ mm. Written as GIFTI 1.0 (`.surf.gii`: POINTSET float32 + TRIANGLE
+# RAS+ mm — the same world as the volumes, so the surface domains declare the
+# volume's space (a surface and a volume in one revision must, SPEC §6).
+# Written as GIFTI 1.0 (`.surf.gii`: POINTSET float32 + TRIANGLE
 # int32; `.func.gii`: one float32 per vertex), Base64Binary little-endian.
 # Vertex and face order is deterministic: subdivision walks the faces in order
 # and appends each new midpoint when first needed.
@@ -156,7 +158,8 @@ end
 const SURFACE_RADIUS = 25.0
 const SURFACE_OFFSET = 30.0
 const SURFACE_SUBDIVISIONS = 3
-const SURFACE_SPACE = "synthetic-ico3"
+const VOLUME_SPACE = "MNI152NLin2009cAsym"
+const SURFACE_SPACE = VOLUME_SPACE
 const GIFTI_MEDIA_TYPE = "application/x-gifti"
 const HEMISPHERES = (("left", "lh"), ("right", "rh"))
 
@@ -316,7 +319,7 @@ function manifest(assets, surfaces)
     affine_rows = [[affine()[r, c] for c in 1:4] for r in 1:4]
     fingerprint = volume_grid_fingerprint(
         VOLUME_GRID_SCHEMA.id, VOLUME_GRID_SCHEMA.version,
-        "MNI152NLin2009cAsym", "RAS+", "mm", "x-fastest")
+        VOLUME_SPACE, "RAS+", "mm", "x-fastest")
     asset(id; extra...) = (
         id = id,
         digest = assets[id].digest,
@@ -376,7 +379,7 @@ function manifest(assets, surfaces)
             descriptor = (
                 schema = VOLUME_GRID_SCHEMA,
                 payload = (
-                    space = "MNI152NLin2009cAsym",
+                    space = VOLUME_SPACE,
                     coordinateConvention = "RAS+",
                     spatialUnit = "mm",
                     ordinalLayout = "x-fastest",

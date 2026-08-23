@@ -96,7 +96,7 @@
           "digest": "sha256:686d9b2e17090e776c3a876f470e83dc874638c10b3dc67a4e4fad27a31c9232"
         },
         "payload": {
-          "space": "synthetic-ico3",
+          "space": "MNI152NLin2009cAsym",
           "hemisphere": "left",
           "vertexCount": 642,
           "faceCount": 1280,
@@ -122,7 +122,7 @@
           "digest": "sha256:686d9b2e17090e776c3a876f470e83dc874638c10b3dc67a4e4fad27a31c9232"
         },
         "payload": {
-          "space": "synthetic-ico3",
+          "space": "MNI152NLin2009cAsym",
           "hemisphere": "right",
           "vertexCount": 642,
           "faceCount": 1280,
