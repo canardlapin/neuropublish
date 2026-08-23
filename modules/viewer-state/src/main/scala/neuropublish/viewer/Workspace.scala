@@ -31,20 +31,43 @@ final case class LayerDisplay(
     colormap: String
 )
 
+/** Where a layer can be drawn. Identity is the result field; the field renders in every pane it has
+  * a representation for and is honestly absent elsewhere (never projected). `surfaces` lists the
+  * hemispheres ("left" | "right") with a surface representation. Representations are facts of the
+  * revision, not presentation: a saved view or URL never changes them.
+  */
+final case class LayerRepresentations(volume: Boolean = true, surfaces: Set[String] = Set.empty):
+  def surface: Boolean = surfaces.nonEmpty
+
 final case class WorkspaceLayer(
     id: String, // result field id
     published: LayerDisplay,
     current: LayerDisplay,
     recommended: Boolean =
-      true // false when `published` is a data-derived default, not a producer recommendation
+      true, // false when `published` is a data-derived default, not a producer recommendation
+    representations: LayerRepresentations = LayerRepresentations()
 ):
   def modified: Boolean = current != published
+
+/** The surface pane's camera as presentation state: a named viewpoint (camera direction) and a
+  * projection. Viewpoints name the direction the camera looks from, so `left` shows the left
+  * hemisphere's lateral face and the right hemisphere's medial face in a bilateral layout.
+  */
+final case class SurfaceCameraState(viewpoint: String, projection: String)
+object SurfaceCameraState:
+  val Viewpoints: Vector[String] =
+    Vector("left", "right", "dorsal", "ventral", "anterior", "posterior")
+  val Projections: Vector[String] = Vector("perspective", "orthographic")
+  val default: SurfaceCameraState = SurfaceCameraState("left", "perspective")
+  def valid(c: SurfaceCameraState): Boolean =
+    Viewpoints.contains(c.viewpoint) && Projections.contains(c.projection)
 
 final case class Workspace(
     layers: Vector[WorkspaceLayer], // list order: first = drawn on top; underlay excluded
     cursor: Option[(Double, Double, Double)],
     layout: WorkspaceLayout,
-    inspector: String // "layers" | "analysis" | "provenance"
+    inspector: String, // "layers" | "analysis" | "provenance"
+    surfaceCamera: SurfaceCameraState = SurfaceCameraState.default
 )
 
 object Workspace:
@@ -61,6 +84,7 @@ object Workspace:
     case SetCursor(x: Double, y: Double, z: Double)
     case SetInspector(tab: String)
     case Layout(action: WorkspaceLayout.Action)
+    case SetSurfaceCamera(camera: SurfaceCameraState)
 
   private def clamp01(x: Double) = math.min(1.0, math.max(0.0, x))
 
@@ -98,6 +122,8 @@ object Workspace:
     case Action.SetInspector(t) =>
       if Set("layers", "analysis", "provenance")(t) then w.copy(inspector = t) else w
     case Action.Layout(la) => w.copy(layout = WorkspaceLayout.reduce(w.layout, la))
+    case Action.SetSurfaceCamera(c) =>
+      if SurfaceCameraState.valid(c) then w.copy(surfaceCamera = c) else w
 
   /** Invariants the reducer must preserve from a valid state. */
   def isValid(w: Workspace): Boolean =
@@ -106,4 +132,4 @@ object Workspace:
         val c = l.current
         c.opacity >= 0 && c.opacity <= 1 && c.window.min < c.window.max && c.threshold.min >= 0 &&
         Threshold.Modes(c.threshold.mode) && Colormap.valid(c.colormap)
-      } && w.layout.isValid
+      } && w.layout.isValid && SurfaceCameraState.valid(w.surfaceCamera)

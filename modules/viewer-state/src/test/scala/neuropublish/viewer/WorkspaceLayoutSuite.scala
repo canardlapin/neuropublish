@@ -11,7 +11,8 @@ class WorkspaceLayoutSuite extends ScalaCheckSuite:
       Gen.oneOf(LayoutPreset.values.toSeq).map(Action.SetPreset.apply),
       Gen.choose(-1.0, 2.0).map(Action.ResizeNavigator.apply),
       Gen.choose(-1.0, 2.0).map(Action.ResizeInspector.apply),
-      Gen.choose(-1.0, 2.0).map(Action.ResizeDrawer.apply)
+      Gen.choose(-1.0, 2.0).map(Action.ResizeDrawer.apply),
+      Gen.oneOf(Gen.choose(-1.0, 2.0), Gen.const(Double.NaN)).map(Action.ResizeSplit.apply)
     )
   )
 

@@ -5,12 +5,15 @@ import neuropublish.api.SavedViewDetail
 import neuropublish.protocol.Measures
 import neuropublish.protocol.json.*
 import neuropublish.viewer.*
-import neuropublish.viewer.laminar.RendererHost
+import neuropublish.viewer.laminar.{RendererHost, SurfaceHost}
 import org.scalajs.dom
+import scala.scalajs.js
 import scalafim.image.view.LayerSampleValue
 
-/** The Volume scientific workspace: navigator · canvas · inspector, status bar (product
-  * definition).
+/** The scientific workspace: navigator · canvas · inspector, status bar (product definition). The
+  * centre follows the layout preset (ADR 0002): Volume = triplanar; Surface = bilateral surfaces;
+  * Hybrid = volume and surface panes side by side behind a keyboard-operable divider. The three
+  * presets share one `WorkspaceStore`, so switching never changes the result identity.
   */
 object WorkspacePage:
   def render(store: WorkspaceStore, onStateChange: Workspace => Unit, mode: PageMode): HtmlElement =
@@ -44,12 +47,13 @@ object WorkspacePage:
             a.sampleSize.map(n => span(cls := "muted", s"n = $n"))
           ),
           a.estimands.sortBy(_.order.getOrElse(Int.MaxValue)).map { e =>
-            val fields = L.volumeFields.filter(_.estimand == e.id)
+            val fields = L.fields.filter(_.estimand == e.id)
             div(
               cls := "tree-estimand",
               div(cls := "tree-row estimand", e.label),
               fields.map { f =>
                 val visible = ws.map(_.layers.find(_.id == f.id).exists(_.current.visible))
+                val reps = L.representationsOf(f)
                 button(
                   cls := "tree-row measure",
                   dataAttr("field") := f.id,
@@ -57,6 +61,15 @@ object WorkspacePage:
                   aria.pressed <-- visible.map(_.toString),
                   span(Measures.label(f.measure)),
                   span(cls := "muted short", Measures.short(f.measure)),
+                  span(
+                    cls := "reps muted",
+                    title := "representations",
+                    dataAttr("reps") :=
+                      (if reps.volume then "v" else "") + (if reps.surface then "s" else ""),
+                    ((if reps.volume then List("vol") else Nil) ++
+                      reps.surfaces.toList.sorted.map(h => s"surf ${h.take(1).toUpperCase}"))
+                      .mkString(" ")
+                  ),
                   onClick --> { _ =>
                     val vis = layerOf(f.id).exists(_.current.visible)
                     store.dispatch(Workspace.Action.SetVisible(f.id, !vis))
@@ -88,10 +101,14 @@ object WorkspacePage:
         )
       )
 
+    /** One card per layer; identical controls whatever the representations: the store mirrors each
+      * change into every pane the field is drawn in.
+      */
     def layerCard(f: ResultField) =
       val layer = ws.map(_.layers.find(_.id == f.id))
       val cur = layer.map(_.map(_.current))
-      val sm = L.summaries.get(L.assetOf(f))
+      val sm = L.summaryOf(f)
+      val reps = L.representationsOf(f)
       val estimandLabel =
         m.analyses.flatMap(_.estimands).find(_.id == f.estimand).map(_.label).getOrElse(f.estimand)
       div(
@@ -143,6 +160,14 @@ object WorkspacePage:
                   "default"
                 )
           }
+        ),
+        div(
+          cls := "layer-reps muted small",
+          dataAttr("testid") := "layer-representations",
+          "drawn in: ",
+          (List(Option.when(reps.volume)("volume")) ++
+            List("left", "right").map(h => Option.when(reps.surfaces(h))(s"$h surface"))).flatten
+            .mkString(" · ")
         ),
         label(
           cls := "field",
@@ -291,17 +316,49 @@ object WorkspacePage:
             ),
             // keyed by layer id so a reorder moves the existing card (focus survives) instead of re-creating it
             children <-- ws.map(_.layers.map(_.id)).distinct.split(identity)((id, _, _) =>
-              L.volumeFields.find(_.id == id).map(layerCard).getOrElse(emptyNode)
+              L.field(id).map(layerCard).getOrElse(emptyNode)
             )
           )
       }
     )
 
-    // ---- canvas + status ----
-    val canvasPane = div(
-      cls := "canvas-host",
+    // ---- link state: what the surface pane says about the shared cursor ----
+    /** Visible layers that have no surface representation: named honestly, never projected. */
+    val absentOnSurface: Signal[List[(String, String)]] = ws.map(_.layers.filter(l =>
+      l.current.visible && !l.representations.surface
+    ).flatMap(l => L.field(l.id).map(f => (f.id, L.labelOf(f)))).toList)
+    val linkText: Signal[Option[String]] = store.link.signal.map(_.map {
+      case SurfaceHost.Link.Linked(_, v, d) => f"linked to vertex $v, $d%.1f mm"
+      case SurfaceHost.Link.OutOfRange(_) =>
+        f"no vertex within ${SurfaceHost.DefaultLinkRadius.value}%.0f mm"
+      case SurfaceHost.Link.NoGeometry => "no surface geometry"
+    })
+
+    // ---- panes ----
+    /** Below 900 px the Hybrid panes stack and the divider becomes horizontal (np.css). */
+    val narrow = dom.window.matchMedia("(max-width: 900px)")
+    val stacked = Var(narrow.matches)
+    val onNarrow: js.Function1[dom.Event, Unit] =
+      e => stacked.set(e.asInstanceOf[js.Dynamic].matches.asInstanceOf[Boolean])
+
+    val volumePane = div(
+      cls := "canvas-host pane volume-pane",
       idAttr := "volume",
-      RendererHost.pane(store.host, h => store.attach(h.renderer)),
+      dataAttr("pane") := "volume",
+      RendererHost.pane(store.host, h => store.attach(h.renderer), _ => store.detach()),
+      child.maybe <--
+        store.cursorSource.signal.combineWith(store.surfaceReadout.signal.distinct).map {
+          (src, sr) =>
+            Option.when(src.contains("surface"))(
+              div(
+                cls := "pane-badge",
+                dataAttr("testid") := "volume-link",
+                sr.map(r => s"cursor from surface vertex ${r.vertex}").getOrElse(
+                  "cursor from surface"
+                )
+              )
+            )
+        },
       onClick --> { e =>
         val r = e.currentTarget.asInstanceOf[dom.HTMLElement].getBoundingClientRect();
         store.pick(e.clientX - r.left, e.clientY - r.top)
@@ -311,27 +368,230 @@ object WorkspacePage:
         store.scroll(e.clientX - r.left, e.clientY - r.top, if e.deltaY > 0 then 1 else -1)
       }
     )
+
+    val cameraBar = div(
+      cls := "surface-toolbar",
+      label(
+        cls := "field inline",
+        span("view from"),
+        select(
+          dataAttr("testid") := "surface-viewpoint",
+          aria.label := "surface viewpoint",
+          controlled(
+            value <-- ws.map(_.surfaceCamera.viewpoint),
+            onChange.mapToValue -->
+              (v =>
+                store.dispatch(Workspace.Action.SetSurfaceCamera(
+                  store.state.now().surfaceCamera.copy(viewpoint = v)
+                ))
+              )
+          ),
+          SurfaceCameraState.Viewpoints.map(v => option(value := v, v))
+        )
+      ),
+      label(
+        cls := "field inline",
+        span("projection"),
+        select(
+          dataAttr("testid") := "surface-projection",
+          aria.label := "surface projection",
+          controlled(
+            value <-- ws.map(_.surfaceCamera.projection),
+            onChange.mapToValue -->
+              (v =>
+                store.dispatch(Workspace.Action.SetSurfaceCamera(
+                  store.state.now().surfaceCamera.copy(projection = v)
+                ))
+              )
+          ),
+          SurfaceCameraState.Projections.map(p => option(value := p, p))
+        )
+      )
+    )
+
+    val surfaceBody: Seq[Modifier[HtmlElement]] =
+      if store.hasSurfaces then
+        Seq(
+          cameraBar,
+          div(
+            cls := "surface-canvas",
+            RendererHost.pane(
+              store.surfaceHost,
+              h => store.attachSurface(h.renderer),
+              _ => store.detachSurface()
+            ),
+            onClick --> { e =>
+              val r = e.currentTarget.asInstanceOf[dom.HTMLElement].getBoundingClientRect();
+              store.pickSurface(e.clientX - r.left, e.clientY - r.top): Unit
+            }
+          ),
+          child.maybe <-- absentOnSurface.map(names =>
+            Option.when(names.nonEmpty)(
+              div(
+                cls := "pane-empty",
+                dataAttr("testid") := "surface-empty",
+                names.map((id, n) =>
+                  div(dataAttr("field") := id, s"$n has no surface representation")
+                )
+              )
+            )
+          ),
+          child.maybe <-- linkText.combineWith(store.cursorSource.signal).map { (t, src) =>
+            t.filter(_ => !src.contains("surface")).map(s =>
+              div(cls := "pane-badge", dataAttr("testid") := "surface-link", s)
+            )
+          }
+        )
+      else
+        Seq(
+          div(
+            cls := "pane-empty",
+            dataAttr("testid") := "surface-empty",
+            if store.unplaceableSurfaces.isEmpty then div("This revision declares no surfaces.")
+            else
+              div(
+                "This revision's surfaces cannot be placed: " +
+                  store.unplaceableSurfaces.map(d =>
+                    s"${d.id} declares hemisphere '${d.hemisphere}'"
+                  ).mkString("; ") + ". Only left and right hemispheres are displayed."
+              )
+            ,
+            child <-- absentOnSurface.map(names =>
+              div(names.map((id, n) =>
+                div(dataAttr("field") := id, s"$n has no surface representation")
+              ))
+            )
+          )
+        )
+    val surfacePane = div(
+      cls := "canvas-host pane surface-pane",
+      idAttr := "surface",
+      dataAttr("pane") := "surface",
+      surfaceBody
+    )
+
+    /** Hybrid divider: pointer drag or arrow keys (2 % steps); `aria-valuenow` is the volume pane's
+      * share in percent.
+      */
+    val splitter =
+      def move(fraction: Double) =
+        store.dispatch(Workspace.Action.Layout(WorkspaceLayout.Action.ResizeSplit(fraction)))
+      div(
+        cls := "splitter",
+        role := "separator",
+        tabIndex := 0,
+        dataAttr("testid") := "hybrid-splitter",
+        aria.orientation <-- stacked.signal.map(if _ then "horizontal" else "vertical"),
+        aria.label := "resize volume and surface panes",
+        aria.valueMin := 5.0,
+        aria.valueMax := 90.0,
+        aria.valueNow <-- ws.map(w => (w.layout.splitFraction * 100).round.toDouble),
+        onKeyDown --> { e =>
+          val f = store.state.now().layout.splitFraction
+          e.key match
+            case "ArrowLeft" | "ArrowDown" => e.preventDefault(); move(f - 0.02)
+            case "ArrowRight" | "ArrowUp" => e.preventDefault(); move(f + 0.02)
+            case "Home" => e.preventDefault(); move(0.05)
+            case "End" => e.preventDefault(); move(0.9)
+            case _ => ()
+        },
+        onPointerDown --> { e =>
+          e.preventDefault()
+          val centre = e.currentTarget.asInstanceOf[dom.HTMLElement].parentElement
+          val box = centre.getBoundingClientRect()
+          val vertical = stacked.now()
+          var onMove: js.Function1[dom.PointerEvent, Unit] = null
+          var onUp: js.Function1[dom.PointerEvent, Unit] = null
+          onMove = ev =>
+            move(
+              if vertical then (ev.clientY - box.top) / box.height
+              else (ev.clientX - box.left) / box.width
+            )
+          onUp = _ => {
+            dom.window.removeEventListener("pointermove", onMove)
+            dom.window.removeEventListener("pointerup", onUp)
+            dom.window.removeEventListener("pointercancel", onUp)
+          }
+          dom.window.addEventListener("pointermove", onMove)
+          dom.window.addEventListener("pointerup", onUp)
+          dom.window.addEventListener("pointercancel", onUp)
+        }
+      )
+
+    /** The centre follows the preset; panes mount and unmount through their hosts' lifecycle. */
+    val centre = div(
+      cls := "centre",
+      dataAttr("testid") := "centre",
+      styleAttr <-- ws.combineWith(stacked.signal).map { (w, st) =>
+        w.layout.preset match
+          case LayoutPreset.Hybrid if st =>
+            val f = w.layout.splitFraction
+            s"grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, ${f}fr) 8px minmax(0, ${1 -
+                f}fr)"
+          case LayoutPreset.Hybrid =>
+            val f = w.layout.splitFraction
+            s"grid-template-columns: minmax(0, ${f}fr) 8px minmax(0, ${1 - f}fr); grid-template-rows: minmax(0, 1fr)"
+          case _ => "grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr)"
+      },
+      onMountCallback(_ => narrow.addEventListener("change", onNarrow)),
+      onUnmountCallback(_ => narrow.removeEventListener("change", onNarrow)),
+      children <-- ws.map(_.layout.preset).distinct.map {
+        case LayoutPreset.Volume => List(volumePane)
+        case LayoutPreset.Surface => List(surfacePane)
+        case LayoutPreset.Hybrid => List(volumePane, splitter, surfacePane)
+      }
+    )
+
+    val presetSwitch = div(
+      cls := "segmented",
+      role := "radiogroup",
+      aria.label := "workspace preset",
+      LayoutPreset.values.toList.map { p =>
+        val id = p.toString.toLowerCase
+        button(
+          role := "radio",
+          cls := "seg",
+          dataAttr("testid") := s"preset-$id",
+          cls.toggle("active") <-- ws.map(_.layout.preset == p),
+          aria.checked <-- ws.map(w => (w.layout.preset == p).toString),
+          p.toString,
+          onClick -->
+            (_ =>
+              store.dispatch(Workspace.Action.Layout(WorkspaceLayout.Action.SetPreset(p)))
+            )
+        )
+      }
+    )
+
+    // ---- status bar: per-pane readouts and the link distance ----
     val status = div(
       cls := "status-bar",
       role := "status",
-      child <-- store.readout.signal.map {
-        case None => span(cls := "muted", "click the canvas to set the cursor")
-        case Some(r) => div(
+      child <-- store.readout.signal.distinct.combineWith(
+        store.surfaceReadout.signal.distinct,
+        linkText.distinct,
+        ws.map(_.layout.preset)
+      ).map { (r, sr, lt, preset) =>
+        if r.isEmpty && sr.isEmpty then span(cls := "muted", "click a pane to set the cursor")
+        else
+          div(
             cls := "readout",
-            span(
-              cls := "readout-layer",
-              dataAttr("readout") := "world",
-              span(cls := "k", "RAS+"),
-              span(cls := "mono", s"${fmt(r.world.x)}, ${fmt(r.world.y)}, ${fmt(r.world.z)}")
+            r.map(r =>
+              span(
+                cls := "readout-layer",
+                dataAttr("readout") := "world",
+                span(cls := "k", "RAS+"),
+                span(cls := "mono", s"${fmt(r.world.x)}, ${fmt(r.world.y)}, ${fmt(r.world.z)}")
+              )
             ),
-            r.layers.map { lr =>
+            r.toList.flatMap(_.layers).map { lr =>
               val id = lr.layer.toString
-              val name = L.volumeFields.find(_.id == id).map(f =>
-                Measures.short(f.measure)
-              ).getOrElse(m.underlays.headOption.map(_.label).getOrElse(id))
+              val name = L.field(id).map(f => Measures.short(f.measure))
+                .getOrElse(m.underlays.headOption.map(_.label).getOrElse(id))
               span(
                 cls := "readout-layer",
                 dataAttr("readout") := id,
+                dataAttr("pane") := "volume",
                 span(cls := "k", name),
                 span(
                   cls := "mono",
@@ -340,6 +600,32 @@ object WorkspacePage:
                     case LayerSampleValue.Label(l) => l.toString
                     case LayerSampleValue.Mask(b) => if b then "in" else "out"
                 )
+              )
+            },
+            Option.when(preset != LayoutPreset.Volume)(
+              lt.map(t =>
+                span(
+                  cls := "readout-layer",
+                  dataAttr("readout") := "link",
+                  span(cls := "k", "surface"),
+                  span(cls := "mono", t)
+                )
+              )
+            ).flatten,
+            sr.toList.flatMap(_.layerValues).map { (lid, v) =>
+              val parts = lid.value.split('@')
+              val fieldId = parts.headOption.getOrElse(lid.value)
+              val hemi = parts.lift(1).getOrElse("")
+              span(
+                cls := "readout-layer",
+                dataAttr("readout") := fieldId,
+                dataAttr("pane") := "surface",
+                span(
+                  cls := "k",
+                  L.field(fieldId).map(f => Measures.short(f.measure)).getOrElse(fieldId) +
+                    s" · ${hemi.take(1).toUpperCase} vertex"
+                ),
+                span(cls := "mono", v.toDoubleOption.map(fmt).getOrElse(v))
               )
             }
           )
@@ -361,6 +647,7 @@ object WorkspacePage:
         span(cls := "crumb mono", L.detail.id),
         span(cls := "crumb muted", "/"),
         span(cls := "crumb", m.title),
+        presetSwitch,
         mode match
           case PageMode.Explore(session, _) => Chrome.explore(store, session, savedView, dialog)
           case PageMode.Presentation(shared, saved) => Chrome.presentation(store, shared, saved)
@@ -369,7 +656,7 @@ object WorkspacePage:
         case PageMode.Presentation(shared, saved) => Chrome.synopsis(L, shared, saved)
         case _ => emptyNode
       ,
-      div(cls := "workspace", navigator, canvasPane, inspector),
+      div(cls := "workspace", navigator, centre, inspector),
       status,
       m.warnings.headOption.map(w =>
         div(cls := "callout warn", w.message)

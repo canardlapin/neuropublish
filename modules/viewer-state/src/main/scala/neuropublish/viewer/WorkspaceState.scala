@@ -13,12 +13,19 @@ import io.circe.syntax.*
   *
   * {{{
   * {"schema":{"id":"org.neuropublish.view/workspace-state","version":"1"},
-  *  "payload":{"layers":[{"id":"speech-t","published":{...},"current":{...},"recommended":true}],
+  *  "payload":{"layers":[{"id":"speech-t","published":{...},"current":{...},"recommended":true,
+  *                        "representations":{"volume":true,"surfaces":["left","right"]}}],
   *             "cursor":[x,y,z] | null,
   *             "layout":{"schema":{"id":"org.neuropublish.view/workspace-layout","version":"1"},
-  *                       "payload":{"preset":"volume","navigatorFraction":0.18,...}},
-  *             "inspector":"layers"}}
+  *                       "payload":{"preset":"volume","navigatorFraction":0.18,...,"splitFraction":0.5}},
+  *             "inspector":"layers",
+  *             "surfaceCamera":{"viewpoint":"left","projection":"perspective"
   * }}}
+  * }}}
+  *
+  * Stage 5 additions (`representations`, `splitFraction`, `surfaceCamera`) are optional on read so
+  * Stage 4 records still decode; they are always written. The version stays 1: a Stage 4 reader
+  * ignores the unknown members and loses only the surface camera and divider.
   */
 object WorkspaceState:
   val StateSchema = "org.neuropublish.view/workspace-state"
@@ -34,7 +41,36 @@ object WorkspaceState:
   given Codec[Window] = deriveCodec
   given Codec[Threshold] = deriveCodec
   given Codec[LayerDisplay] = deriveCodec
-  given Codec[WorkspaceLayer] = deriveCodec
+  given Codec[LayerRepresentations] = Codec.from(
+    Decoder.instance(c =>
+      for
+        v <- c.get[Option[Boolean]]("volume")
+        s <- c.get[Option[Set[String]]]("surfaces")
+      yield LayerRepresentations(v.getOrElse(true), s.getOrElse(Set.empty))
+    ),
+    Encoder.forProduct2("volume", "surfaces")(r => (r.volume, r.surfaces))
+  )
+  given Codec[SurfaceCameraState] = deriveCodec
+  given Codec[WorkspaceLayer] = Codec.from(
+    Decoder.instance { c =>
+      for
+        id <- c.get[String]("id")
+        published <- c.get[LayerDisplay]("published")
+        current <- c.get[LayerDisplay]("current")
+        recommended <- c.get[Option[Boolean]]("recommended")
+        reps <- c.get[Option[LayerRepresentations]]("representations")
+      yield WorkspaceLayer(
+        id,
+        published,
+        current,
+        recommended.getOrElse(true),
+        reps.getOrElse(LayerRepresentations())
+      )
+    },
+    Encoder.forProduct5("id", "published", "current", "recommended", "representations")(l =>
+      (l.id, l.published, l.current, l.recommended, l.representations)
+    )
+  )
 
   given Codec[LayoutPreset] = Codec.from(
     Decoder[String].emap(s =>
@@ -42,7 +78,30 @@ object WorkspaceState:
     ),
     Encoder[String].contramap(_.toString.toLowerCase)
   )
-  private val layoutPayload: Codec[WorkspaceLayout] = deriveCodec
+  private val layoutPayload: Codec[WorkspaceLayout] = Codec.from(
+    Decoder.instance { c =>
+      for
+        preset <- c.get[LayoutPreset]("preset")
+        nav <- c.get[Double]("navigatorFraction")
+        ins <- c.get[Double]("inspectorFraction")
+        drawer <- c.get[Double]("drawerFraction")
+        split <- c.get[Option[Double]]("splitFraction")
+      yield WorkspaceLayout(
+        preset,
+        nav,
+        ins,
+        drawer,
+        split.getOrElse(WorkspaceLayout.default.splitFraction)
+      )
+    },
+    Encoder.forProduct5(
+      "preset",
+      "navigatorFraction",
+      "inspectorFraction",
+      "drawerFraction",
+      "splitFraction"
+    )(l => (l.preset, l.navigatorFraction, l.inspectorFraction, l.drawerFraction, l.splitFraction))
+  )
   given Codec[WorkspaceLayout] = Codec.from(
     Decoder[Record[Json]].emap { r =>
       if r.schema.id != LayoutSchema then Left(s"expected $LayoutSchema, got ${r.schema.id}")
@@ -62,7 +121,26 @@ object WorkspaceState:
     Encoder.encodeOption(Encoder[List[Double]].contramap((x, y, z) => List(x, y, z)))
   )
 
-  private val workspacePayload: Codec[Workspace] = deriveCodec
+  private val workspacePayload: Codec[Workspace] = Codec.from(
+    Decoder.instance { c =>
+      for
+        layers <- c.get[Vector[WorkspaceLayer]]("layers")
+        cursor <- c.get[Option[(Double, Double, Double)]]("cursor")
+        layout <- c.get[WorkspaceLayout]("layout")
+        inspector <- c.get[String]("inspector")
+        camera <- c.get[Option[SurfaceCameraState]]("surfaceCamera")
+      yield Workspace(
+        layers,
+        cursor,
+        layout,
+        inspector,
+        camera.getOrElse(SurfaceCameraState.default)
+      )
+    },
+    Encoder.forProduct5("layers", "cursor", "layout", "inspector", "surfaceCamera")(w =>
+      (w.layers, w.cursor, w.layout, w.inspector, w.surfaceCamera)
+    )
+  )
   given Codec[Workspace] = Codec.from(
     Decoder[Record[Json]].emap { r =>
       if r.schema.id != StateSchema then Left(s"expected $StateSchema, got ${r.schema.id}")
@@ -102,5 +180,7 @@ object WorkspaceState:
       saved.cursor.filter((x, y, z) => x.isFinite && y.isFinite && z.isFinite),
       if saved.layout.isValid then saved.layout else base.layout,
       if Set("layers", "analysis", "provenance")(saved.inspector) then saved.inspector
-      else base.inspector
+      else base.inspector,
+      if SurfaceCameraState.valid(saved.surfaceCamera) then saved.surfaceCamera
+      else base.surfaceCamera
     )

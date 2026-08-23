@@ -44,6 +44,9 @@ test("surface panes: a mounted sentinel survives 24 mount/unmount cycles with no
   await page.evaluate(() => window.__spike.mountSurface("sentinel"));
   await settle(page);
   expect(await page.evaluate(() => window.__spike.contextState("sentinel"))).toBe("Available");
+  // the pane hosts a real two-hemisphere model: it compiled and drew at least one frame
+  expect((await report(page)).surface.frames).toBeGreaterThanOrEqual(1);
+  expect((await report(page)).surface.errors).toEqual([]);
   const before = (await report(page)).listeners;
 
   for (let i = 0; i < CYCLES; i++) {
@@ -66,6 +69,46 @@ test("surface panes: a mounted sentinel survives 24 mount/unmount cycles with no
   expect(f.surface.disposed).toBe(CYCLES + 1);
   expect(f.disposedHandles).toBe(CYCLES + 1);
   expect(f.liveHandles).toBe(0);
+});
+
+test("surface pane: the world cursor links to the nearest vertex within 3 mm, or says so; a pick returns that vertex's world point", async ({ page }) => {
+  await ready(page);
+  await page.evaluate(() => window.__spike.mountSurface("surf"));
+  await settle(page);
+  // left tetrahedron vertex 1 sits at world (-10, 0, 0): 0.5 mm off it links, 5 mm off it does not
+  const near = await page.evaluate(() => window.__spike.link("surf", -10.5, 0, 0));
+  expect(near.kind).toBe("linked");
+  expect(near.surface).toBe("lh");
+  expect(near.vertex).toBe(1);
+  expect(near.distance).toBeCloseTo(0.5, 6);
+  const far = await page.evaluate(() => window.__spike.link("surf", 0, 0, 0));
+  expect(far.kind).toBe("out-of-range");
+  expect(far.distance).toBeGreaterThan(3);
+  const right = await page.evaluate(() => window.__spike.link("surf", 30.2, 0, 0));
+  expect(right.kind).toBe("linked");
+  expect(right.surface).toBe("rh");
+  // a pick somewhere on the mesh returns a vertex whose world point links back at distance 0
+  await settle(page);
+  const pick = await page.evaluate(() => {
+    const el = document.querySelector("#surf canvas");
+    const w = el.clientWidth, h = el.clientHeight;
+    for (const [fx, fy] of [[0.25, 0.5], [0.75, 0.5], [0.3, 0.4], [0.7, 0.6], [0.2, 0.6], [0.8, 0.4], [0.5, 0.5]]) {
+      const p = window.__spike.pick("surf", w * fx, h * fy);
+      if (p) return p;
+    }
+    return null;
+  });
+  expect(pick).not.toBeNull();
+  const back = await page.evaluate((p) => window.__spike.link("surf", p.x, p.y, p.z), pick);
+  expect(back.kind).toBe("linked");
+  expect(back.surface).toBe(pick.surface);
+  expect(back.vertex).toBe(pick.vertex);
+  expect(back.distance).toBeCloseTo(0, 6);
+  expect((await report(page)).surface.errors).toEqual([]);
+  await page.evaluate(() => window.__spike.unmount("surf"));
+  await settle(page);
+  const unmounted = await page.evaluate(() => window.__spike.link("surf", 0, 0, 0));
+  expect(unmounted.kind).toBe("unmounted");
 });
 
 test("volume pane: 24 mount/unmount cycles leave no outstanding frames", async ({ page }) => {

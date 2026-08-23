@@ -328,7 +328,7 @@ object Chrome:
   def synopsis(L: Loaded, shared: SharedView, savedState: Workspace): HtmlElement =
     val m = L.manifest
     val visible = savedState.layers.filter(_.current.visible).flatMap(l =>
-      L.volumeFields.find(_.id == l.id).map(f =>
+      L.field(l.id).map(f =>
         val est = m.analyses.flatMap(_.estimands).find(_.id == f.estimand).map(_.label)
         est.fold(Measures.label(f.measure))(e => s"$e · ${Measures.label(f.measure)}")
       )

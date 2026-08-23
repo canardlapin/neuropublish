@@ -8,12 +8,18 @@ import org.scalacheck.Prop.forAll
 class WorkspaceStateSuite extends ScalaCheckSuite:
   private val ids = List("speech-t", "speech-z", "b:c;d&e=f%g h")
   private val pub = LayerDisplay(true, 0.85, Window(-8, 8), Threshold("two-sided", 3.1), "cold-hot")
+  private val reps = List(
+    LayerRepresentations(volume = true, surfaces = Set("left", "right")),
+    LayerRepresentations(volume = true),
+    LayerRepresentations(volume = false, surfaces = Set("right"))
+  )
   private val base = Workspace(
-    ids.map(id => WorkspaceLayer(id, pub, pub)).toVector,
+    ids.zip(reps).map((id, r) => WorkspaceLayer(id, pub, pub, true, r)).toVector,
     None,
     WorkspaceLayout.default,
     "layers"
   )
+  private def repsOf(id: String) = base.layers.find(_.id == id).get.representations
 
   private val genDisplay: Gen[LayerDisplay] =
     for
@@ -43,12 +49,16 @@ class WorkspaceStateSuite extends ScalaCheckSuite:
       nav <- Gen.choose(0.1, 0.4)
       ins <- Gen.choose(0.1, 0.4)
       drawer <- Gen.choose(0.1, 0.8)
+      split <- Gen.choose(0.1, 0.9)
       tab <- Gen.oneOf("layers", "analysis", "provenance")
+      vp <- Gen.oneOf(SurfaceCameraState.Viewpoints)
+      pr <- Gen.oneOf(SurfaceCameraState.Projections)
     yield Workspace(
-      order.zip(displays).map((id, d) => WorkspaceLayer(id, pub, d)),
+      order.zip(displays).map((id, d) => WorkspaceLayer(id, pub, d, true, repsOf(id))),
       cursor,
-      WorkspaceLayout(preset, nav, ins, drawer),
-      tab
+      WorkspaceLayout(preset, nav, ins, drawer, split),
+      tab,
+      SurfaceCameraState(vp, pr)
     )
   given Arbitrary[Workspace] = Arbitrary(genWorkspace)
 
@@ -81,6 +91,36 @@ class WorkspaceStateSuite extends ScalaCheckSuite:
     )
     assertEquals(layout.downField("payload").downField("preset").as[String], Right("volume"))
     assertEquals(j.downField("payload").downField("cursor").focus.map(_.isNull), Some(true))
+  }
+
+  test("a Stage 4 record (no representations, split, or camera) still decodes with defaults") {
+    val j = WorkspaceState.encode(base).mapObject(_.mapValues(identity))
+    val stripped = j.hcursor.downField("payload").withFocus(_.mapObject(_.remove("surfaceCamera")))
+      .downField("layout").downField("payload").withFocus(_.mapObject(_.remove("splitFraction")))
+      .up.up.downField("layers").withFocus(_.mapArray(
+        _.map(_.mapObject(_.remove("representations")))
+      ))
+      .top.get
+    val decoded = WorkspaceState.decode(stripped)
+    assertEquals(decoded.map(_.surfaceCamera), Right(SurfaceCameraState.default))
+    assertEquals(decoded.map(_.layout.splitFraction), Right(0.5))
+    assert(decoded.toOption.get.layers.forall(_.representations == LayerRepresentations()))
+    // applied onto the revision, representations come back from the revision, not the record
+    val applied = decoded.map(WorkspaceState.apply(_, base))
+    assertEquals(
+      applied.map(_.layers.map(_.representations)),
+      Right(base.layers.map(_.representations))
+    )
+  }
+
+  test("a saved view cannot change representations or smuggle an invalid camera") {
+    val saved = base.copy(
+      layers = base.layers.map(_.copy(representations = LayerRepresentations(false, Set("left")))),
+      surfaceCamera = SurfaceCameraState("sideways", "fisheye")
+    )
+    val r = WorkspaceState.apply(saved, base)
+    assertEquals(r.layers.map(_.representations), base.layers.map(_.representations))
+    assertEquals(r.surfaceCamera, base.surfaceCamera)
   }
 
   test("a wrong schema id or version is rejected, not guessed") {

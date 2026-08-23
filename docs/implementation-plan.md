@@ -783,6 +783,59 @@ pass; atlas lookup; surface rendition fidelity (Stage 5).
 - static Quarto export and interactive publication can coexist from the same
   source description.
 
+### Status (2026-08-23) — surface and hybrid display
+
+Workspace track, built against the parallel surface-rendition track's
+signatures (`SurfaceRendition` / `VertexFieldRendition` decoders; `kind` and
+`surface` on `RenditionRef`; manifest `surfaces[]` and `{kind: "surface"}`
+representations, read from `Manifest.raw` until the typed projection lands).
+
+- `SurfaceHost` (viewer-laminar) is a real ScalaFIM host: it owns the
+  `ThreeJsRuntime` + `ThreeSurfaceBackend`, a `SurfaceViewerModel` with its
+  reducer state, renders the compiled `SurfaceRenderPlan` on coalesced
+  animation frames tracked by the same `LifecycleProbe` as `VolumeHost`, picks
+  to `(surface, vertex, world)` through `SurfaceWorldLink.worldPoint`, links a
+  world cursor with an explicit `Linked(vertex, distance) | OutOfRange(distance)
+  | NoGeometry` result at the product's 3 mm radius, and disposes idempotently
+  (the runtime forces context loss). A pane creates its canvas per mount
+  because a canvas whose context was deliberately lost cannot take a new one.
+- One result field is one layer wherever it has a representation:
+  `WorkspaceLayer.representations` (volume · left/right surface) is a fact of
+  the revision — the reducer never changes it, a saved view cannot change it,
+  and the card says "drawn in: volume · left surface · right surface". The
+  same threshold/window/colormap controls drive both renderers
+  (`SetLayerThreshold` etc. per hemisphere layer `field@hemisphere`).
+- Presets are wired: Volume = triplanar, Surface = bilateral (left/right
+  slots, `SurfaceLayout.Bilateral`), Hybrid = both behind a CSS-grid divider
+  (`role=separator`, pointer drag or arrow keys; `splitFraction` in
+  `workspace-layout@1`). A pick in either pane sets the shared world cursor;
+  the other pane shows the link state ("linked to vertex 1234, 0.8 mm" /
+  "no vertex within 3 mm" / "… has no surface representation"). The status bar
+  reads out the volume voxel value, the surface vertex value per hemisphere,
+  and the link distance. `ViewUrl` adds `sc=viewpoint,projection` and
+  `sf=fraction` (omitted at the defaults); the saved-view record adds
+  `surfaceCamera`, `splitFraction`, and `representations`, all optional on read
+  so Stage 4 records still decode (version stays 1).
+- No projection: a visible field without a surface representation is an empty
+  state naming the field; the geometry is drawn bare, never sampled from the
+  volume. A revision without surfaces says so.
+- Tests: viewer-state property suites cover the new state (reducer
+  invariants, URL and saved-view round trips, Stage 4 record compatibility,
+  a saved view cannot smuggle representations or an invalid camera); the
+  lifecycle suite mounts a real two-hemisphere model through `SurfaceHost`
+  (24-cycle sentinel still green) and pins the link/pick contract (0.5 mm
+  links, 10 mm does not, a pick links back at 0 mm); `e2e-stage5.spec.mjs`
+  covers preset switching without identity change, linked picks both ways,
+  the empty state, URL/saved-view/presentation round trips of proportions and
+  camera, disposal across preset cycles and navigation, and narrow layouts —
+  runnable once the reference bundle carries `lh-pial`/`rh-pial` and surface
+  representations of `speech-t`/`speech-z` (the Julia oracle's vertex values
+  become the pick tolerance then).
+
+Not done here: atlas lookup; the Hybrid artboard visual pass (design README);
+topology/coordinate-identity rejection and the derivation-receipt gate live
+with the rendition/admission track.
+
 ## Stage 5b — post-MVP finite-indexed and parcel track
 
 This track depends on the Stage 2 domain envelope but does not block the

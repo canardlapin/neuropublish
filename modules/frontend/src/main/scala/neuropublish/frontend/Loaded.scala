@@ -2,27 +2,92 @@ package neuropublish.frontend
 
 import neuropublish.api.*
 import neuropublish.protocol.json.*
-import neuropublish.rendition.{ScalarSummary, VolumeRendition}
+import neuropublish.rendition.{
+  ScalarSummary,
+  SurfaceRendition,
+  VertexFieldRendition,
+  VolumeRendition
+}
 import neuropublish.viewer.*
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
 import scalafim.image.NeuroVol
+import scalafim.surface.{SurfaceField, SurfaceGeometry}
 
-/** A revision with its renditions decoded: everything the workspace needs, loaded once. */
+/** A surface declared by the manifest (`surfaces[]`): one hemisphere's geometry asset. */
+final case class SurfaceDecl(
+    id: String,
+    asset: String,
+    domain: String,
+    hemisphere: String, // normalised: "left" | "right" | other
+    kind: String,
+    label: String
+)
+
+/** A field's surface representation: per-vertex values (`asset`) on a declared surface. */
+final case class SurfaceRep(asset: String, surface: String, hemisphere: String)
+
+/** A revision with its renditions decoded: everything the workspace needs, loaded once. Surface
+  * geometry and vertex fields are decoded per hemisphere from their own renditions (by `kind`);
+  * nothing here derives one representation from another.
+  */
 final case class Loaded(
     workspace: String,
     project: String,
     detail: RevisionDetail,
     manifest: Manifest,
     volumes: Map[String, NeuroVol[Double]],
-    summaries: Map[String, ScalarSummary]
+    summaries: Map[String, ScalarSummary], // by asset id: volumes and vertex fields
+    surfaces: Map[String, (SurfaceDecl, SurfaceGeometry)], // by surface id (e.g. "lh-pial")
+    vertexFields: Map[String, SurfaceField[Double]] // by asset id
 ):
-  /** Result fields that have a volume representation with a ready rendition, in manifest order. */
-  def volumeFields: List[ResultField] =
+  private val surfaceRepsByField: Map[String, List[SurfaceRep]] = Loaded.surfaceReps(manifest)
+
+  /** Result fields with at least one ready representation, in manifest order. */
+  def fields: List[ResultField] =
     manifest.resultFields
-      .filter(f => f.representations.exists(r => r.kind == "volume" && volumes.contains(r.asset)))
+      .filter(f => volumeAssetOf(f).isDefined || surfaceRepsOf(f).nonEmpty)
       .sortBy(_.order.getOrElse(Int.MaxValue))
-  def assetOf(f: ResultField): String = f.representations.find(_.kind == "volume").get.asset
+
+  /** Result fields that have a volume representation with a ready rendition, in manifest order. */
+  def volumeFields: List[ResultField] = fields.filter(f => volumeAssetOf(f).isDefined)
+
+  def field(id: String): Option[ResultField] = fields.find(_.id == id)
+
+  def volumeAssetOf(f: ResultField): Option[String] =
+    f.representations.find(r => r.kind == "volume" && volumes.contains(r.asset)).map(_.asset)
+
+  /** Surface representations whose vertex field and surface geometry both decoded. */
+  def surfaceRepsOf(f: ResultField): List[SurfaceRep] =
+    surfaceRepsByField.getOrElse(f.id, Nil).filter(r =>
+      vertexFields.contains(r.asset) && surfaces.contains(r.surface)
+    )
+
+  def representationsOf(f: ResultField): LayerRepresentations =
+    LayerRepresentations(volumeAssetOf(f).isDefined, surfaceRepsOf(f).map(_.hemisphere).toSet)
+
+  /** The first declared surface of a hemisphere ("left" | "right") whose geometry decoded. */
+  def surface(hemisphere: String): Option[(SurfaceDecl, SurfaceGeometry)] =
+    manifest.raw.hcursor.downField("surfaces").values.toList.flatten
+      .flatMap(j => j.hcursor.get[String]("id").toOption)
+      .flatMap(surfaces.get)
+      .find(_._1.hemisphere == hemisphere)
+
+  def hasSurfaces: Boolean = surfaces.nonEmpty
+
+  /** The summary the layer card and data-derived defaults use: the volume's, else the first vertex
+    * field's.
+    */
+  def summaryOf(f: ResultField): Option[ScalarSummary] =
+    volumeAssetOf(f).flatMap(summaries.get)
+      .orElse(surfaceRepsOf(f).iterator.flatMap(r => summaries.get(r.asset)).nextOption())
+
+  /** A human label for a field: estimand · measure. */
+  def labelOf(f: ResultField): String =
+    val est = manifest.analyses.flatMap(_.estimands).find(_.id == f.estimand).map(_.label)
+    est.fold(neuropublish.protocol.Measures.label(f.measure))(e =>
+      s"$e · ${neuropublish.protocol.Measures.label(f.measure)}"
+    )
 
   /** The producer's recommendation, or — when the manifest carries none — a data-derived default
     * (window = data range, no threshold) that the layer card labels "default" rather than
@@ -30,7 +95,7 @@ final case class Loaded(
     */
   def published(f: ResultField): LayerDisplay =
     val c = f.publishedDisplay.map(_.hcursor)
-    val sm = summaries.get(assetOf(f))
+    val sm = summaryOf(f)
     val lo = c.flatMap(
       _.downField("window").downField("min").as[Double].toOption
     ).orElse(sm.map(_.min)).getOrElse(-1.0)
@@ -60,8 +125,14 @@ final case class Loaded(
 
   def initialWorkspace: Workspace =
     Workspace(
-      volumeFields.map(f =>
-        WorkspaceLayer(f.id, published(f), published(f), recommended = f.publishedDisplay.isDefined)
+      fields.map(f =>
+        WorkspaceLayer(
+          f.id,
+          published(f),
+          published(f),
+          recommended = f.publishedDisplay.isDefined,
+          representations = representationsOf(f)
+        )
       ).toVector,
       None,
       WorkspaceLayout.default,
@@ -69,6 +140,54 @@ final case class Loaded(
     )
 
 object Loaded:
+  def normaliseHemisphere(h: String): String = h.trim.toLowerCase match
+    case "left" | "lh" | "l" => "left"
+    case "right" | "rh" | "r" => "right"
+    case other => other
+
+  /** `surfaces[]` from the manifest (read from `raw` until the typed projection carries it). */
+  def surfaceDecls(m: Manifest): List[SurfaceDecl] =
+    m.raw.hcursor.downField("surfaces").values.toList.flatten.flatMap { j =>
+      val c = j.hcursor
+      for
+        id <- c.get[String]("id").toOption
+        asset <- c.get[String]("asset").toOption
+      yield SurfaceDecl(
+        id,
+        asset,
+        c.get[String]("domain").getOrElse(""),
+        normaliseHemisphere(c.get[String]("hemisphere").getOrElse("")),
+        c.get[String]("kind").getOrElse(""),
+        c.get[String]("label").getOrElse(id)
+      )
+    }
+
+  /** `representations[] {kind: "surface", asset, surface, hemisphere}` per field id, from `raw`. A
+    * representation missing its `surface` is ignored: it cannot be displayed anywhere.
+    */
+  def surfaceReps(m: Manifest): Map[String, List[SurfaceRep]] =
+    val decls = surfaceDecls(m).map(d => d.id -> d).toMap
+    m.raw.hcursor.downField("resultFields").values.toList.flatten.flatMap { j =>
+      val c = j.hcursor
+      c.get[String]("id").toOption.map { id =>
+        id -> c.downField("representations").values.toList.flatten.flatMap { r =>
+          val rc = r.hcursor
+          for
+            kind <- rc.get[String]("kind").toOption if kind == "surface"
+            asset <- rc.get[String]("asset").toOption
+            surface <- rc.get[String]("surface").toOption
+          yield SurfaceRep(
+            asset,
+            surface,
+            normaliseHemisphere(
+              rc.get[String]("hemisphere").toOption
+                .orElse(decls.get(surface).map(_.hemisphere)).getOrElse("")
+            )
+          )
+        }
+      }
+    }.toMap
+
   def load(api: Api, ws: String, project: String, revisionId: Option[String]): Future[Loaded] =
     for
       id <- revisionId.fold(api.project(ws, project).map(
@@ -78,8 +197,13 @@ object Loaded:
       loaded <- fromDetail(ws, project, detail, api.rendition)
     yield loaded
 
+  private def orFail[A](asset: String, e: Either[String, A]): A =
+    e.fold(m => throw RuntimeException(s"$asset: $m"), identity)
+
   /** Decode a revision's renditions through `fetch` — the member route for explore, the
-    * share-secret route for a link viewer (same bytes, different authorization).
+    * share-secret route for a link viewer (same bytes, different authorization). Renditions are
+    * dispatched by `kind`; vertex fields decode against the geometry of the surface they are
+    * defined on (`RenditionRef.surface`), which is why meshes are decoded first.
     */
   def fromDetail(
       ws: String,
@@ -90,24 +214,39 @@ object Loaded:
     for
       manifest <- Future.fromTry(detail.manifest.as[Manifest].toTry)
       ready = detail.renditions.filter(_.status == "ready")
-      vols <- Future.traverse(ready) { r =>
-        fetch(r).map { (hdr, bytes) =>
-          val h = VolumeRendition.decodeHeader(hdr).fold(
-            m => throw RuntimeException(s"${r.assetId}: $m"),
-            identity
-          )
-          val v = VolumeRendition.decode(
-            h,
-            bytes
-          ).fold(m => throw RuntimeException(s"${r.assetId}: $m"), identity)
-          (r.assetId, v, h.summary)
-        }
+      fetched <- Future.traverse(ready)(r => fetch(r).map(hb => (r, hb._1, hb._2)))
+    yield
+      val decls = surfaceDecls(manifest)
+      val vols = fetched.collect {
+        case (r, hdr, bytes) if r.kind == "volume" =>
+          val h = orFail(r.assetId, VolumeRendition.decodeHeader(hdr))
+          (r.assetId, orFail(r.assetId, VolumeRendition.decode(h, bytes)), h.summary)
       }
-    yield Loaded(
-      ws,
-      project,
-      detail,
-      manifest,
-      vols.map(t => t._1 -> t._2).toMap,
-      vols.flatMap(t => t._3.map(t._1 -> _)).toMap
-    )
+      val meshes = fetched.collect {
+        case (r, hdr, bytes) if r.kind == "surface-mesh" =>
+          val h = orFail(r.assetId, SurfaceRendition.decodeHeader(hdr))
+          r.assetId -> orFail(r.assetId, SurfaceRendition.decode(h, bytes))
+      }.toMap
+      // surface id → geometry, through the manifest's declaration of which asset each surface is
+      val surfaces = decls.flatMap(d => meshes.get(d.asset).map(g => d.id -> (d, g))).toMap
+      val fields = fetched.collect {
+        case (r, hdr, bytes) if r.kind == "vertex-field" =>
+          val h = orFail(r.assetId, VertexFieldRendition.decodeHeader(hdr))
+          val surfaceId = r.surface.getOrElse(h.surface)
+          val geometry = surfaces.get(surfaceId).map(_._2)
+            .orElse(decls.find(_.asset == surfaceId).flatMap(d => surfaces.get(d.id)).map(_._2))
+            .getOrElse(throw RuntimeException(
+              s"${r.assetId}: vertex field on unknown surface '$surfaceId'"
+            ))
+          (r.assetId, orFail(r.assetId, VertexFieldRendition.decode(h, bytes, geometry)), h.summary)
+      }
+      Loaded(
+        ws,
+        project,
+        detail,
+        manifest,
+        vols.map(t => t._1 -> t._2).toMap,
+        (vols ++ fields).flatMap(t => t._3.map(t._1 -> _)).toMap,
+        surfaces,
+        fields.map(t => t._1 -> t._2).toMap
+      )

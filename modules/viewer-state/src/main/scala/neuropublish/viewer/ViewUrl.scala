@@ -6,6 +6,9 @@ package neuropublish.viewer
   *
   * ?l=speech-t:1:0.85:-8,8:ts3.1:cold-hot;speech-z:0:0.85:-8,8:off:cold-hot&c=-56,-22,14&p=volume&i=layers
   *
+  * Stage 5 adds the surface camera (`sc=left,perspective`) and the Hybrid divider (`sf=0.5`, the
+  * volume pane's share of the centre width); both are omitted when they equal the defaults.
+  *
   * Layer ids and colormap names are percent-encoded so they can never collide with the separators.
   * Only *current* display state is encoded; published recommendations come from the revision.
   * Unknown or malformed parts are ignored (the revision's recommendation fills in), never guessed.
@@ -45,7 +48,13 @@ object ViewUrl:
       s"${esc(l.id)}:${if c.visible then 1 else 0}:${num(c.opacity)}:${num(c.window.min)},${num(c.window.max)}:$thr:${esc(c.colormap)}"
     }.mkString(";")
     val cursor = w.cursor.map((x, y, z) => s"&c=${num(x)},${num(y)},${num(z)}").getOrElse("")
-    s"l=$layers$cursor&p=${w.layout.preset.toString.toLowerCase}&i=${w.inspector}"
+    val cam =
+      if w.surfaceCamera == SurfaceCameraState.default then ""
+      else s"&sc=${w.surfaceCamera.viewpoint},${w.surfaceCamera.projection}"
+    val split =
+      if w.layout.splitFraction == WorkspaceLayout.default.splitFraction then ""
+      else s"&sf=${num(w.layout.splitFraction)}"
+    s"l=$layers$cursor&p=${w.layout.preset.toString.toLowerCase}&i=${w.inspector}$cam$split"
 
   /** Apply a query string onto a workspace built from the revision's recommendations. */
   def apply(query: String, base: Workspace): Workspace =
@@ -67,9 +76,23 @@ object ViewUrl:
     val withPreset =
       params.get("p").flatMap(p => LayoutPreset.values.find(_.toString.equalsIgnoreCase(p)))
         .fold(withCursor)(p => withCursor.copy(layout = withCursor.layout.copy(preset = p)))
-    params.get("i").filter(Set("layers", "analysis", "provenance")).fold(withPreset)(i =>
-      withPreset.copy(inspector = i)
+    val withInspector =
+      params.get("i").filter(Set("layers", "analysis", "provenance")).fold(withPreset)(i =>
+        withPreset.copy(inspector = i)
+      )
+    val withCamera = params.get("sc").flatMap(parseCamera).fold(withInspector)(c =>
+      withInspector.copy(surfaceCamera = c)
     )
+    params.get("sf").flatMap(_.toDoubleOption).filter(f => f > 0.0 && f < 1.0).fold(withCamera)(f =>
+      withCamera.copy(layout =
+        WorkspaceLayout.reduce(withCamera.layout, WorkspaceLayout.Action.ResizeSplit(f))
+      )
+    )
+
+  private def parseCamera(s: String): Option[SurfaceCameraState] =
+    s.split(',') match
+      case Array(v, p) => Some(SurfaceCameraState(v, p)).filter(SurfaceCameraState.valid)
+      case _ => None
 
   private def parseLayer(s: String): Option[(String, LayerDisplay => LayerDisplay)] =
     s.split(':') match

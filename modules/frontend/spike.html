@@ -21,6 +21,8 @@
         mountSurface: (id) => app.spikeMountSurface(id, THREE),
         unmount: (id) => app.spikeUnmount(id),
         contextState: (id) => app.spikeSurfaceContextState(id),
+        link: (id, x, y, z) => app.spikeSurfaceLink(id, x, y, z),
+        pick: (id, x, y) => app.spikeSurfacePick(id, x, y),
         report: () => ({ ...app.spikeReport(), listeners: { ...counts } }),
         resize: (id, w, h) => { const el = document.getElementById(id); el.style.width = w + "px"; el.style.height = h + "px"; },
       };
