@@ -108,6 +108,33 @@ class FixtureSuite extends FunSuite:
     assertEquals(required(schema.get[String]("digest")), Sha256.of(schemaBytes).render)
   }
 
+  test("the committed Julia bundle is admitted with its recorded digest and unknown fields") {
+    val bytes = read("julia/manifest.json")
+    val (digest, manifest) =
+      neuropublish.protocol.json.Manifest.parse(bytes).fold(m => fail(m), identity)
+    assertEquals(digest.hex, Files.readString(fixtures.resolve("julia/manifest.sha256")).trim)
+    assertEquals(manifest.core, "0.1")
+    assertEquals(
+      manifest.volumeAssetIds.sorted,
+      List("speech-effect", "speech-t", "speech-z", "t1")
+    )
+    manifest.assets.foreach { a =>
+      val file = read(s"julia/assets/${a.id}.nii")
+      assertEquals(Sha256.of(file).render, a.digest.render, a.id)
+      assertEquals(file.length.toLong, a.size, a.id)
+    }
+    val raw = manifest.raw.hcursor
+    assertEquals(raw.downField("x-julia-producer").downField("version").as[String], Right("0.1"))
+    assertEquals(
+      raw.downField("assets").downArray.downField("x-julia-voxelStats").downField("max")
+        .as[Double],
+      Right(100.0)
+    )
+    assert(raw.downField("provenance").downField("activities").values.exists(_.exists(
+      _.hcursor.downField("schema").downField("id").as[String] == Right("org.example.julia/denoise")
+    )))
+  }
+
   test("every invalid fixture is rejected with the documented reason") {
     val dir = fixtures.resolve("invalid")
     val cases = Files.list(dir).toList.asScala.filter(_.toString.endsWith(".json")).toList

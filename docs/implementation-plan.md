@@ -381,6 +381,19 @@ valid bundle and publish it through the documented HTTP or CLI boundary. The
 same fixture is decoded and re-encoded by Scala and R without losing unknown
 extension fields.
 
+Status (2026-08-22): done. `modules/conformance/julia/producer.jl` (Julia
+stdlib `SHA`/`Downloads` plus `JSON3`, no Neuropublish code) writes four
+float32 NIfTI volumes and a core 0.1 manifest with the ADR 0005 domain
+envelope, an unknown activity record, an unknown top-level field and an
+unknown field inside a known record, then publishes it through the documented
+upload-session/object/manifest/commit endpoints. `JuliaProducerSuite` asserts
+the Scala digest equals Julia's, drives the script against an in-process
+backend (stale re-push rejected, `--parent` accepted, every rendition `ready`),
+and checks that `roundtrip.R` (jsonlite) re-encodes to a value-equal manifest
+with the unknown fields intact. The committed output lives in
+`modules/conformance/fixtures/julia/` for CI without Julia; `scripts/e2e.sh`
+runs the producer as a second push against the live server.
+
 ### Exit criteria
 
 - valid, invalid, old-version, new-extension, and schema-digest-mismatch golden

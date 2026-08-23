@@ -76,4 +76,17 @@ grep "^digest " "$DATA/push.log" | grep -q "$(shasum -a 256 modules/conformance/
 
 echo "== browser"
 (cd modules/frontend && NP_BASE_URL="http://127.0.0.1:$PORT" npx playwright test -c playwright.e2e.config.mjs)
+
+echo "== julia producer publishes a second revision with no Neuropublish code (ADR 0001 gate)"
+command -v julia >/dev/null || { echo "julia is required on PATH for the neutrality proof"; exit 1; }
+HEAD=$(curl -fs -H "Authorization: Bearer $SECRET" "http://127.0.0.1:$PORT/api/v1/workspaces/rotman/projects/sherlock" \
+  | grep -oE '"head":"[^"]+"' | cut -d'"' -f4)
+[ -n "$HEAD" ] || { echo "project has no head after the first push"; exit 1; }
+julia modules/conformance/julia/producer.jl --out "$DATA/julia-bundle" \
+  --server "http://127.0.0.1:$PORT" --project rotman/sherlock --token "$SECRET" \
+  --parent "$HEAD" --message "julia e2e" | tee "$DATA/julia.log"
+grep -q "^revision " "$DATA/julia.log"
+grep "^server-digest " "$DATA/julia.log" | grep -q "$(shasum -a 256 "$DATA/julia-bundle/manifest.json" | cut -d' ' -f1)"
+! grep "^rendition " "$DATA/julia.log" | grep -qv " ready$"
+
 echo "== e2e ok"

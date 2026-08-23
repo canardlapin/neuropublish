@@ -1,0 +1,225 @@
+package neuropublish.conformance
+
+import cats.effect.{IO, Resource}
+import com.comcast.ip4s.*
+import fs2.io.file.{Files, Path}
+import io.circe.Json
+import io.circe.parser.parse
+import munit.CatsEffectSuite
+import neuropublish.api.*
+import neuropublish.api.Protocol.given
+import neuropublish.backend.{ProjectKey, Server}
+import neuropublish.protocol.Sha256
+import neuropublish.protocol.json.{ByteProfile, Manifest}
+import org.http4s.{AuthScheme, Credentials, HttpApp, Method, Request, Status, Uri}
+import org.http4s.circe.*
+import org.http4s.ember.server.EmberServerBuilder
+import org.http4s.headers.Authorization
+import scala.sys.process.*
+
+/** Stage 2 neutrality proof (ADR 0001 "Verification"): a Julia program that uses no Neuropublish
+  * code writes a bundle the Scala side admits with the same digest, publishes it over the
+  * documented HTTP API against an in-process server, and its manifest survives an R round trip with
+  * unknown fields intact.
+  *
+  * Needs `julia` (with JSON3) and `Rscript` (with jsonlite) on PATH; each test skips with a message
+  * otherwise. `fixtures/julia` is the committed output of the same script for CI.
+  */
+class JuliaProducerSuite extends CatsEffectSuite:
+  private val scripts = List("julia", "modules/conformance/julia").map(Path(_))
+    .find(p => java.nio.file.Files.isDirectory(p.toNioPath))
+    .getOrElse(fail("julia directory not found from " + Path("").absolute))
+  private val producer = (scripts / "producer.jl").absolute.toString
+  private val roundtrip = (scripts / "roundtrip.R").absolute.toString
+
+  private def onPath(tool: String): Boolean =
+    try Process(Seq("which", tool)).!(ProcessLogger(_ => ())) == 0
+    catch case _: Exception => false
+
+  private def requireTool(tool: String): Unit =
+    assume(onPath(tool), s"$tool is not on PATH; skipping the Julia producer proof")
+
+  /** Runs a command, capturing stdout lines; fails with stderr on a non-zero exit. */
+  private def run(cmd: Seq[String]): IO[List[String]] = IO.blocking {
+    val out = List.newBuilder[String]
+    val err = new StringBuilder
+    val code =
+      Process(cmd).!(ProcessLogger(l => out += l, l => { val _ = err.append(l).append('\n') }))
+    assert(code == 0, s"${cmd.mkString(" ")} exited $code\n$err")
+    out.result()
+  }
+
+  private def printed(lines: List[String], key: String): String =
+    lines.collectFirst { case l if l.startsWith(key + " ") => l.drop(key.length + 1).trim }
+      .getOrElse(fail(s"producer did not print '$key'; output:\n${lines.mkString("\n")}"))
+
+  private val key = ProjectKey("rotman", "sherlock")
+  private val token = "julia-test-token"
+
+  /** An in-process backend on a free loopback port, with the deprecated static token enabled. */
+  private def server: Resource[IO, (String, HttpApp[IO])] =
+    for
+      data <- Files[IO].tempDirectory
+      port <- Resource.eval(IO.blocking {
+        val s = new java.net.ServerSocket(0)
+        try s.getLocalPort
+        finally s.close()
+      })
+      base = s"http://127.0.0.1:$port"
+      app <- Resource.eval(Server.build(data, token, key, base).map(_.orNotFound))
+      _ <- EmberServerBuilder.default[IO].withHost(host"127.0.0.1")
+        .withPort(Port.fromInt(port).get).withHttpApp(app).build
+    yield (base, app)
+
+  private val bundle = ResourceFunFixture(Files[IO].tempDirectory)
+
+  bundle.test("the Julia bundle is admitted with Julia's digest and its unknown fields intact") {
+    dir =>
+      requireTool("julia")
+      for
+        lines <- run(Seq("julia", producer, "--out", dir.toString))
+        julia = printed(lines, "digest")
+        bytes <- Files[IO].readAll(dir / "manifest.json").compile.to(Array)
+      yield
+        val admitted = ByteProfile.admit(bytes)
+          .fold(vs => fail(vs.map(_.render).mkString("; ")), identity)
+        assertEquals(admitted.render, julia)
+        val (digest, manifest) =
+          Manifest.parse(bytes).fold(m => fail(s"manifest rejected: $m"), identity)
+        assertEquals(digest.render, julia)
+        assertEquals(manifest.core, "0.1")
+        assertEquals(manifest.underlays.map(_.asset), List("t1"))
+        assertEquals(
+          manifest.resultFields.map(_.measure),
+          List("effect", "t-statistic", "z-statistic").map("org.neuropublish.measure/" + _)
+        )
+        assertUnknownFieldsPresent(manifest.raw)
+        // asset digests and sizes are over the files the producer wrote
+        manifest.assets.foreach { a =>
+          val file = java.nio.file.Files.readAllBytes((dir / "assets" / s"${a.id}.nii").toNioPath)
+          assertEquals(Sha256.of(file).render, a.digest.render, a.id)
+          assertEquals(file.length.toLong, a.size, a.id)
+        }
+  }
+
+  bundle.test("the Julia producer publishes over the HTTP API and every rendition is ready") {
+    dir =>
+      requireTool("julia")
+      server.use { (base, app) =>
+        for
+          lines <- run(Seq(
+            "julia",
+            producer,
+            "--out",
+            dir.toString,
+            "--server",
+            base,
+            "--project",
+            key.render,
+            "--token",
+            token,
+            "--message",
+            "julia neutrality proof"
+          ))
+          julia = printed(lines, "digest")
+          revision = printed(lines, "revision")
+          _ = assertEquals(printed(lines, "server-digest"), julia)
+          _ = assertEquals(printed(lines, "viewUrl"), s"$base/w/rotman/p/sherlock/r/$revision/view")
+          bytes <- Files[IO].readAll(dir / "manifest.json").compile.to(Array)
+          _ = assertEquals(Sha256.of(bytes).render, julia)
+          // independent check through the server: stored digest, renditions, unknown fields
+          detail <- app.run(Request[IO](
+            Method.GET,
+            Uri.unsafeFromString(s"/api/v1/revisions/$revision")
+          ).putHeaders(Authorization(Credentials.Token(AuthScheme.Bearer, token))))
+          _ = assertEquals(detail.status, Status.Ok)
+          d <- detail.as[Json].map(_.as[RevisionDetail].fold(e => fail(e.getMessage), identity))
+          _ = assertEquals(d.digest, julia)
+          _ = assertEquals(d.parent, None)
+          _ = assertEquals(d.message, Some("julia neutrality proof"))
+          _ = assertEquals(
+            d.renditions.map(_.assetId).sorted,
+            List("speech-effect", "speech-t", "speech-z", "t1")
+          )
+          _ = assert(d.renditions.forall(_.status == "ready"), d.renditions.toString)
+          _ = assertUnknownFieldsPresent(d.manifest)
+          // a second push without --parent is stale: the producer must fail, not silently re-push
+          again <- IO.blocking(Process(Seq(
+            "julia",
+            producer,
+            "--out",
+            dir.toString,
+            "--server",
+            base,
+            "--project",
+            key.render,
+            "--token",
+            token
+          )).!(ProcessLogger(_ => ())))
+          _ = assertNotEquals(again, 0, "stale parent was accepted")
+          // with --parent the same bundle publishes again as a child revision
+          child <- run(Seq(
+            "julia",
+            producer,
+            "--out",
+            dir.toString,
+            "--server",
+            base,
+            "--project",
+            key.render,
+            "--token",
+            token,
+            "--parent",
+            revision
+          ))
+          _ = assertEquals(printed(child, "server-digest"), julia)
+          _ = assertNotEquals(printed(child, "revision"), revision)
+        yield ()
+      }
+  }
+
+  bundle.test("an R decode/re-encode of the Julia manifest is value-equal with unknown fields") {
+    dir =>
+      requireTool("julia")
+      requireTool("Rscript")
+      for
+        _ <- run(Seq("julia", producer, "--out", dir.toString))
+        original <- Files[IO].readAll(dir / "manifest.json").compile.to(Array)
+        _ <- run(Seq(
+          "Rscript",
+          roundtrip,
+          (dir / "manifest.json").toString,
+          (dir / "roundtrip.json").toString
+        ))
+        rewritten <- Files[IO].readAll(dir / "roundtrip.json").compile.to(Array)
+      yield
+        // re-encoding changes the bytes (and so the digest) but not the value (ADR 0001)
+        assertNotEquals(Sha256.of(rewritten).hex, Sha256.of(original).hex)
+        val before = parse(String(original, "UTF-8")).fold(e => fail(e.message), identity)
+        ByteProfile.admit(rewritten).left.foreach(vs => fail(vs.map(_.render).mkString("; ")))
+        val after = parse(String(rewritten, "UTF-8")).fold(e => fail(e.message), identity)
+        assertEquals(after, before)
+        assertUnknownFieldsPresent(after)
+        // and Scala still admits the R spelling as a manifest
+        Manifest.parse(rewritten).fold(m => fail(s"R output rejected: $m"), _ => ())
+  }
+
+  /** The unknown top-level field and the unknown field inside a known record (assets[0]). */
+  private def assertUnknownFieldsPresent(raw: Json): Unit =
+    val top = raw.hcursor.downField("x-julia-producer")
+    assertEquals(top.downField("version").as[String], Right("0.1"))
+    assertEquals(
+      top.downField("nested").downField("flags").as[List[Boolean]],
+      Right(List(true, false))
+    )
+    assertEquals(top.downField("nested").downField("empty").as[List[Json]], Right(Nil))
+    assertEquals(top.downField("nested").downField("ratio").as[Double], Right(0.125))
+    val asset = raw.hcursor.downField("assets").downArray.downField("x-julia-voxelStats")
+    assertEquals(asset.downField("max").as[Double], Right(100.0))
+    val denoise = raw.hcursor.downField("provenance").downField("activities").values
+      .getOrElse(fail("no activities")).find(_.hcursor.downField("id").as[String] ==
+        Right("denoise")).getOrElse(fail("no denoise activity"))
+    assertEquals(
+      denoise.hcursor.downField("schema").downField("id").as[String],
+      Right("org.example.julia/denoise")
+    )

@@ -231,11 +231,16 @@ lazy val publisherCli = project
 // Golden bundles and foreign-producer harnesses.
 lazy val conformance = project
   .in(file("modules/conformance"))
-  .dependsOn(protocolJson.jvm, publisherCli)
+  .dependsOn(protocolJson.jvm, publisherCli, backend)
   .settings(commonSettings)
   .settings(
     name := "neuropublish-conformance",
-    publish / skip := true
+    publish / skip := true,
+    // the Julia producer is driven against an in-process backend (Stage 2 neutrality proof)
+    libraryDependencies ++= Seq(
+      "org.typelevel" %% "munit-cats-effect" % Versions.munitCatsEffect % Test,
+      "org.http4s" %% "http4s-circe" % Versions.http4s % Test
+    )
   )
 
 // ---------------------------------------------------------------------------
