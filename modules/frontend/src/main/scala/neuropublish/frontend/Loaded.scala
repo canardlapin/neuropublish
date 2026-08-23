@@ -293,8 +293,12 @@ object Loaded:
         spaces
       )
 
-  /** The surface-mesh header's `space` (the space its coordinates are expressed in). Optional: the
-    * field is being added to the profile, and a header without it stays decodable.
+  /** The surface-mesh header's `space` (the space its coordinates are expressed in).
+    *
+    * `SurfaceRendition.decodeHeader` requires the field, so a header that reaches this point always
+    * carries one and a rendition stored before the field existed fails to decode rather than
+    * linking on an unstated space. The `Option` is the reader staying total, not a tolerated
+    * absence: `None` reaches `SpaceGuard` only if the header shape changes again.
     */
   def headerSpace(headerJson: String): Option[String] =
     io.circe.parser.parse(headerJson).toOption.flatMap(
