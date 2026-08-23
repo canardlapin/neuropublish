@@ -21,7 +21,8 @@ Imports:
     digest,
     jsonlite,
     methods,
-    neuroim2
+    neuroim2,
+    tools
 Suggests:
     knitr,
     processx,

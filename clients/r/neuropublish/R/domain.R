@@ -28,10 +28,7 @@
 np_volume_grid_fingerprint <- function(shape, affine, space, convention = "RAS+",
                                        unit = "mm", layout = "x-fastest",
                                        descriptor = np_volume_grid_schema) {
-  shape <- as.integer(shape)
-  if (length(shape) != 3L || anyNA(shape)) {
-    stop("`shape` must be three integers", call. = FALSE)
-  }
+  shape <- np_check_shape(shape)
   affine <- as.matrix(affine)
   if (!identical(dim(affine), c(4L, 4L)) || !is.numeric(affine)) {
     stop("`affine` must be a 4 x 4 numeric matrix", call. = FALSE)
@@ -58,6 +55,14 @@ np_volume_grid_fingerprint <- function(shape, affine, space, convention = "RAS+"
   paste0("sha256:", digest::digest(rawConnectionValue(con), algo = "sha256", serialize = FALSE))
 }
 
+np_check_shape <- function(shape) {
+  if (!is.numeric(shape) || length(shape) != 3L || anyNA(shape) ||
+    any(shape != round(shape)) || any(shape < 1) || any(shape > .Machine$integer.max)) {
+    stop("`shape` must be three positive integers (each at most 2^31 - 1)", call. = FALSE)
+  }
+  as.integer(shape)
+}
+
 #' Describe a volume domain from a `NeuroSpace`
 #'
 #' Builds the `domains[]` record for a regular 3-D grid: the open descriptor
@@ -71,7 +76,9 @@ np_volume_grid_fingerprint <- function(shape, affine, space, convention = "RAS+"
 #' @param space_name The coordinate space name recorded in the payload.
 #' @param convention,unit,layout Payload values; the defaults are the only ones
 #'   the protocol currently defines for a `volume-grid` domain.
-#' @return A plain list that serializes to one entry of `domains`.
+#' @return A plain list that serializes to one entry of `domains`. `key$size`
+#'   is the voxel count as a double (it may exceed R's integer range; it is
+#'   written as an integer literal).
 #' @examples
 #' sp <- neuroim2::NeuroSpace(c(24L, 28L, 20L), spacing = c(2, 2, 2), origin = c(-22, -30, -18))
 #' d <- np_domain_volume(sp, id = "mni-2mm")
@@ -83,12 +90,13 @@ np_domain_volume <- function(space, id = "volume", space_name = "MNI152NLin2009c
   if (!methods::is(space, "NeuroSpace")) {
     stop("`space` must be a neuroim2 NeuroSpace or NeuroVol", call. = FALSE)
   }
-  shape <- as.integer(dim(space))
+  shape <- dim(space)
   if (length(shape) != 3L) {
     stop("a volume-grid domain needs a three-dimensional space, got ", length(shape), " dimensions",
       call. = FALSE
     )
   }
+  shape <- np_check_shape(shape)
   affine <- unname(as.matrix(neuroim2::trans(space)))
   fingerprint <- np_volume_grid_fingerprint(
     shape, affine, space_name, convention, unit, layout, np_volume_grid_schema
@@ -97,7 +105,7 @@ np_domain_volume <- function(space, id = "volume", space_name = "MNI152NLin2009c
     id = np_check_id(id),
     key = list(
       descriptor = np_volume_grid_schema,
-      size = as.integer(prod(shape)),
+      size = prod(as.numeric(shape)),
       structuralFingerprint = fingerprint
     ),
     descriptor = list(

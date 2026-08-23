@@ -26,6 +26,11 @@ np_array <- function(x) {
 
 np_compact <- function(x) x[!vapply(x, is.null, logical(1))]
 
+# An empty *object*: `list()` serializes as `[]`, a named empty list as `{}`.
+np_object <- function(x) {
+  if (is.list(x) && !length(x) && is.null(names(x))) structure(list(), names = character(0)) else x
+}
+
 #' Start a manifest
 #'
 #' Creates the top-level manifest list with `core = "0.1"`, the title, synopsis
@@ -99,7 +104,8 @@ np_axis <- function(id, label, values) {
 #'
 #' @param schema_id Semantic id of the schema, `namespace/name`.
 #' @param version Version string `major.minor`.
-#' @param payload A named list (may be empty).
+#' @param payload A named list (may be empty; an empty payload is written as
+#'   `{}`).
 #' @param digest Optional `sha256:` digest of the schema document.
 #' @return A plain list `list(schema = list(id, version, digest), payload)`.
 #' @examples
@@ -116,7 +122,7 @@ np_record <- function(schema_id, version, payload = list(), digest = NULL) {
       version = np_check_string(version, "version"),
       digest = digest
     )),
-    payload = payload
+    payload = np_object(payload)
   )
 }
 
@@ -235,7 +241,7 @@ np_window <- function(min, max, centre = NULL) {
 #' @param measure A semantic id; use the constants in [np_measure].
 #' @param domain The id of the domain the representations live on.
 #' @param selection A named list of axis id to axis value (e.g.
-#'   `list(level = "group")`).
+#'   `list(level = "group")`); an empty selection is written as `{}`.
 #' @param representations A list of representations, e.g.
 #'   `list(np_volume_rep("speech-t"))`.
 #' @param order Optional display order within the estimand.
@@ -261,7 +267,7 @@ np_field <- function(id, estimand, measure, domain, selection = list(level = "gr
     label = label,
     estimand = np_check_id(estimand, "estimand"),
     measure = np_check_id(measure, "measure"),
-    selection = selection,
+    selection = np_object(selection),
     domain = np_check_id(domain, "domain"),
     representations = representations,
     order = np_int(order, "order"),

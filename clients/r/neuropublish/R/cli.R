@@ -81,10 +81,17 @@ np_run <- function(args, echo = FALSE) {
   } else {
     err <- tempfile("npub-stderr")
     on.exit(unlink(err), add = TRUE)
-    out <- suppressWarnings(system2(cmd, shQuote(argv), stdout = TRUE, stderr = err))
-    status <- attr(out, "status")
-    if (is.null(status)) status <- 0L
-    if (echo) cat(out, sep = "\n")
+    if (echo) {
+      # stdout = "" streams the CLI's output to the console as it arrives;
+      # capturing it (stdout = TRUE) would hold the device-flow URL and code
+      # back until the command exits, i.e. until the user has approved them.
+      status <- suppressWarnings(system2(cmd, shQuote(argv), stdout = "", stderr = err))
+      out <- character()
+    } else {
+      out <- suppressWarnings(system2(cmd, shQuote(argv), stdout = TRUE, stderr = err))
+      status <- attr(out, "status")
+      if (is.null(status)) status <- 0L
+    }
     list(
       status = status,
       stdout = as.character(out),
@@ -106,22 +113,77 @@ np_lines <- function(x) {
   strsplit(x, "\r?\n")[[1]]
 }
 
-np_field_of <- function(lines, key) {
-  hit <- grep(paste0("^", key, " +"), lines, value = TRUE)
-  if (!length(hit)) {
-    return(NA_character_)
-  }
-  sub(paste0("^", key, " +"), "", hit[1])
+#' Run a subcommand in `--json` mode and decode its one document
+#'
+#' Every subcommand the wrapper uses (`validate`, `pack`, `push`) prints, under
+#' `--json`, exactly one JSON object on stdout: `{"ok": true, ...}`,
+#' `{"ok": false, "problems": [{pointer, message}, ...]}` for admission
+#' problems, or `{"ok": false, "error": {"type", "message", ...}}` for
+#' anything else (a missing file, an unreachable server, a rejected request).
+#' Progress lines go to stderr. A `stdout` that is not such a document is an
+#' error here, never a problem row.
+#'
+#' @return The decoded document (`simplifyVector = FALSE`) with the CLI's
+#'   `status` and `stderr` attached as attributes.
+#' @keywords internal
+#' @noRd
+np_run_json <- function(args, what) {
+  res <- np_run(c(args, "--json"))
+  np_decode_cli(res$stdout, what, status = res$status, stderr = res$stderr)
 }
 
-np_cli_error <- function(res, what) {
-  err <- c(
-    grep("^error", res$stdout, value = TRUE),
-    grep("^(SLF4J|WARNING)", res$stderr, value = TRUE, invert = TRUE)
+#' Decode the `--json` document the CLI printed (pure: takes the text)
+#' @noRd
+np_decode_cli <- function(stdout, what, status = NA_integer_, stderr = character()) {
+  text <- paste(stdout, collapse = "\n")
+  doc <- if (nzchar(trimws(text))) {
+    tryCatch(jsonlite::fromJSON(text, simplifyVector = FALSE), error = function(e) NULL)
+  }
+  if (!is.list(doc) || !is.logical(doc$ok)) {
+    diag <- c(stdout, grep("^(SLF4J|WARNING)", stderr, value = TRUE, invert = TRUE))
+    stop(
+      "npub ", what, " did not return a JSON document (exit ", status, ")",
+      if (length(diag)) paste0(":\n", paste(diag, collapse = "\n")) else "",
+      call. = FALSE
+    )
+  }
+  structure(doc, status = status, stderr = stderr)
+}
+
+np_problems_frame <- function(problems) {
+  data.frame(
+    pointer = vapply(problems, function(p) as.character(p$pointer), character(1)),
+    message = vapply(problems, function(p) as.character(p$message), character(1)),
+    stringsAsFactors = FALSE
   )
+}
+
+#' Raise the CLI's `error` record as an R error
+#'
+#' The condition has class `np_cli_error` and carries the CLI's `type` in
+#' `$type`, so callers can branch on it (`stale_parent` is raised separately as
+#' [np_push()]'s `np_stale_parent`). When the document has no `error` (pure
+#' admission problems where they are not expected) the problems are listed.
+#' @noRd
+np_cli_stop <- function(doc, what) {
+  err <- doc$error
+  if (is.list(err) && !is.null(err$message)) {
+    stop(structure(
+      list(
+        message = paste0("npub ", what, " failed (", err$type, "): ", err$message),
+        type = as.character(err$type),
+        call = NULL
+      ),
+      class = c("np_cli_error", "error", "condition")
+    ))
+  }
+  problems <- np_problems_frame(doc$problems)
   stop(
-    "npub ", what, " failed (exit ", res$status, ")",
-    if (length(err)) paste0(":\n", paste(err, collapse = "\n")) else "",
+    "npub ", what, " failed: ", nrow(problems), " problem(s)",
+    if (nrow(problems)) paste0(":\n", paste(
+      ifelse(nzchar(problems$pointer), paste0(problems$pointer, ": ", problems$message), problems$message),
+      collapse = "\n"
+    )) else "",
     call. = FALSE
   )
 }
@@ -138,8 +200,10 @@ np_cli_error <- function(res, what) {
 #' @return A data frame with one row per problem, columns `pointer` (JSON
 #'   Pointer into the manifest, `""` for the whole document) and `message`.
 #'   Zero rows means the bundle is admitted; the data frame then carries
-#'   attributes `digest` (the manifest digest) and `assets` (the CLI's asset
-#'   summary line).
+#'   attributes `digest` (the manifest digest) and `assets` (`"N declared, M
+#'   volume"`). A failure that is not an admission problem (the bundle has no
+#'   `manifest.json`, `npub` cannot run) is an error of class `np_cli_error`,
+#'   never a problem row.
 #' @examples
 #' \dontrun{
 #' problems <- np_validate("speech-model.npub")
@@ -148,21 +212,19 @@ np_cli_error <- function(res, what) {
 #' @export
 np_validate <- function(dir) {
   dir <- normalizePath(dir, winslash = "/", mustWork = TRUE)
-  res <- np_run(c("validate", dir))
-  errors <- grep("^error  ", res$stdout, value = TRUE)
-  if (res$status == 0L && !length(errors)) {
+  doc <- np_run_json(c("validate", dir), "validate")
+  np_validate_result(doc)
+}
+
+np_validate_result <- function(doc) {
+  if (isTRUE(doc$ok)) {
     out <- data.frame(pointer = character(), message = character(), stringsAsFactors = FALSE)
-    attr(out, "digest") <- np_field_of(res$stdout, "manifest")
-    attr(out, "assets") <- np_field_of(res$stdout, "assets")
+    attr(out, "digest") <- doc$digest
+    attr(out, "assets") <- sprintf("%d declared, %d volume", doc$assets$declared, doc$assets$volume)
     return(out)
   }
-  if (!length(errors)) np_cli_error(res, "validate")
-  body <- sub("^error  ", "", errors)
-  # the first line is the summary "<path>: N problem(s)"
-  body <- body[!grepl(": [0-9]+ problem\\(s\\)$", body)]
-  pointer <- ifelse(grepl("^(/[^ ]*|): ", body), sub("^((/[^ ]*)?): .*$", "\\1", body), "")
-  message <- ifelse(grepl("^(/[^ ]*|): ", body), sub("^((/[^ ]*)?): ", "", body), body)
-  data.frame(pointer = pointer, message = message, stringsAsFactors = FALSE)
+  if (is.null(doc$problems)) np_cli_stop(doc, "validate")
+  np_problems_frame(doc$problems)
 }
 
 #' Pack a staging bundle with `npub pack`
@@ -185,21 +247,21 @@ np_validate <- function(dir) {
 #' @export
 np_pack <- function(staging, out, force = FALSE) {
   staging <- normalizePath(staging, winslash = "/", mustWork = TRUE)
-  args <- c("pack", staging, out, if (isTRUE(force)) "--force")
-  res <- np_run(args)
-  if (res$status != 0L) np_cli_error(res, "pack")
-  rows <- grep("^  \\S+  [0-9]+ B  sha256:", res$stdout, value = TRUE)
-  parts <- regmatches(rows, regexec("^  (\\S+)  ([0-9]+) B  (sha256:[0-9a-f]{64})$", rows))
-  assets <- data.frame(
-    id = vapply(parts, `[`, character(1), 2),
-    size = as.numeric(vapply(parts, `[`, character(1), 3)),
-    digest = vapply(parts, `[`, character(1), 4),
-    stringsAsFactors = FALSE
-  )
+  doc <- np_run_json(c("pack", staging, out, if (isTRUE(force)) "--force"), "pack")
+  if (!isTRUE(doc$ok)) np_cli_stop(doc, "pack")
   list(
     dir = normalizePath(out, winslash = "/", mustWork = TRUE),
-    digest = np_field_of(res$stdout, "manifest"),
-    assets = assets
+    digest = doc$digest,
+    assets = np_pack_assets(doc$assets)
+  )
+}
+
+np_pack_assets <- function(assets) {
+  data.frame(
+    id = vapply(assets, function(a) as.character(a$id), character(1)),
+    size = vapply(assets, function(a) as.numeric(a$size), numeric(1)),
+    digest = vapply(assets, function(a) as.character(a$digest), character(1)),
+    stringsAsFactors = FALSE
   )
 }
 
@@ -244,7 +306,10 @@ np_login <- function(server) {
 #' @param token Optional bearer (discouraged on the command line; prefer
 #'   `NP_TOKEN` or [np_login()]).
 #' @return A list with `revision` (id), `digest`, `revision_url`, `view_url`,
-#'   `parent`, `unchanged`, and `output` (every line the CLI printed).
+#'   `parent` (as the server recorded it), `unchanged`, and `output` (the
+#'   CLI's progress lines). Any other failure is an error of class
+#'   `np_cli_error` whose `type` is the server's error code or the CLI's
+#'   failure type.
 #' @examples
 #' \dontrun{
 #' r <- np_push("speech-model.npub", "rotman/sherlock",
@@ -264,12 +329,29 @@ np_push <- function(bundle, project, server, message = NULL, parent = NULL, toke
     if (!is.null(message)) c("--message", message),
     if (!is.null(token)) c("--token", token)
   )
-  res <- np_run(args)
-  out <- res$stdout
-  rejected <- grep("^rejected ", out, value = TRUE)
-  if (length(rejected)) {
-    head <- sub(".*Re-run with --parent (\\S+).*", "\\1", rejected[1], perl = TRUE)
-    if (identical(head, rejected[1])) head <- NA_character_
+  np_push_result(np_run_json(args, "push"), parent)
+}
+
+np_push_result <- function(doc, parent = NULL) {
+  if (isTRUE(doc$ok)) {
+    if (isTRUE(doc$unchanged)) {
+      return(list(
+        revision = doc$revision, digest = NA_character_, revision_url = NA_character_,
+        view_url = NA_character_, parent = parent, unchanged = TRUE, output = attr(doc, "stderr")
+      ))
+    }
+    return(list(
+      revision = doc$revision,
+      digest = doc$digest,
+      revision_url = doc$revisionUrl,
+      view_url = doc$viewUrl,
+      parent = doc$parent,
+      unchanged = FALSE,
+      output = attr(doc, "stderr")
+    ))
+  }
+  if (identical(doc$error$type, "stale_parent")) {
+    head <- if (is.null(doc$error$head)) NA_character_ else as.character(doc$error$head)
     stop(structure(
       list(
         message = paste0(
@@ -282,24 +364,5 @@ np_push <- function(bundle, project, server, message = NULL, parent = NULL, toke
       class = c("np_stale_parent", "error", "condition")
     ))
   }
-  unchanged <- grep("^unchanged ", out, value = TRUE)
-  if (length(unchanged)) {
-    id <- sub("^unchanged +already published as +", "", unchanged[1])
-    return(list(
-      revision = id, digest = NA_character_, revision_url = NA_character_,
-      view_url = NA_character_, parent = parent, unchanged = TRUE, output = out
-    ))
-  }
-  if (res$status != 0L) np_cli_error(res, "push")
-  committing <- np_field_of(out, "committing")
-  revision <- if (is.na(committing)) NA_character_ else sub("^parent \\S+ -> (\\S+).*$", "\\1", committing)
-  list(
-    revision = revision,
-    digest = np_field_of(out, "digest"),
-    revision_url = np_field_of(out, "revision"),
-    view_url = np_field_of(out, "view"),
-    parent = parent,
-    unchanged = FALSE,
-    output = out
-  )
+  np_cli_stop(doc, "push")
 }
