@@ -72,7 +72,9 @@ object TrustedSchemas:
   private val byId: Map[String, List[SchemaRefWire]] = all.groupBy(_.id)
 
   def isTrustedNamespace(id: String): Boolean =
-    SemanticId.parse(id).toOption.exists(_.namespace.startsWith(TrustedNamespace))
+    SemanticId.parse(id).toOption.exists(ns =>
+      ns.namespace == TrustedNamespace || ns.namespace.startsWith(TrustedNamespace + ".")
+    )
 
   /** Interpret one record; `pointer` addresses it for problems. */
   def interpret(pointer: String, r: OpenRecord): Interpretation =

@@ -84,3 +84,12 @@ class ByteProfileSuite extends FunSuite:
     assert(a.isRight && b.isRight)
     assertNotEquals(a.map(_.hex), b.map(_.hex))
   }
+
+  test("concurrent parses do not share scanner state (server parses on every revision GET)") {
+    val deep = bytes("{\"a\":" + "[" * 400 + "1" + "]" * 400 + ",\"b\":{\"c\":[{\"d\":1}]}}")
+    val results = (1 to 64).toList.map(_ => ByteProfile.admit(deep))
+    assert(
+      results.forall(_.isRight),
+      results.collectFirst { case Left(vs) => vs.map(_.render) }.toString
+    )
+  }

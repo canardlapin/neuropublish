@@ -524,9 +524,11 @@ Carried / watch: `IngestionQueue` and upload sessions stay on local files even
 in PostgreSQL mode (adapter point marked; `gc` is local-read-model only);
 signed object GETs for *link* viewers are 307 redirects to 15-minute presigned
 URLs (bucket CORS still to be configured for a real deployment); an
-intermittent `500` on `GET /revisions/{id}` was seen twice under load in the
-browser suites and not reproduced in three subsequent full runs — server
-errors are now logged (`slf4j-simple`) so the next occurrence is diagnosable.
+intermittent `500` on `GET /revisions/{id}` seen twice under concurrent
+browser load is attributed to the byte-profile scanner having been a
+singleton with mutable depth state (fixed: one scanner per parse, with a
+64-way concurrent test); server errors are now logged (`slf4j-simple`) so
+any recurrence is diagnosable.
 The ScalaFIM `NArray` migration remains queued before Stage 5.
 
 ## Stage 3 — volume scientific workspace

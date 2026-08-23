@@ -75,9 +75,16 @@ object ByteProfile:
     * one JSON object, tracks object keys per nesting level to reject duplicates, and rejects
     * unpaired surrogate escapes.
     */
+  /** Per-call scanner: it carries mutable depth/path state, so one instance per parse (the server
+    * parses concurrently).
+    */
   private[json] object Scanner:
-    /** Nesting limit; deeper manifests are rejected rather than risking a stack overflow. */
     val MaxDepth = 512
+    def scan(s: String): List[Violation] = (new Scanner).scan(s)
+
+  private[json] final class Scanner:
+    /** Nesting limit; deeper manifests are rejected rather than risking a stack overflow. */
+    private val MaxDepth = Scanner.MaxDepth
 
     def scan(s: String): List[Violation] =
       val out = List.newBuilder[Violation]
