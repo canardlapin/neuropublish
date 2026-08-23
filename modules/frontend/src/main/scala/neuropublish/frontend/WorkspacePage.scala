@@ -526,7 +526,9 @@ object WorkspacePage:
         w.layout.preset match
           case LayoutPreset.Hybrid if st =>
             val f = w.layout.splitFraction
-            s"grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, ${f}fr) 8px minmax(0, ${1 -
+            // rows need a floor: the centre's own height is only its min-height, and a 0-floored
+            // fr row would let the volume pane overflow into the surface pane
+            s"grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(280px, ${f}fr) 8px minmax(280px, ${1 -
                 f}fr)"
           case LayoutPreset.Hybrid =>
             val f = w.layout.splitFraction
