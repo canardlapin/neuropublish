@@ -45,6 +45,15 @@ class IngestionSurfaceSuite extends CatsEffectSuite:
   private def get(app: HttpApp[IO], path: String) =
     app.run(auth(Request[IO](Method.GET, Uri.unsafeFromString(path))))
 
+  /** The `space` the reference manifest's domain `id` declares (never hard-coded here). */
+  private def domainSpace(id: String): IO[String] =
+    bytes("reference/manifest.json").map { b =>
+      io.circe.parser.parse(new String(b, "UTF-8")).toOption.get
+        .hcursor.downField("domains").values.get
+        .find(_.hcursor.get[String]("id").toOption.contains(id)).get
+        .hcursor.downField("descriptor").downField("payload").get[String]("space").toOption.get
+    }
+
   /** The reference bundle's `lh-pial` with the first two vertex ordinals of face 0 swapped: the
     * same vertex set, a different ordered topology, so its ADR 0005 key differs from the domain's.
     */
@@ -71,11 +80,13 @@ class IngestionSurfaceSuite extends CatsEffectSuite:
 
   /** Pushes the reference bundle with `substitute` replacing one asset's bytes; the manifest's
     * digest and size for that asset are rewritten to the substitute's, so the push is well formed
-    * and only ingestion can object.
+    * and only ingestion can object. `edit` rewrites the manifest itself, for a bundle that admits
+    * cleanly and only the asset bytes can contradict.
     */
   private def push(
       app: HttpApp[IO],
-      substitute: Option[(String, Array[Byte])] = None
+      substitute: Option[(String, Array[Byte])] = None,
+      edit: Option[Json => Json] = None
   ): IO[org.http4s.Response[IO]] =
     for
       manifest0 <- bytes("reference/manifest.json")
@@ -84,17 +95,21 @@ class IngestionSurfaceSuite extends CatsEffectSuite:
       )
       assets =
         assets0.map((id, b, mt) => (id, substitute.filter(_._1 == id).map(_._2).getOrElse(b), mt))
-      manifest = substitute.fold(manifest0) { (sid, sb) =>
-        val json = io.circe.parser.parse(new String(manifest0, "UTF-8")).toOption.get
-        json.hcursor.downField("assets").withFocus(_.mapArray(_.map(a =>
-          if a.hcursor.get[String]("id").toOption.contains(sid) then
-            a.mapObject(
-              _.add("digest", Json.fromString(Sha256.of(sb).render))
-                .add("size", Json.fromInt(sb.length))
-            )
-          else a
-        ))).top.get.spaces2.getBytes("UTF-8")
-      }
+      manifest =
+        if substitute.isEmpty && edit.isEmpty then manifest0
+        else
+          val json = io.circe.parser.parse(new String(manifest0, "UTF-8")).toOption.get
+          val withAssets = substitute.fold(json) { (sid, sb) =>
+            json.hcursor.downField("assets").withFocus(_.mapArray(_.map(a =>
+              if a.hcursor.get[String]("id").toOption.contains(sid) then
+                a.mapObject(
+                  _.add("digest", Json.fromString(Sha256.of(sb).render))
+                    .add("size", Json.fromInt(sb.length))
+                )
+              else a
+            ))).top.get
+          }
+          edit.fold(withAssets)(_(withAssets)).spaces2.getBytes("UTF-8")
       inv = assets.map((_, b, mt) => AssetInventory(Sha256.of(b).render, b.length.toLong, mt))
       s <- app.run(auth(Request[IO](
         Method.POST,
@@ -136,10 +151,10 @@ class IngestionSurfaceSuite extends CatsEffectSuite:
           List(
             ("lh-pial", "surface-mesh", None),
             ("rh-pial", "surface-mesh", None),
-            ("speech-t-lh", "vertex-field", Some("lh-pial")),
-            ("speech-t-rh", "vertex-field", Some("rh-pial")),
-            ("speech-z-lh", "vertex-field", Some("lh-pial")),
-            ("speech-z-rh", "vertex-field", Some("rh-pial"))
+            ("speech-t-lh", "vertex-field", Some("lh-pial-surface")),
+            ("speech-t-rh", "vertex-field", Some("rh-pial-surface")),
+            ("speech-z-lh", "vertex-field", Some("lh-pial-surface")),
+            ("speech-z-rh", "vertex-field", Some("rh-pial-surface"))
           )
         )
         mh <- get(e.app, s"/api/v1/revisions/${r.revisionId}/renditions/lh-pial/header")
@@ -150,16 +165,29 @@ class IngestionSurfaceSuite extends CatsEffectSuite:
           .flatMap(_.as[String])
         fp <- get(e.app, s"/api/v1/revisions/${r.revisionId}/renditions/speech-t-lh/payload")
           .flatMap(_.body.compile.to(Array))
+        space <- domainSpace("ico3-lh")
       yield
         val header = SurfaceRendition.decodeHeader(mh).fold(fail(_), identity)
         assertEquals(
           (header.hemisphere, header.kind, header.vertexCount, header.faceCount),
           ("left", "pial", 642, 1280)
         )
+        // the space comes from the surface's domain, so a reader can refuse to link a surface
+        // with a volume of another space
+        assertEquals(header.space, space)
+        // the GIFTI's transform was applied to the positions and kept as provenance; the header's
+        // surfaceToWorld is the identity, so nothing applies it a second time
+        assertEquals(header.surfaceToWorld, SurfaceRendition.Identity)
+        assertEquals(
+          header.sourceTransform.flatMap(_.transformedSpace),
+          Some("NIFTI_XFORM_SCANNER_ANAT")
+        )
+        assertEquals(header.anatomicalStructurePrimary, Some("CortexLeft"))
+        assert(header.faceDigest.exists(_.startsWith("sha256:")), header.faceDigest)
         val g = SurfaceRendition.decode(header, mp).fold(fail(_), identity)
         assertEquals(g.vertexCount, 642)
         val fheader = VertexFieldRendition.decodeHeader(fh).fold(fail(_), identity)
-        assertEquals(fheader.surface, "lh-pial")
+        assertEquals(fheader.surface, "lh-pial-surface")
         val f = VertexFieldRendition.decode(fheader, fp, g).fold(fail(_), identity)
         assertEquals(f.size, 642)
         // the rendition's source is the canonical asset's digest
@@ -178,6 +206,40 @@ class IngestionSurfaceSuite extends CatsEffectSuite:
       assert(err.message.contains("ico3-lh"), err.message)
   }
 
+  inline.test("a surface declared as the hemisphere its GIFTI denies fails the push") { e =>
+    // the reference `lh-pial` GIFTI says AnatomicalStructurePrimary=CortexLeft. Declaring it the
+    // right hemisphere admits cleanly — the manifest is consistent with itself — and only the
+    // bytes contradict it; left and right meshes of one template share counts and topology, so
+    // nothing further downstream would notice (review S6).
+    def rightward(j: Json): Json =
+      val surfaces = j.hcursor.downField("surfaces").withFocus(_.mapArray(_.map(s =>
+        if s.hcursor.get[String]("id").toOption.contains("lh-pial-surface") then
+          s.mapObject(_.add("hemisphere", Json.fromString("right")))
+        else s
+      ))).top.get
+      val domains = surfaces.hcursor.downField("domains").withFocus(_.mapArray(_.map(d =>
+        if d.hcursor.get[String]("id").toOption.contains("ico3-lh") then
+          d.hcursor.downField("descriptor").downField("payload")
+            .withFocus(_.mapObject(_.add("hemisphere", Json.fromString("right")))).top.get
+        else d
+      ))).top.get
+      domains.hcursor.downField("resultFields").withFocus(_.mapArray(_.map(f =>
+        f.hcursor.downField("representations").withFocus(_.mapArray(_.map(r =>
+          if r.hcursor.get[String]("surface").toOption.contains("lh-pial-surface") then
+            r.mapObject(_.add("hemisphere", Json.fromString("right")))
+          else r
+        ))).top.getOrElse(f)
+      ))).top.get
+    for
+      c <- push(e.app, edit = Some(rightward))
+      _ = assertEquals(c.status, Status.BadRequest)
+      err <- decode[ApiError](c)
+    yield
+      assert(err.message.contains("asset lh-pial (surface lh-pial-surface)"), err.message)
+      assert(err.message.contains("declared the right hemisphere"), err.message)
+      assert(err.message.contains("AnatomicalStructurePrimary=CortexLeft"), err.message)
+  }
+
   inline.test("a vertex field whose length is not its surface's vertex count fails the push") {
     e =>
       for
@@ -186,5 +248,5 @@ class IngestionSurfaceSuite extends CatsEffectSuite:
         err <- decode[ApiError](c)
       yield
         assert(err.message.contains("asset speech-t-lh has 4 vertex values"), err.message)
-        assert(err.message.contains("surface lh-pial has 642 vertices"), err.message)
+        assert(err.message.contains("surface lh-pial-surface has 642 vertices"), err.message)
   }
