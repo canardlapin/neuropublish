@@ -42,6 +42,7 @@ test("provenance shows heterogeneous inputs as groups, never a false shared valu
   await expect(unknown).toContainText(/retained/i);
   await expect(unknown.locator("a[download]")).toHaveCount(1);
   await expect(unknown.locator("button")).toHaveCount(0);
+  await page.screenshot({ path: "test-results/stage4-provenance.png", fullPage: true });
 });
 
 test("saved view: save, reopen with order + presentation, update leaves the revision digest unchanged", async ({ page }) => {
@@ -92,6 +93,8 @@ test("share link opens without an account, explores locally, and dies on revoke"
   await expect(viewer.getByTestId("readonly-bar")).toBeVisible();
   await expect(viewer.getByTestId("save-view")).toHaveCount(0);
   await expect(viewer.locator("#volume canvas")).toHaveCount(1);
+  await settle(viewer);
+  await viewer.screenshot({ path: "test-results/stage4-shared-view.png", fullPage: true });
   // local exploration, then return
   await viewer.locator('.layer-card[data-layer="speech-t"] input[type=checkbox]').click();
   await viewer.getByTestId("return-to-saved").click();
