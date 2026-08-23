@@ -1,0 +1,36 @@
+Package: neuropublish
+Title: Build, Validate, and Publish Neuropublish Result Bundles
+Version: 0.1.0
+Authors@R:
+    person("Bradley", "Buchsbaum", , "bbuchsbaum@research.baycrest.org", role = c("aut", "cre"))
+Description: Builds Neuropublish result bundles from 'neuroim2' volumes as plain
+    R lists that serialize exactly to the public manifest schema (core 0.1),
+    writes them as staging bundles under the documented byte profile, computes
+    the 'volume-grid' structural fingerprint of a domain, and wraps the reference
+    'npub' command-line tool for packing, validation, login, and publication.
+    Provides the 'as_neuropublish()' generic that domain packages implement to
+    describe their results, and 'np_publish()' which turns such a description
+    into one immutable published revision.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+Depends:
+    R (>= 4.1)
+Imports:
+    digest,
+    jsonlite,
+    methods,
+    neuroim2
+Suggests:
+    knitr,
+    processx,
+    rmarkdown,
+    testthat (>= 3.0.0),
+    withr
+VignetteBuilder: knitr
+Config/testthat/edition: 3
+SystemRequirements: npub (the Neuropublish publisher CLI) for packing,
+    validation, and publication
+URL: https://github.com/bbuchsbaum/neuropublish
+BugReports: https://github.com/bbuchsbaum/neuropublish/issues

@@ -18,5 +18,16 @@ fingerprint is recomputed in `FixtureSuite` from the `volume-grid/v1` binary
 identity preimage defined by ADR 0005. The descriptor schema digest is the
 SHA-256 of `schemas/volume-grid-v1.schema.json`; it is not a placeholder.
 
+Stage 5 added the surface vocabulary: two `surface-vertices` domains
+(`ico3-lh`, `ico3-rh`), two surfaces (`lh-pial`, `rh-pial`), and left/right t
+and z vertex fields as surface representations of `speech-t` and `speech-z`,
+with `project-to-surface` as their derivation receipt. The GIFTI assets are the
+Julia producer's (`../julia`, same bytes), so `assets/oracle.json` carries the
+same `surfaces` and `fields` sections as the Julia oracle; `renditions/` holds
+the `surface-mesh@0` (`.bin`) and `vertex-field-f32@0` (`.f32`) renditions
+`GiftiToRenditionSuite` writes and `SurfaceFidelitySuite` decodes on JVM and
+Scala.js. `schemas/surface-vertices-v1.schema.json` is the trusted records
+schema, pinned like `volume-grid-v1`.
+
 `manifest.sha256` is `shasum -a 256 manifest.json`; the conformance suite
 asserts the pure-Scala digest (shared by JVM and Scala.js) equals it.

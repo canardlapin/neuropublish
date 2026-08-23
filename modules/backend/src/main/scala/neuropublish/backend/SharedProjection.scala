@@ -7,14 +7,24 @@ import io.circe.Json
   * pure projection by allow-list: anything not named here — `provenance`, open records, method
   * payloads, asset sizes and catalogs, sensitivity, axes — is dropped, never copied.
   *
-  * Kept: `core`, `title`, `synopsis`, `warnings`, `resultFields`, `underlays`, `domains`;
-  * `analyses` as `{id, label, estimands, sampleSize}`; `assets` as `{id, digest, size, mediaType}`
-  * (`size` because the manifest decoder the page uses requires it; it is the byte count of a
-  * rendition the viewer fetches anyway — `catalog` and anything else on an asset is dropped).
+  * Kept: `core`, `title`, `synopsis`, `warnings`, `resultFields`, `underlays`, `surfaces`,
+  * `domains`; `analyses` as `{id, label, estimands, sampleSize}`; `assets` as
+  * `{id, digest, size, mediaType}` (`size` because the manifest decoder the page uses requires it;
+  * it is the byte count of a rendition the viewer fetches anyway — `catalog` and anything else on
+  * an asset is dropped).
   */
 object SharedProjection:
   private val topLevel =
-    List("core", "title", "synopsis", "warnings", "resultFields", "underlays", "domains")
+    List(
+      "core",
+      "title",
+      "synopsis",
+      "warnings",
+      "resultFields",
+      "underlays",
+      "surfaces",
+      "domains"
+    )
   private val analysisKeys = List("id", "label", "estimands", "sampleSize")
   private val assetKeys = List("id", "digest", "size", "mediaType")
 

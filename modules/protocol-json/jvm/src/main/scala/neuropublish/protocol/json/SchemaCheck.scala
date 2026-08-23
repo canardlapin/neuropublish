@@ -33,6 +33,7 @@ object SchemaCheck:
   lazy val workspaceStateSchema: JsonSchema = load("workspace-state")
   lazy val renditionHeaderSchema: JsonSchema = load("rendition-header")
   lazy val volumeGridV1Schema: JsonSchema = load("records/volume-grid-v1")
+  lazy val surfaceVerticesV1Schema: JsonSchema = load("records/surface-vertices-v1")
 
   def validate(schema: JsonSchema, json: Json): List[Problem] =
     schema.validate(json.noSpaces, InputFormat.JSON).asScala.toList.map { v =>
@@ -53,3 +54,7 @@ object SchemaCheck:
     */
   def volumeGridV1(at: String, payload: Json): List[Problem] =
     validate(volumeGridV1Schema, payload).map(p => p.copy(pointer = at + p.pointer))
+
+  /** A trusted `surface-vertices@1.0` descriptor payload against its records schema. */
+  def surfaceVerticesV1(at: String, payload: Json): List[Problem] =
+    validate(surfaceVerticesV1Schema, payload).map(p => p.copy(pointer = at + p.pointer))

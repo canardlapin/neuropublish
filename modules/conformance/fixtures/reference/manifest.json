@@ -77,6 +77,58 @@
           ]
         }
       }
+    },
+    {
+      "id": "ico3-lh",
+      "key": {
+        "descriptor": {
+          "id": "org.neuropublish.domain/surface-vertices",
+          "version": "1.0",
+          "digest": "sha256:686d9b2e17090e776c3a876f470e83dc874638c10b3dc67a4e4fad27a31c9232"
+        },
+        "size": 642,
+        "structuralFingerprint": "sha256:676ab979d593efee7b473c6868feb825251f01a48a2b24c11e2ddf6acabbf799"
+      },
+      "descriptor": {
+        "schema": {
+          "id": "org.neuropublish.domain/surface-vertices",
+          "version": "1.0",
+          "digest": "sha256:686d9b2e17090e776c3a876f470e83dc874638c10b3dc67a4e4fad27a31c9232"
+        },
+        "payload": {
+          "space": "synthetic-ico3",
+          "hemisphere": "left",
+          "vertexCount": 642,
+          "faceCount": 1280,
+          "topology": "lh-pial"
+        }
+      }
+    },
+    {
+      "id": "ico3-rh",
+      "key": {
+        "descriptor": {
+          "id": "org.neuropublish.domain/surface-vertices",
+          "version": "1.0",
+          "digest": "sha256:686d9b2e17090e776c3a876f470e83dc874638c10b3dc67a4e4fad27a31c9232"
+        },
+        "size": 642,
+        "structuralFingerprint": "sha256:0861bddcdbe8a54c7da2e7b7e9ae88cd0f0dac6a16dd26af5cfc5873bae98f48"
+      },
+      "descriptor": {
+        "schema": {
+          "id": "org.neuropublish.domain/surface-vertices",
+          "version": "1.0",
+          "digest": "sha256:686d9b2e17090e776c3a876f470e83dc874638c10b3dc67a4e4fad27a31c9232"
+        },
+        "payload": {
+          "space": "synthetic-ico3",
+          "hemisphere": "right",
+          "vertexCount": 642,
+          "faceCount": 1280,
+          "topology": "rh-pial"
+        }
+      }
     }
   ],
   "assets": [
@@ -110,6 +162,42 @@
       "digest": "sha256:067ebf74826d5d880dca7ff9879d9a55a69ec548e73f9a6c41c775122be53909",
       "mediaType": "application/x-nifti",
       "size": 54112
+    },
+    {
+      "id": "lh-pial",
+      "digest": "sha256:a26400d2988ac9675dff6e96185c27da47712c32122b3a7efcc5af2d09842edb",
+      "mediaType": "application/x-gifti",
+      "size": 31758
+    },
+    {
+      "id": "rh-pial",
+      "digest": "sha256:ddc76a3831a03147cc924d6ea2b37a2b1826d33ad3238e845ee2d246ed5081de",
+      "mediaType": "application/x-gifti",
+      "size": 31759
+    },
+    {
+      "id": "speech-t-lh",
+      "digest": "sha256:efa367124f9816f70cfb7acf0ab288da39346237a656eeda3436df4509c1e986",
+      "mediaType": "application/x-gifti",
+      "size": 3811
+    },
+    {
+      "id": "speech-t-rh",
+      "digest": "sha256:f29737eebaeed40070022879175b0790fd4f90a15537fba1c7f9ac718c1d08fd",
+      "mediaType": "application/x-gifti",
+      "size": 3811
+    },
+    {
+      "id": "speech-z-lh",
+      "digest": "sha256:36e9d636449fcfaaad4d76ee4d32133d4ca7ed853eb3f22bba19dc44e917d922",
+      "mediaType": "application/x-gifti",
+      "size": 3811
+    },
+    {
+      "id": "speech-z-rh",
+      "digest": "sha256:7f2710f5845968f086f5a682c86f82f66b2faa87e38b1e7fb29ef90452c57b0b",
+      "mediaType": "application/x-gifti",
+      "size": 3811
     }
   ],
   "analyses": [
@@ -193,6 +281,20 @@
         {
           "kind": "volume",
           "asset": "speech-t"
+        },
+        {
+          "kind": "surface",
+          "asset": "speech-t-lh",
+          "surface": "lh-pial",
+          "hemisphere": "left",
+          "derivation": "project-to-surface"
+        },
+        {
+          "kind": "surface",
+          "asset": "speech-t-rh",
+          "surface": "rh-pial",
+          "hemisphere": "right",
+          "derivation": "project-to-surface"
         }
       ],
       "order": 3,
@@ -221,6 +323,20 @@
         {
           "kind": "volume",
           "asset": "speech-z"
+        },
+        {
+          "kind": "surface",
+          "asset": "speech-z-lh",
+          "surface": "lh-pial",
+          "hemisphere": "left",
+          "derivation": "project-to-surface"
+        },
+        {
+          "kind": "surface",
+          "asset": "speech-z-rh",
+          "surface": "rh-pial",
+          "hemisphere": "right",
+          "derivation": "project-to-surface"
         }
       ],
       "order": 4
@@ -293,6 +409,18 @@
           "runtime": "R 4.5.1",
           "git": "3f2a1c0"
         }
+      },
+      {
+        "id": "project-to-surface",
+        "schema": {
+          "id": "org.example.julia/surface-projection",
+          "version": "0.1",
+          "digest": "sha256:ee00000000000000000000000000000000000000000000000000000000000005"
+        },
+        "payload": {
+          "method": "synthetic",
+          "note": "t = 6z/30 and z = 5.5(y+5)/25 at each vertex, clipped"
+        }
       }
     ],
     "edges": [
@@ -319,7 +447,37 @@
       {
         "from": "group-reduce",
         "to": "speech-t"
+      },
+      {
+        "from": "speech-t",
+        "to": "project-to-surface"
+      },
+      {
+        "from": "project-to-surface",
+        "to": "speech-t-lh"
+      },
+      {
+        "from": "project-to-surface",
+        "to": "speech-t-rh"
       }
     ]
-  }
+  },
+  "surfaces": [
+    {
+      "id": "lh-pial",
+      "asset": "lh-pial",
+      "domain": "ico3-lh",
+      "hemisphere": "left",
+      "kind": "pial",
+      "label": "Synthetic left pial (icosphere)"
+    },
+    {
+      "id": "rh-pial",
+      "asset": "rh-pial",
+      "domain": "ico3-rh",
+      "hemisphere": "right",
+      "kind": "pial",
+      "label": "Synthetic right pial (icosphere)"
+    }
+  ]
 }

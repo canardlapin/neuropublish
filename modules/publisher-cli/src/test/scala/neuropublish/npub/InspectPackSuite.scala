@@ -16,6 +16,12 @@ class InspectPackSuite extends CatsEffectSuite:
 
   private def bytes(p: String) = Files[IO].readAll(fixtures / p).compile.to(Array)
 
+  /** The reference bundle's file for an asset id (NIfTI volumes, GIFTI surfaces and fields). */
+  private def fileOf(id: String): String =
+    if id.endsWith("-pial") then s"$id.surf.gii"
+    else if id.endsWith("-lh") || id.endsWith("-rh") then s"$id.func.gii"
+    else s"$id.nii"
+
   /** The bytes of the two digest-only assets in the staging bundle (`speech-effect`, `speech-se`),
     * staged at their normalized location with matching `digest`/`size`.
     */
@@ -42,16 +48,20 @@ class InspectPackSuite extends CatsEffectSuite:
                 .add("size", io.circe.Json.fromInt(b.length))
             case None =>
               o.remove("digest").remove("size")
-                .add("path", io.circe.Json.fromString(s"in/$id.nii"))
+                .add("path", io.circe.Json.fromString(s"in/${fileOf(id)}"))
         )
       }
       manifest = json.mapObject(
         _.add("assets", io.circe.Json.arr(staged*)).add("lab", io.circe.Json.fromString("rotman"))
       )
       _ <- Files[IO].createDirectories(dir / "in")
-      _ <- List("t1", "speech-t", "speech-z").traverse_(id =>
-        Files[IO].copy(fixtures / "reference" / "assets" / s"$id.nii", dir / "in" / s"$id.nii")
-      )
+      _ <- assets.map(_.hcursor.get[String]("id").toOption.get).filterNot(digestOnly.contains)
+        .traverse_(id =>
+          Files[IO].copy(
+            fixtures / "reference" / "assets" / fileOf(id),
+            dir / "in" / fileOf(id)
+          )
+        )
       _ <- digestOnly.values.toList.traverse_ { b =>
         val d = Sha256.of(b)
         val sub = dir / "assets" / "sha256" / d.hex.take(2)
@@ -76,7 +86,19 @@ class InspectPackSuite extends CatsEffectSuite:
         assertEquals(digest.hex, packed.manifestDigest.hex)
         assertEquals(
           packed.assets.map(_._1),
-          List("t1", "speech-effect", "speech-se", "speech-t", "speech-z")
+          List(
+            "t1",
+            "speech-effect",
+            "speech-se",
+            "speech-t",
+            "speech-z",
+            "lh-pial",
+            "rh-pial",
+            "speech-t-lh",
+            "speech-t-rh",
+            "speech-z-lh",
+            "speech-z-rh"
+          )
         )
         // digest-only assets are copied from the staging layout into the output
         digestOnly.foreach { (id, b) =>
@@ -194,7 +216,7 @@ class InspectPackSuite extends CatsEffectSuite:
         )
         assert(
           lines.exists(_.contains(
-            "speech-t  t statistic (t)  volume:speech-t  domain mni-2mm  display recommended"
+            "speech-t  t statistic (t)  volume:speech-t, surface:speech-t-lh, surface:speech-t-rh  domain mni-2mm  display recommended"
           )),
           text
         )

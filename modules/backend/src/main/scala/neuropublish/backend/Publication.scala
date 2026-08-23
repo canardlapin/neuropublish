@@ -332,14 +332,15 @@ final class Publication(
         for
           job <- ingestion.queue.status(id)
           st <- ingestion.status(id, rec.committedAt, m, job)
-          rends <- m.volumeAssetIds.traverse { a =>
+          rends <- m.renditionTargets.traverse { t =>
+            val a = t.assetId
             (ingestion.assetStatus(id, a, job), signedRendition(id, a)).mapN {
               (status, urls) =>
                 val (h, p) = urls.getOrElse((
                   s"$baseUrl/api/v1/revisions/$id/renditions/$a/header",
                   s"$baseUrl/api/v1/revisions/$id/renditions/$a/payload"
                 ))
-                RenditionRef(a, status, h, p)
+                RenditionRef(a, status, h, p, t.kind, t.surface)
             }
           }
         yield Right(RevisionDetail(

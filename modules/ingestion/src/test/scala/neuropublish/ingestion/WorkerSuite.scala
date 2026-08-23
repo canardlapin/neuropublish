@@ -47,23 +47,29 @@ class WorkerSuite extends CatsEffectSuite:
   private def bytes(p: String) = Files[IO].readAll(fixtures / p).compile.to(Array)
   private def decode[A: io.circe.Decoder](r: org.http4s.Response[IO]): IO[A] =
     r.as[String].flatMap(b => IO.fromEither(io.circe.parser.decode[A](b)))
-  private val assetIds = List("t1", "speech-effect", "speech-se", "speech-t", "speech-z")
 
   /** Pushes the reference bundle; `substitute` swaps one asset's bytes (its digest in the inventory
     * and manifest stay the asset's own, so the manifest must be rewritten to match).
     */
-  private def push(app: HttpApp[IO], junk: Option[String] = None): IO[CommitResult] =
+  private def push(
+      app: HttpApp[IO],
+      junk: Option[String] = None,
+      substitute: Option[(String, Array[Byte])] = None
+  ): IO[CommitResult] =
     for
       manifest0 <- bytes("reference/manifest.json")
-      assets0 <- assetIds.traverse(id => bytes(s"reference/assets/$id.nii").map(id -> _))
+      assets0 <- ReferenceBundle.assets.traverse((id, file, _) =>
+        bytes(s"reference/assets/$file").map(id -> _)
+      )
       junkBytes = Array.fill[Byte](54112)(1) // same size, not a NIfTI volume
-      assets = assets0.map((id, b) => if junk.contains(id) then id -> junkBytes else id -> b)
-      manifest = junk.fold(manifest0) { id =>
+      swap = junk.map(_ -> junkBytes).orElse(substitute) // same size: only the digest changes
+      assets = assets0.map((id, b) => id -> swap.filter(_._1 == id).map(_._2).getOrElse(b))
+      manifest = swap.fold(manifest0) { (id, sb) =>
         val was = Sha256.of(assets0.find(_._1 == id).get._2).render
-        new String(manifest0, "UTF-8").replace(was, Sha256.of(junkBytes).render).getBytes("UTF-8")
+        new String(manifest0, "UTF-8").replace(was, Sha256.of(sb).render).getBytes("UTF-8")
       }
-      inv = assets.map((_, b) =>
-        AssetInventory(Sha256.of(b).render, b.length.toLong, "application/x-nifti")
+      inv = assets.zip(ReferenceBundle.assets).map((e, a) =>
+        AssetInventory(Sha256.of(e._2).render, e._2.length.toLong, a._3)
       )
       s <- app.run(auth(Request[IO](
         Method.POST,
@@ -159,6 +165,42 @@ class WorkerSuite extends CatsEffectSuite:
             .flatMap(decode[ProjectSummary])
       yield assertEquals(head.head, Some(r.revisionId))
   }
+
+  env.test("a surface whose triangles do not realize its domain's key fails the job (Stage 5)") {
+    e =>
+      for
+        original <- bytes("reference/assets/lh-pial.surf.gii")
+        r <- push(e.app, substitute = Some("lh-pial" -> permutedSurface(original)))
+        t0 <- IO.realTimeInstant
+        _ <- e.worker.runOnce(t0)
+        _ <- e.worker.runOnce(t0.plusSeconds(10))
+        _ <- e.worker.runOnce(t0.plusSeconds(100))
+        job <- e.stores.queue.status(r.revisionId)
+        d <- detail(e.app, r.revisionId)
+      yield
+        assertEquals(job.map(_.status), Some("failed"))
+        assert(job.flatMap(_.error).exists(_.contains("surface lh-pial")), job.flatMap(_.error))
+        assert(job.flatMap(_.error).exists(_.contains("triangles hash to")), job.flatMap(_.error))
+        assertEquals(d.ingestion.map(_.status), Some("failed"))
+        // the volumes before the surface were derived; the surface and its fields were not
+        assertEquals(d.renditions.find(_.assetId == "t1").map(_.status), Some("ready"))
+        assertEquals(d.renditions.find(_.assetId == "lh-pial").map(_.status), Some("failed"))
+        assertEquals(d.renditions.find(_.assetId == "speech-t-lh").map(_.status), Some("failed"))
+  }
+
+  /** `lh-pial` with the first two vertex ordinals of face 0 swapped: same vertex set and byte
+    * length, a different ordered topology, so its ADR 0005 key differs from the domain's.
+    */
+  private def permutedSurface(original: Array[Byte]): Array[Byte] =
+    val text = new String(original, "UTF-8")
+    val data = "<Data>([A-Za-z0-9+/=]+)</Data>".r.findAllMatchIn(text).toList
+    assertEquals(data.length, 2)
+    val tri = java.util.Base64.getDecoder.decode(data(1).group(1))
+    for k <- 0 until 4 do
+      val a = tri(k); tri(k) = tri(4 + k); tri(4 + k) = a
+    val swapped = java.util.Base64.getEncoder.encodeToString(tri)
+    (text.substring(0, data(1).start(1)) + swapped + text.substring(data(1).end(1)))
+      .getBytes("UTF-8")
 
   env.test("a tampered stored manifest is refused by the worker and recorded on the job") { e =>
     for

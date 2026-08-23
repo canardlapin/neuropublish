@@ -241,7 +241,7 @@ with a static, locally configured bearer token.
 | modules compile and test on JVM and JS | `sbt npCheck` green on JVM and Scala.js |
 | clean external resolution | ScalaFIM and its pinned tree cloned from GitHub by SHA on first load; no sibling checkout consulted |
 | volume fidelity | `rendition` suite on JVM and Scala.js: exact shape, affine, every oracle probe value and world coordinate, sums, and `ViewerModel` cursor readouts for underlay + two overlays against an R/neuroim2 oracle |
-| surface fidelity | **open** — GIFTI fixture (`tetra_lh_midthickness.surf.gii` from ScalaFIM) not yet run through a rendition; carried into Stage 1 alongside the surface pane |
+| surface fidelity | **closed in Stage 5** (carried from here through Stages 1–4): `SurfaceFidelitySuite` on JVM and Scala.js decodes the `surface-mesh@0` and `vertex-field-f32@0` renditions of the Julia producer's icosphere hemispheres (642 vertices / 1280 faces each) to the exact oracle coordinates, faces, field values, and sums; `GiftiToRenditionSuite` proves the GIFTI → rendition encode byte for byte and the ADR 0005 `surface-vertices/v1` key against the manifest |
 | lifecycle | Playwright in Chromium: volume pane mount/resize/unmount disposes exactly once and cancels outstanding frames; a sentinel surface pane stays mounted through 24 further surface mount/unmount cycles (more than Chrome's live-context budget) and keeps `contextState = Available` with zero `webglcontextlost` events on any canvas; every `EventTarget.addEventListener` is matched by a remove |
 | documentation | `DEVELOPMENT.md`, `docs/architecture.md`, this file |
 | rendition decision | **confirmed**: typed-binary derivative (JSON header + float32) decoded into ScalaFIM objects on JS exactly for float32 sources (the fixtures); float64 and wide-integer sources lose precision in the rendition, documented in the profile, and the canonical asset remains the record. In-browser NIfTI decoding not attempted (image4s-nifti JS is Node-only) |
@@ -768,6 +768,54 @@ pass; atlas lookup; surface rendition fidelity (Stage 5).
 - `rMVPA` adapter over its existing maps, tables, manifests, runtime context,
   session information, and Git identity;
 - R-to-Scala golden fixtures and privacy checks.
+
+Status (2026-08-23), R client core: done in this repository as
+`clients/r/neuropublish` (CRAN-clean `R CMD check --as-cran`). It holds the
+neutral half of the R track: plain-list builders for the core 0.1 vocabulary,
+`np_domain_volume()` with the ADR 0005 fingerprint recomputed in R (tests pin
+it to the reference and Julia fixtures), `np_write_bundle()` under the byte
+profile, `np_pack`/`np_validate`/`np_login`/`np_push` over the `npub` CLI
+(`scripts/npub` launcher; stale parent → `np_stale_parent` error with the
+head), the `as_neuropublish()` generic with its contract and a reference
+method for a list of `NeuroVol`s, `np_publish()` as the one high-level call,
+and a vignette that rebuilds the Julia producer's bundle from `neuroim2`
+volumes. Not here, by design: the `fmrigds`, `fmrireg`, `rMVPA`, and
+`neuromosaic` methods (they live in those packages and implement
+`as_neuropublish()`; the vignette shows what each returns), and the
+R-to-Scala golden fixtures and privacy checks, which land with those methods.
+
+### Surface rendition track (2026-08-23)
+
+Protocol: `surfaces[]` (`{id, asset, domain, hemisphere, kind, label}`), surface
+representations (`{kind: "surface", asset, surface, hemisphere, derivation?}`),
+the trusted `org.neuropublish.domain/surface-vertices@1.0` descriptor with the
+ADR 0005 `surface-vertices/v1` key (`records/surface-vertices-v1.schema.json`,
+pinned by digest), and the admission split recorded in SPEC §6: admission
+checks what the manifest determines (payload, key agreement, `size` =
+`vertexCount`, the topology surface's hemisphere); ingestion recomputes the
+fingerprint from the GIFTI triangles and fails the revision on disagreement.
+Renditions: `surface-mesh@0` (float32 positions + int32 faces, `topologyIdentity`
+= ScalaFIM's stable key) and `vertex-field-f32@0`, decoded on JVM and Scala.js
+by `SurfaceRendition.decode`/`VertexFieldRendition.decode`; `RenditionRef`
+carries `kind` and `surface`. Fixtures: the Julia producer writes two icosphere
+hemispheres (642/1280, ±30 mm) as GIFTI with t and z vertex fields and an
+oracle; the reference bundle carries the same assets. Verified: fidelity on both
+platforms, fingerprint against the manifest, ingestion refusing a
+foreign-topology surface and a wrong-length field (inline and worker, local and
+S3 stores), the admission fixtures `invalid/surface-*` and
+`invalid/representation-*`.
+
+| Criterion | Evidence |
+| --- | --- |
+| surface rendition fidelity | `SurfaceFidelitySuite` (JVM + JS): exact coordinates, faces, topology identity, field values, sums against the Julia oracle; decode → encode identity |
+| topology admission | `GiftiToRenditionSuite`: triangles hash to the manifest key; `IngestionSurfaceSuite`: a permuted-face surface and a 4-vertex field are refused with messages naming the asset and both fingerprints |
+| coordinate system | every mesh header states `RAS+`; a header with another system is refused by the decoder |
+| explicit left/right fields | `speech-t`/`speech-z` carry one surface representation per hemisphere; `renditionTargets` lists both vertex fields on their surfaces |
+| honest empty state | a field without a surface representation has no vertex-field target (`speech-effect`, `speech-se`); the workspace shows it as absent (workspace track) |
+| no projection without a receipt | the server never projects: a vertex field is the producer's GIFTI; the reference and Julia representations name `derivation: project-to-surface`, an activity admission resolves |
+
+Not done here: the surface/hybrid workspace itself (the workspace track builds
+it against the decoders above); picking and volume–surface linking.
 
 ### Exit criteria
 

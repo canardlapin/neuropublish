@@ -8,3 +8,4 @@ import io.circe.Json
 object SchemaCheck:
   def manifest(json: Json): List[Problem] = Nil
   def volumeGridV1(at: String, payload: Json): List[Problem] = Nil
+  def surfaceVerticesV1(at: String, payload: Json): List[Problem] = Nil

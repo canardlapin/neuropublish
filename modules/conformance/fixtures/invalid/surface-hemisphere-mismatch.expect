@@ -1,0 +1,4 @@
+/domains/1/descriptor/payload/topology: topology surface 'lh-pial' is the right hemisphere; the domain is left
+/surfaces/0/domain: surface is the right hemisphere but domain 'ico3-lh' is left
+/resultFields/2/representations/1/hemisphere: representation is the left hemisphere but surface 'lh-pial' is right
+/resultFields/3/representations/1/hemisphere: representation is the left hemisphere but surface 'lh-pial' is right

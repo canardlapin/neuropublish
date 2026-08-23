@@ -52,6 +52,11 @@
       "type": "array",
       "items": { "$ref": "#/$defs/underlay" }
     },
+    "surfaces": {
+      "description": "Surface geometries (GIFTI) that surface representations are displayed on; each realizes one surface-vertices domain.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/surface" }
+    },
     "provenance": { "$ref": "#/$defs/provenance" }
   },
   "unevaluatedProperties": true,
@@ -191,12 +196,18 @@
       "unevaluatedProperties": true
     },
     "representation": {
+      "description": "How an asset presents a field. A `surface` representation is a per-vertex scalar GIFTI on the surface it names (`surface` is a `surfaces[].id`; `hemisphere` must equal that surface's); its support is the surface's domain, and the values are the producer's — the server never projects. `derivation` may name the provenance activity that produced the vertex values.",
       "type": "object",
       "required": ["kind", "asset"],
       "properties": {
         "kind": { "type": "string", "enum": ["volume", "surface", "table", "preview"] },
-        "asset": { "$ref": "#/$defs/localId" }
+        "asset": { "$ref": "#/$defs/localId" },
+        "surface": { "$ref": "#/$defs/localId" },
+        "hemisphere": { "type": "string", "enum": ["left", "right"] },
+        "derivation": { "$ref": "#/$defs/localId" }
       },
+      "if": { "properties": { "kind": { "const": "surface" } } },
+      "then": { "required": ["surface", "hemisphere"] },
       "additionalProperties": false
     },
     "threshold": {
@@ -260,6 +271,20 @@
       "properties": {
         "asset": { "$ref": "#/$defs/localId" },
         "domain": { "$ref": "#/$defs/localId" },
+        "label": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "surface": {
+      "description": "One hemisphere's surface geometry: a GIFTI asset (POINTSET + TRIANGLE) on a surface-vertices domain whose hemisphere it must match. Its triangle array must realize the domain's topology (verified at ingestion).",
+      "type": "object",
+      "required": ["id", "asset", "domain", "hemisphere", "kind", "label"],
+      "properties": {
+        "id": { "$ref": "#/$defs/localId" },
+        "asset": { "$ref": "#/$defs/localId" },
+        "domain": { "$ref": "#/$defs/localId" },
+        "hemisphere": { "type": "string", "enum": ["left", "right"] },
+        "kind": { "type": "string", "enum": ["pial", "white", "midthickness", "inflated"] },
         "label": { "type": "string", "minLength": 1 }
       },
       "additionalProperties": false
