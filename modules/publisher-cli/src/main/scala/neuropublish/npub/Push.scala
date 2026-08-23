@@ -90,7 +90,19 @@ object Push:
         outcome <- parsed match
           case Left(o) => IO.pure(o)
           case Right((digest, manifest)) =>
-            transfer(dir, api, ws, project, parent, message, token, progress, manifestBytes, digest, manifest)
+            transfer(
+              dir,
+              api,
+              ws,
+              project,
+              parent,
+              message,
+              token,
+              progress,
+              manifestBytes,
+              digest,
+              manifest
+            )
       yield outcome
     flow.handleError(e => Outcome.Failed(e))
 

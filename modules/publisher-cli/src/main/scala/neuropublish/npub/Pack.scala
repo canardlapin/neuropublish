@@ -42,7 +42,8 @@ object Pack:
          else
            print(s"manifest  ${p.manifestDigest.render}") *>
              print(s"packed    ${p.assets.length} assets into $out") *>
-             p.assets.traverse_((id, d, size) => print(s"  $id  $size B  ${d.render}")))
+             p.assets.traverse_((id, d, size) => print(s"  $id  $size B  ${d.render}"))
+        )
           .as(ExitCode.Success)
     }
 

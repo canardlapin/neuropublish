@@ -7,8 +7,9 @@ import io.circe.Json
 import neuropublish.protocol.Sha256
 import neuropublish.protocol.json.{Manifest, Problem}
 
-/** `npub validate <bundle> [--json]`: admit the bundle's `manifest.json` bytes and print its digest.
-  * A failure to read the file is reported the same way as any other failure (never a stack trace).
+/** `npub validate <bundle> [--json]`: admit the bundle's `manifest.json` bytes and print its
+  * digest. A failure to read the file is reported the same way as any other failure (never a stack
+  * trace).
   */
 object Validate:
   enum Outcome:

@@ -41,15 +41,15 @@ np_write_bundle <- function(manifest, dir, overwrite = FALSE) {
   if (file.exists(manifest_path) && !overwrite) {
     stop(manifest_path, " already exists; pass overwrite = TRUE", call. = FALSE)
   }
-  bytes <- np_manifest_bytes(manifest) # refuses non-finite numbers before any file is touched
+  # both checks run before a single file is copied
+  np_check_finite(manifest, "")
   assets <- manifest$assets
   if (length(assets)) {
     np_check_asset_names(assets)
     if (!dir.exists(file.path(dir, "assets"))) dir.create(file.path(dir, "assets"))
     manifest$assets <- lapply(assets, function(a) np_stage_asset(a, dir))
-    bytes <- np_manifest_bytes(manifest)
   }
-  writeBin(bytes, manifest_path)
+  writeBin(np_manifest_bytes(manifest, check = FALSE), manifest_path)
   invisible(structure(dir, digest = np_digest(manifest_path)))
 }
 
@@ -103,11 +103,13 @@ np_stage_asset <- function(a, dir) {
 #' Serialize a manifest under the byte profile
 #'
 #' @param manifest A manifest list.
+#' @param check Refuse non-finite numbers first; `FALSE` when the caller has
+#'   already checked (the writer checks before it copies any asset).
 #' @return A raw vector: the UTF-8 JSON text with a trailing newline.
 #' @keywords internal
 #' @noRd
-np_manifest_bytes <- function(manifest) {
-  np_check_finite(manifest, "")
+np_manifest_bytes <- function(manifest, check = TRUE) {
+  if (check) np_check_finite(manifest, "")
   text <- jsonlite::toJSON(manifest, auto_unbox = TRUE, digits = I(17), null = "null", pretty = TRUE)
   text <- enc2utf8(as.character(text))
   if (!validUTF8(text)) stop("manifest text is not valid UTF-8", call. = FALSE)

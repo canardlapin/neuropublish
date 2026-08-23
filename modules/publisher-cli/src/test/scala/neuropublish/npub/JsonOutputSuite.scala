@@ -115,7 +115,8 @@ class JsonOutputSuite extends CatsEffectSuite:
 
   test("push --json: every outcome has a stable shape") {
     import Push.Outcome.*
-    val committed = Push.render(Committed(Some("r1"), "r2", "sha256:ab", "http://s/r2", "http://s/v"))
+    val committed =
+      Push.render(Committed(Some("r1"), "r2", "sha256:ab", "http://s/r2", "http://s/v"))
     assertEquals(field(committed, "ok"), Json.True)
     assertEquals(field(committed, "unchanged"), Json.False)
     assertEquals(field(committed, "revision"), Json.fromString("r2"))
