@@ -16,8 +16,8 @@ import scalafim.surface.view.three.{ThreeCanvasSize, ThreeJsRuntime, ThreeSurfac
   * context that draws nothing, so the lifecycle contract is identical with or without data.
   *
   * The host outlives its panes: a preset switch disposes the live handle and mounts a new one. The
-  * last reducer state is kept as `snapshot` on dispose and carried into the next `create`, so
-  * zoom, orbit, lighting, and the selection survive Volume → Hybrid → Surface switches.
+  * last reducer state is kept as `snapshot` on dispose and carried into the next `create`, so zoom,
+  * orbit, lighting, and the selection survive Volume → Hybrid → Surface switches.
   */
 final class SurfaceHost(
     three: js.Dynamic,

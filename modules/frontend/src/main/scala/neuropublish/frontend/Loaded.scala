@@ -84,8 +84,8 @@ final case class Loaded(
   def surfaceRepsOf(f: ResultField): List[SurfaceRep] =
     decodedSurfaceRepsOf(f).filter(r => isPlaced(r.surface)).distinctBy(_.hemisphere)
 
-  /** Decoded surface representations that are not drawn because their surface is not the placed
-    * one for its hemisphere (stated on the card, never silently dropped).
+  /** Decoded surface representations that are not drawn because their surface is not the placed one
+    * for its hemisphere (stated on the card, never silently dropped).
     */
   def undrawnSurfaceRepsOf(f: ResultField): List[SurfaceRep] =
     decodedSurfaceRepsOf(f).filterNot(r => isPlaced(r.surface))

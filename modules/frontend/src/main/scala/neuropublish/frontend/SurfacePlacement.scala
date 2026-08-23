@@ -7,15 +7,15 @@ package neuropublish.frontend
   * several decoded surfaces (`lh-pial` and `lh-white`), the slot takes the first one in manifest
   * order that some result field targets with a decoded surface representation; when none is
   * targeted, the first declared. Deterministic, and a field therefore lands on the surface it was
-  * published for whenever one surface per hemisphere carries data. Representations are then
-  * counted against the placed surfaces only: a field whose only left-hemisphere representation
-  * sits on an unplaced surface is *not* "drawn in: left surface" — its card says so.
+  * published for whenever one surface per hemisphere carries data. Representations are then counted
+  * against the placed surfaces only: a field whose only left-hemisphere representation sits on an
+  * unplaced surface is *not* "drawn in: left surface" — its card says so.
   */
 object SurfacePlacement:
   val Hemispheres: List[String] = List("left", "right")
 
-  /** `decoded` in manifest order; `targeted` = surface ids that some decoded surface
-    * representation names. One entry per hemisphere that has at least one decoded surface.
+  /** `decoded` in manifest order; `targeted` = surface ids that some decoded surface representation
+    * names. One entry per hemisphere that has at least one decoded surface.
     */
   def place(decoded: List[SurfaceDecl], targeted: Set[String]): Map[String, SurfaceDecl] =
     Hemispheres.flatMap { h =>
@@ -33,11 +33,11 @@ object SurfacePlacement:
     val i = id.indexOf('@')
     if i <= 0 || i == id.length - 1 then None else Some((id.substring(0, i), id.substring(i + 1)))
 
-/** Defensive guard for the linked cursor: a surface and the volume underlay share a world only
-  * when they declare the same space. The surface's space comes from its rendition header (`space`,
+/** Defensive guard for the linked cursor: a surface and the volume underlay share a world only when
+  * they declare the same space. The surface's space comes from its rendition header (`space`,
   * optional until every producer writes it); the volume's from the underlay's `volume-grid` domain
-  * payload. Absent on either side → link (nothing contradicts); both present and different →
-  * never link, say why.
+  * payload. Absent on either side → link (nothing contradicts); both present and different → never
+  * link, say why.
   */
 object SpaceGuard:
   enum Decision:

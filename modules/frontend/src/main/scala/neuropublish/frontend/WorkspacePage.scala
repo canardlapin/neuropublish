@@ -101,6 +101,54 @@ object WorkspacePage:
         )
       )
 
+    /** Where the field is drawn, and — the product rule — where it is not. A one-hemisphere field
+      * says so ("left surface only; no right-hemisphere representation"); a representation on a
+      * surface the pane could not place says that too. Absence is stated, never projected.
+      */
+    def drawnIn(f: ResultField, reps: LayerRepresentations): String =
+      val bothPlaced = L.surface("left").isDefined && L.surface("right").isDefined
+      val alone = bothPlaced && reps.surfaces.size == 1
+      val drawn =
+        (List(Option.when(reps.volume)("volume")) ++
+          List("left", "right").map(h =>
+            Option.when(reps.surfaces(h))(s"$h surface${if alone then " only" else ""}")
+          )).flatten
+      val only =
+        if !alone then None
+        else
+          reps.surfaces.headOption.map(h =>
+            s"${if h == "left" then "right" else "left"}-hemisphere representation"
+          )
+      val undrawn = L.undrawnSurfaceRepsOf(f).map(_.surface).distinct
+      val parts = List(
+        Option.when(drawn.nonEmpty)(drawn.mkString(" · ")),
+        Option.when(drawn.isEmpty)("nowhere: no ready representation"),
+        only.map(o => s"no $o"),
+        Option.when(undrawn.nonEmpty)(
+          s"not drawn on ${undrawn.mkString(", ")} (one surface per hemisphere is placed)"
+        )
+      ).flatten
+      parts.mkString("; ")
+
+    /** What produced the surface values. An absent `derivation` is a declaration, not a gap: the
+      * producer states a native surface measurement (SPEC §5, "Deliberately not changed").
+      */
+    def derivationLine(f: ResultField, reps: LayerRepresentations) =
+      Option.when(reps.surface) {
+        val stated = L.surfaceRepsOf(f).flatMap(r =>
+          L.derivationOf(f, r.surface).map((id, schema, line) =>
+            s"$id · $schema${line.fold("")(l => s" · $l")}"
+          )
+        ).distinct
+        div(
+          cls := "layer-derivation muted small",
+          dataAttr("testid") := "layer-derivation",
+          if stated.isEmpty then
+            "surface values: native surface measurement; no projection receipt declared"
+          else s"surface values from ${stated.mkString("; ")}"
+        )
+      }
+
     /** One card per layer; identical controls whatever the representations: the store mirrors each
       * change into every pane the field is drawn in.
       */
@@ -165,10 +213,9 @@ object WorkspacePage:
           cls := "layer-reps muted small",
           dataAttr("testid") := "layer-representations",
           "drawn in: ",
-          (List(Option.when(reps.volume)("volume")) ++
-            List("left", "right").map(h => Option.when(reps.surfaces(h))(s"$h surface"))).flatten
-            .mkString(" · ")
+          drawnIn(f, reps)
         ),
+        derivationLine(f, reps),
         label(
           cls := "field",
           span("opacity"),
@@ -216,13 +263,7 @@ object WorkspacePage:
                 f.id,
                 Threshold(layerOf(f.id).map(_.current.threshold.mode).getOrElse("two-sided"), v)
               ))
-          ),
-          child.maybe <-- cur.map(_.filter(c => !Threshold.Renderable(c.threshold.mode)).map(c =>
-            span(
-              cls := "pill warn",
-              s"${c.threshold.mode} threshold cannot be rendered yet; shown unthresholded"
-            )
-          ))
+          )
         ),
         div(
           cls := "group",
@@ -327,12 +368,15 @@ object WorkspacePage:
     val absentOnSurface: Signal[List[(String, String)]] = ws.map(_.layers.filter(l =>
       l.current.visible && !l.representations.surface
     ).flatMap(l => L.field(l.id).map(f => (f.id, L.labelOf(f)))).toList)
-    val linkText: Signal[Option[String]] = store.link.signal.map(_.map {
-      case SurfaceHost.Link.Linked(_, v, d) => f"linked to vertex $v, $d%.1f mm"
-      case SurfaceHost.Link.OutOfRange(_) =>
-        f"no vertex within ${SurfaceHost.DefaultLinkRadius.value}%.0f mm"
-      case SurfaceHost.Link.NoGeometry => "no surface geometry"
-    })
+    val linkText: Signal[Option[String]] = store.link.signal.map(l =>
+      // spaces that disagree are never bridged by a distance: the reason replaces the number
+      store.spaceMismatch.orElse(l.map {
+        case SurfaceHost.Link.Linked(_, v, d) => f"linked to vertex $v, $d%.1f mm"
+        case SurfaceHost.Link.OutOfRange(_) =>
+          f"no vertex within ${SurfaceHost.DefaultLinkRadius.value}%.0f mm"
+        case SurfaceHost.Link.NoGeometry => "no surface geometry"
+      })
+    )
 
     // ---- panes ----
     /** Below 900 px the Hybrid panes stack and the divider becomes horizontal (np.css). */
@@ -425,6 +469,9 @@ object WorkspacePage:
               store.pickSurface(e.clientX - r.left, e.clientY - r.top): Unit
             }
           ),
+          child.maybe <-- store.surfaceError.signal.map(_.map(m =>
+            div(cls := "pane-empty error", dataAttr("testid") := "surface-error", m)
+          )),
           child.maybe <-- absentOnSurface.map(names =>
             Option.when(names.nonEmpty)(
               div(
@@ -447,7 +494,14 @@ object WorkspacePage:
           div(
             cls := "pane-empty",
             dataAttr("testid") := "surface-empty",
-            if store.unplaceableSurfaces.isEmpty then div("This revision declares no surfaces.")
+            if store.unplaceableSurfaces.isEmpty && store.unplacedSurfaces.isEmpty then
+              div("This revision declares no surfaces.")
+            else if store.unplaceableSurfaces.isEmpty then
+              div(
+                "This revision's surfaces share a hemisphere slot: " +
+                  store.unplacedSurfaces.map(_.id).mkString(", ") +
+                  " are not placed. One surface per hemisphere is displayed."
+              )
             else
               div(
                 "This revision's surfaces cannot be placed: " +
@@ -476,6 +530,9 @@ object WorkspacePage:
     val splitter =
       def move(fraction: Double) =
         store.dispatch(Workspace.Action.Layout(WorkspaceLayout.Action.ResizeSplit(fraction)))
+      // set while a pointer drag is in flight; called on unmount so a divider that disappears
+      // mid-drag (a preset switch from a keyboard shortcut) leaves no window listener behind
+      var endDrag: () => Unit = () => ()
       div(
         cls := "splitter",
         role := "separator",
@@ -495,11 +552,18 @@ object WorkspacePage:
             case "End" => e.preventDefault(); move(0.9)
             case _ => ()
         },
+        // a drag in flight owns the pointer (the panes' own handlers never see it) and its
+        // listeners are released on pointer-up, on cancel, and if the divider unmounts mid-drag
         onPointerDown --> { e =>
           e.preventDefault()
-          val centre = e.currentTarget.asInstanceOf[dom.HTMLElement].parentElement
-          val box = centre.getBoundingClientRect()
+          val handle = e.currentTarget.asInstanceOf[dom.HTMLElement]
+          val box = handle.parentElement.getBoundingClientRect()
           val vertical = stacked.now()
+          val pointerId = e.pointerId
+          // pointer capture is not in scala-js-dom's HTMLElement facade
+          val capture = handle.asInstanceOf[js.Dynamic]
+          try capture.applyDynamic("setPointerCapture")(pointerId)
+          catch case _: Throwable => () // capture is a nicety; the drag works without it
           var onMove: js.Function1[dom.PointerEvent, Unit] = null
           var onUp: js.Function1[dom.PointerEvent, Unit] = null
           onMove = ev =>
@@ -511,11 +575,18 @@ object WorkspacePage:
             dom.window.removeEventListener("pointermove", onMove)
             dom.window.removeEventListener("pointerup", onUp)
             dom.window.removeEventListener("pointercancel", onUp)
+            endDrag = () => ()
+            try
+              if capture.applyDynamic("hasPointerCapture")(pointerId).asInstanceOf[Boolean] then
+                capture.applyDynamic("releasePointerCapture")(pointerId)
+            catch case _: Throwable => ()
           }
+          endDrag = () => onUp(null)
           dom.window.addEventListener("pointermove", onMove)
           dom.window.addEventListener("pointerup", onUp)
           dom.window.addEventListener("pointercancel", onUp)
-        }
+        },
+        onUnmountCallback(_ => endDrag())
       )
 
     /** The centre follows the preset; panes mount and unmount through their hosts' lifecycle. */
@@ -615,9 +686,12 @@ object WorkspacePage:
               )
             ).flatten,
             sr.toList.flatMap(_.layerValues).map { (lid, v) =>
-              val parts = lid.value.split('@')
-              val fieldId = parts.headOption.getOrElse(lid.value)
-              val hemi = parts.lift(1).getOrElse("")
+              // layer ids are `field@surface`; the label names the hemisphere that surface fills
+              val split = SurfacePlacement.splitLayerId(lid.value)
+              val fieldId = split.map(_._1).getOrElse(lid.value)
+              val hemi = split.map(_._2).flatMap(s =>
+                L.placedSurfaces.collectFirst { case (h, d) if d.id == s => h }
+              ).getOrElse("")
               span(
                 cls := "readout-layer",
                 dataAttr("readout") := fieldId,

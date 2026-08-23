@@ -7,12 +7,14 @@ class SurfacePlacementSuite extends FunSuite:
     SurfaceDecl(id, id, s"dom-$id", hemi, kind, id)
 
   test("one surface per hemisphere: the first declared when nothing targets a surface") {
-    val placed = SurfacePlacement.place(List(decl("lh-pial", "left"), decl("rh-pial", "right")), Set())
+    val placed =
+      SurfacePlacement.place(List(decl("lh-pial", "left"), decl("rh-pial", "right")), Set())
     assertEquals(placed.view.mapValues(_.id).toMap, Map("left" -> "lh-pial", "right" -> "rh-pial"))
   }
 
   test("two decoded surfaces on one hemisphere: the slot takes the one a field targets") {
-    val decoded = List(decl("lh-pial", "left"), decl("lh-white", "left", "white"), decl("rh-pial", "right"))
+    val decoded =
+      List(decl("lh-pial", "left"), decl("lh-white", "left", "white"), decl("rh-pial", "right"))
     val placed = SurfacePlacement.place(decoded, Set("lh-white"))
     assertEquals(placed("left").id, "lh-white")
     assertEquals(placed("right").id, "rh-pial")
@@ -21,14 +23,19 @@ class SurfacePlacementSuite extends FunSuite:
   test("both surfaces targeted: manifest order decides, deterministically") {
     val decoded = List(decl("lh-white", "left", "white"), decl("lh-pial", "left"))
     assertEquals(SurfacePlacement.place(decoded, Set("lh-pial", "lh-white"))("left").id, "lh-white")
-    assertEquals(SurfacePlacement.place(decoded.reverse, Set("lh-pial", "lh-white"))("left").id, "lh-pial")
+    assertEquals(
+      SurfacePlacement.place(decoded.reverse, Set("lh-pial", "lh-white"))("left").id,
+      "lh-pial"
+    )
   }
 
   test("hemispheres other than left/right are never placed") {
     assertEquals(SurfacePlacement.place(List(decl("both", "bilateral")), Set("both")), Map.empty)
   }
 
-  test("layer ids are keyed by the placed surface, so two surfaces on one hemisphere cannot collide") {
+  test(
+    "layer ids are keyed by the placed surface, so two surfaces on one hemisphere cannot collide"
+  ) {
     val a = SurfacePlacement.layerId("speech-t", "lh-pial")
     val b = SurfacePlacement.layerId("speech-t", "lh-white")
     assertNotEquals(a, b)
@@ -40,7 +47,10 @@ class SpaceGuardSuite extends FunSuite:
   import SpaceGuard.Decision
 
   test("same space links") {
-    assertEquals(SpaceGuard.decide(Some("MNI152NLin2009cAsym"), Some("MNI152NLin2009cAsym")), Decision.Link)
+    assertEquals(
+      SpaceGuard.decide(Some("MNI152NLin2009cAsym"), Some("MNI152NLin2009cAsym")),
+      Decision.Link
+    )
   }
 
   test("different spaces never link and the message names both") {
