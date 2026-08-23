@@ -113,7 +113,7 @@ object VolumeRendition:
     val affine = Vector.tabulate(4, 4)((r, c) => m.data(r * 4 + c))
     val n = dims.product
     val bytes = new Array[Byte](n * 4)
-    val values = new Array[Double](n) // summary input; the rendition payload is packed below
+    val values = new Array[Double](n)
     var i = 0
     while i < n do
       val v = volume.linear(i)
@@ -164,8 +164,7 @@ object VolumeRendition:
     else if payload.length != n * 4 then
       Left(s"payload has ${payload.length} bytes, expected ${n * 4}")
     else
-      val values =
-        NArrayUtil.ofSize[Double](n) // ScalaFIM cross-platform buffer (typed array on JS)
+      val values = new Array[Double](n)
       var i = 0
       while i < n do
         val o = i * 4
@@ -176,5 +175,5 @@ object VolumeRendition:
       val trans = DMat.fromRows(header.affine)
       for
         space <- NeuroSpace.make(header.shape, trans = Some(trans)).left.map(_.toString)
-        vol <- NeuroVol.fromLinearChecked[Double](values, space).left.map(_.toString)
+        vol <- NeuroVol.fromLinearChecked(values, space).left.map(_.toString)
       yield vol
