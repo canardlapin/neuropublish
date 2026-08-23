@@ -113,6 +113,14 @@ lazy val viewerState = crossProject(JSPlatform, JVMPlatform)
   .dependsOn(protocolCore)
   .jvmConfigure(_.dependsOn(scalafimImageViewJVM, scalafimSurfaceViewJVM))
   .jsConfigure(_.dependsOn(scalafimImageViewJS, scalafimSurfaceViewJS))
+  .settings(
+    // saved-view wire record `org.neuropublish.view/workspace-state@1` (circe, no tapir here)
+    libraryDependencies ++= Seq(
+      "io.circe" %%% "circe-core" % Versions.circe,
+      "io.circe" %%% "circe-generic" % Versions.circe,
+      "io.circe" %%% "circe-parser" % Versions.circe % Test
+    )
+  )
 
 // Browser-ready typed-binary volume rendition: JVM encodes from canonical
 // assets (ingestion), JVM and JS decode into ScalaFIM volumes (Spike A).

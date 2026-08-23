@@ -1,6 +1,7 @@
 package neuropublish.frontend
 
 import com.raquo.laminar.api.L.*
+import neuropublish.api.SavedViewDetail
 import neuropublish.protocol.Measures
 import neuropublish.protocol.json.*
 import neuropublish.viewer.*
@@ -12,10 +13,19 @@ import scalafim.image.view.LayerSampleValue
   * definition).
   */
 object WorkspacePage:
-  def render(store: WorkspaceStore, onStateChange: Workspace => Unit): HtmlElement =
+  def render(store: WorkspaceStore, onStateChange: Workspace => Unit, mode: PageMode): HtmlElement =
     val L = store.loaded
     val m = L.manifest
     val ws = store.state.signal
+    val dialog = Var[Option[HtmlElement]](None)
+    val savedView = Var[Option[SavedViewDetail]](mode match
+      case PageMode.Explore(_, s) => s
+      case _ => None)
+    // fetched once per page, on first open of the Provenance tab
+    lazy val provenance: HtmlElement = mode match
+      case PageMode.Explore(session, _) =>
+        ProvenancePanel.render(session.api.provenance(L.detail.id))
+      case PageMode.Presentation(_, _) => ProvenancePanel.unavailable(L)
 
     def fmt(d: Double) = if d.abs >= 100 then f"$d%.0f" else f"$d%.2f"
     def layerOf(id: String) = store.state.now().layers.find(_.id == id)
@@ -268,7 +278,7 @@ object WorkspacePage:
       ),
       child <-- ws.map(_.inspector).distinct.map {
         case "analysis" => analysisPanel(L)
-        case "provenance" => provenancePanel(L)
+        case "provenance" => provenance
         case _ => div(
             cls := "layers",
             div(
@@ -341,23 +351,30 @@ object WorkspacePage:
       dataAttr("preset") <-- ws.map(_.layout.preset.toString.toLowerCase),
       headerTag(
         cls := "topbar",
-        a(href := s"/w/${L.workspace}/p/${L.project}", cls := "crumb", L.project),
+        cls.toggle("readonly") := mode.isInstanceOf[PageMode.Presentation],
+        mode match
+          case PageMode.Explore(_, _) =>
+            a(href := s"/w/${L.workspace}/p/${L.project}", cls := "crumb", L.project)
+          case PageMode.Presentation(_, _) => span(cls := "crumb", L.project)
+        ,
         span(cls := "crumb muted", "/"),
         span(cls := "crumb mono", L.detail.id),
         span(cls := "crumb muted", "/"),
         span(cls := "crumb", m.title),
-        div(cls := "spacer"),
-        button(
-          cls := "ghost",
-          "Reset view",
-          onClick --> (_ => store.dispatch(Workspace.Action.ResetAll))
-        )
+        mode match
+          case PageMode.Explore(session, _) => Chrome.explore(store, session, savedView, dialog)
+          case PageMode.Presentation(shared, saved) => Chrome.presentation(store, shared, saved)
       ),
+      mode match
+        case PageMode.Presentation(shared, saved) => Chrome.synopsis(L, shared, saved)
+        case _ => emptyNode
+      ,
       div(cls := "workspace", navigator, canvasPane, inspector),
       status,
       m.warnings.headOption.map(w =>
         div(cls := "callout warn", w.hcursor.downField("message").as[String].getOrElse(""))
       ),
+      child.maybe <-- dialog.signal,
       ws --> onStateChange // subscription owned by the page; released on unmount
     )
     page
@@ -416,49 +433,5 @@ object WorkspacePage:
           span(cls := "k", "committed"),
           span(L.detail.committedAt.take(19).replace("T", " "))
         )
-      )
-    )
-
-  private def provenancePanel(L: Loaded) =
-    val prov = L.manifest.raw.hcursor.downField("provenance")
-    val activities = prov.downField("activities").values.map(_.toList).getOrElse(Nil)
-    val entities = prov.downField("entities").values.map(_.toList).getOrElse(Nil)
-    div(
-      cls := "facts-panel",
-      div(cls := "k", "Pipeline"),
-      entities.map(e =>
-        div(
-          cls := "prov-node entity",
-          e.hcursor.downField(
-            "label"
-          ).as[String].getOrElse(e.hcursor.downField("id").as[String].getOrElse("")),
-          if e.hcursor.downField("hosted").as[Boolean].contains(false) then
-            span(cls := "pill", "not hosted")
-          else emptyNode
-        )
-      ),
-      activities.map { a =>
-        val sid = a.hcursor.downField("schema").downField("id").as[String].getOrElse("")
-        val known = sid.startsWith("org.bbuchsbaum.") || sid.startsWith("org.neuropublish.")
-        div(
-          cls := "prov-node activity",
-          cls.toggle("unknown") := !known,
-          div(
-            span(a.hcursor.downField("id").as[String].getOrElse("")),
-            if known then emptyNode else span(cls := "pill", "retained, not interpreted")
-          ),
-          div(
-            cls := "mono muted",
-            sid + " @ " +
-              a.hcursor.downField("schema").downField("version").as[String].getOrElse("")
-          ),
-          div(
-            cls := "mono muted small",
-            a.hcursor.downField("payload").focus.map(_.noSpaces).getOrElse("")
-          )
-        )
-      },
-      L.manifest.warnings.map(w =>
-        div(cls := "callout warn", w.hcursor.downField("message").as[String].getOrElse(""))
       )
     )

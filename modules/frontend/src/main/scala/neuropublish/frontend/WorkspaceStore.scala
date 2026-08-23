@@ -104,6 +104,18 @@ final class WorkspaceStore(val loaded: Loaded, initial: Workspace):
     }
   }
 
+  /** Replace the whole state (a saved view re-applied, "Return to saved view"): rebuild the model
+    * so order and colormaps follow, then mirror every display value and the cursor.
+    */
+  def replace(w: Workspace): Unit =
+    state.set(w)
+    live.foreach { l =>
+      lastModelKey = modelKey(w)
+      host.rebuild(l, model(w))
+      applyAll(w)
+      w.cursor.foreach((x, y, z) => host.dispatch(l, ViewerAction.SetCursor(WorldPoint(x, y, z))))
+    }
+
   /** Like dispatch, but reports whether the reducer accepted the action (e.g. window min ≥ max is
     * rejected).
     */

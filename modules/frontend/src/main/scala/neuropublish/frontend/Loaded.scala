@@ -75,10 +75,23 @@ object Loaded:
         _.head.getOrElse(throw RuntimeException("This project has no revisions yet."))
       ))(Future.successful)
       detail <- api.revision(id)
+      loaded <- fromDetail(ws, project, detail, api.rendition)
+    yield loaded
+
+  /** Decode a revision's renditions through `fetch` — the member route for explore, the
+    * share-secret route for a link viewer (same bytes, different authorization).
+    */
+  def fromDetail(
+      ws: String,
+      project: String,
+      detail: RevisionDetail,
+      fetch: RenditionRef => Future[(String, Array[Byte])]
+  ): Future[Loaded] =
+    for
       manifest <- Future.fromTry(detail.manifest.as[Manifest].toTry)
       ready = detail.renditions.filter(_.status == "ready")
       vols <- Future.traverse(ready) { r =>
-        api.rendition(r).map { (hdr, bytes) =>
+        fetch(r).map { (hdr, bytes) =>
           val h = VolumeRendition.decodeHeader(hdr).fold(
             m => throw RuntimeException(s"${r.assetId}: $m"),
             identity
