@@ -1,17 +1,23 @@
 package neuropublish.frontend
 
 import com.raquo.laminar.api.L.*
+import neuropublish.viewer.SafeNext
 import org.scalajs.dom
 import scala.concurrent.ExecutionContext.Implicits.global
-import scala.util.{Failure, Success}
+import scala.util.{Failure, Success, Try}
 
 /** `/login` and `/device`: the browser side of the identity boundary (alpha local provider). */
 object AuthPages:
   val DefaultNext = "/w/rotman/p/sherlock"
 
-  /** Only same-origin paths are honoured as `next` (no open redirect). */
+  /** Only same-origin paths are honoured as `next` (no open redirect): the pure [[SafeNext]] rule,
+    * then the browser's own parse must land on this origin.
+    */
   def safeNext(raw: Option[String]): String =
-    raw.filter(n => n.startsWith("/") && !n.startsWith("//")).getOrElse(DefaultNext)
+    val origin = dom.window.location.origin
+    raw.flatMap(SafeNext.accept(_, origin)).filter(n =>
+      Try(new dom.URL(n, origin).origin == origin).getOrElse(false)
+    ).getOrElse(DefaultNext)
 
   def login(session: Session, next: String): HtmlElement =
     val email = Var("")
