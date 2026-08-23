@@ -243,9 +243,9 @@ object ManifestChecks:
 
   /** A surface and a volume in one revision are linked by world millimetres — a surface pick moves
     * the volume cursor and back — which means something only when both are in the same space. A
-    * `surface-vertices` domain whose `space` is not every `volume-grid` domain's `space` is
-    * refused at its `space` member (SPEC §6, "Spaces"); a manifest with no volume domain has
-    * nothing to disagree with.
+    * `surface-vertices` domain whose `space` is not every `volume-grid` domain's `space` is refused
+    * at its `space` member (SPEC §6, "Spaces"); a manifest with no volume domain has nothing to
+    * disagree with.
     */
   def spaces(m: Manifest): List[Problem] =
     val volume = volumeSpaces(m)

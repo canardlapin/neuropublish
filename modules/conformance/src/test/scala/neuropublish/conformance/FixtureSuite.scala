@@ -154,7 +154,10 @@ class FixtureSuite extends FunSuite:
       assertEquals(p.topology, s"${id.drop(5)}-pial")
       assert(m.assets.exists(_.id == p.topology), p.topology)
       assert(!m.surfaces.exists(_.id == p.topology), p.topology)
-      assertEquals(m.surfaces.find(_.asset == p.topology).map(_.id), Some(s"${id.drop(5)}-pial-surface"))
+      assertEquals(
+        m.surfaces.find(_.asset == p.topology).map(_.id),
+        Some(s"${id.drop(5)}-pial-surface")
+      )
       val key = m.domains.find(_.id == id).flatMap(_.key).get.hcursor
       assertEquals(key.get[Long]("size"), Right(642L))
       val oracle =
@@ -443,7 +446,10 @@ class FixtureSuite extends FunSuite:
     }
     // the producer's own spelling: a surfaces[] id that happens to equal its asset. The reference
     // bundle spells them apart, so a check that confuses the two fails on one of the two bundles.
-    assertEquals(manifest.surfaces.map(s => (s.id, s.asset)), List(("lh-pial", "lh-pial"), ("rh-pial", "rh-pial")))
+    assertEquals(
+      manifest.surfaces.map(s => (s.id, s.asset)),
+      List(("lh-pial", "lh-pial"), ("rh-pial", "rh-pial"))
+    )
     assertEquals(manifest.renditionTargets.length, 10)
     val raw = manifest.raw.hcursor
     assertEquals(raw.downField("x-julia-producer").downField("version").as[String], Right("0.1"))

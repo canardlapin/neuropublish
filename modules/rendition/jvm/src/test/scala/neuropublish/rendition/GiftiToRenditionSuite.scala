@@ -48,7 +48,10 @@ class GiftiToRenditionSuite extends FunSuite:
 
   private def payloadOf(domainId: String): SurfaceVertices.Payload =
     val d = domains.find(_.hcursor.get[String]("id").toOption.contains(domainId)).get
-    SurfaceVertices.readPayload("", d.hcursor.downField("descriptor").downField("payload").focus.get)
+    SurfaceVertices.readPayload(
+      "",
+      d.hcursor.downField("descriptor").downField("payload").focus.get
+    )
       .fold(ps => fail(ps.mkString("; ")), identity)
 
   private def keyOf(domainId: String): String =

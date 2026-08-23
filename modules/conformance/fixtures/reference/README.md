@@ -19,9 +19,14 @@ identity preimage defined by ADR 0005. The descriptor schema digest is the
 SHA-256 of `schemas/volume-grid-v1.schema.json`; it is not a placeholder.
 
 Stage 5 added the surface vocabulary: two `surface-vertices` domains
-(`ico3-lh`, `ico3-rh`), two surfaces (`lh-pial`, `rh-pial`), and left/right t
-and z vertex fields as surface representations of `speech-t` and `speech-z`,
-with `project-to-surface` as their derivation receipt. The GIFTI assets are the
+(`ico3-lh`, `ico3-rh`), two surfaces (`lh-pial-surface`, `rh-pial-surface`, on
+assets `lh-pial` and `rh-pial` — the ids differ from the assets on purpose, so
+a check that confuses `topology`'s asset with a `surfaces[].id` fails here),
+and left/right t and z vertex fields as surface representations of `speech-t`
+and `speech-z`, with `project-to-surface` as their derivation receipt. The
+surface domains declare the volume domain's space: the icospheres sit in the
+same RAS+ world as the volumes, and a revision whose surface and volume spaces
+disagree is refused (SPEC §6). The GIFTI assets are the
 Julia producer's (`../julia`, same bytes), so `assets/oracle.json` carries the
 same `surfaces` and `fields` sections as the Julia oracle; `renditions/` holds
 the `surface-mesh@0` (`.bin`) and `vertex-field-f32@0` (`.f32`) renditions

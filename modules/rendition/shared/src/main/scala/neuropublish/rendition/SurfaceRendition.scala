@@ -132,10 +132,10 @@ object SurfaceRendition:
   /** SHA-256 of the face bytes: the stable topology identity (SPEC §5, "Renditions"). */
   def faceDigest(faceIndices: Array[Int]): String = Sha256.of(faceBytes(faceIndices)).render
 
-  /** Encode a geometry whose hemisphere is left or right. The geometry's positions must already
-    * be world coordinates: its `surfaceToWorld` must be the identity (ingestion applies the
-    * source transform and records it as `sourceTransform`), so a reader never applies a transform
-    * twice. Positions are narrowed to float32.
+  /** Encode a geometry whose hemisphere is left or right. The geometry's positions must already be
+    * world coordinates: its `surfaceToWorld` must be the identity (ingestion applies the source
+    * transform and records it as `sourceTransform`), so a reader never applies a transform twice.
+    * Positions are narrowed to float32.
     */
   def encode(
       geometry: SurfaceGeometry,
@@ -207,7 +207,9 @@ object SurfaceRendition:
           Left("vertexCount and faceCount must be positive")
         else if h.surfaceToWorld.length != 4 || h.surfaceToWorld.exists(_.length != 4) then
           Left("surfaceToWorld must be 4x4")
-        else if h.sourceTransform.exists(t => t.matrix.length != 4 || t.matrix.exists(_.length != 4))
+        else if h.sourceTransform.exists(t =>
+            t.matrix.length != 4 || t.matrix.exists(_.length != 4)
+          )
         then Left("sourceTransform.matrix must be 4x4")
         else if payloadLength(h.vertexCount, h.faceCount) > Int.MaxValue.toLong then
           Left("surface too large for a single rendition payload")

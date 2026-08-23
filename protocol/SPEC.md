@@ -282,6 +282,16 @@ change, not a silent one. `summary` is the server-derived `ScalarSummary`
 in its rendition and the canonical asset remains the record; a float64 GIFTI
 source is refused outright in this revision ("Surfaces" above).
 
+`space` is required on a `surface-mesh@0` header and the decoder refuses one
+without it. Renditions written before `space` existed therefore no longer
+decode and must be re-derived from their canonical assets — a rendition is
+server-derived, outside the snapshot digest, and always reproducible, while an
+unlabelled space is the dishonesty this member exists to remove: a reader that
+defaulted it to "compatible" would link a surface to a volume of another space
+exactly as before. The profile stays at `@0`, the band in which a header may
+gain required members and stored renditions are re-derived rather than
+migrated.
+
 ## 6. Domains (ADR 0005 §1)
 
 Every `domains[]` entry has a manifest-local `id`, an open `descriptor`

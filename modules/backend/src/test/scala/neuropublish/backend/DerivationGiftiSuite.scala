@@ -134,9 +134,12 @@ class DerivationGiftiSuite extends FunSuite:
       placed(surface(structure = Some("CortexRight")), "right").map(_._3),
       Right(Some("CortexRight"))
     )
-    assertEquals(placed(surface(structure = Some("CORTEX_LEFT"))).map(_._3), Right(Some(
-      "CORTEX_LEFT"
-    )))
+    assertEquals(
+      placed(surface(structure = Some("CORTEX_LEFT"))).map(_._3),
+      Right(Some(
+        "CORTEX_LEFT"
+      ))
+    )
     // a structure that is neither hemisphere is not silently taken for the declared one
     assert(placed(surface(structure = Some("CortexLeftAndRight"))).isLeft)
     // and a GIFTI that says nothing is taken at the manifest's word

@@ -134,14 +134,14 @@ object Derivation:
 
   /** One hemisphere's geometry in RAS+ world millimetres, from the GIFTI document as written.
     *
-    * The GIFTI's `CoordinateSystemTransformMatrix` is applied here — the only place it is applied
-    * — so the rendition payload is world positions and its `surfaceToWorld` is the identity; the
+    * The GIFTI's `CoordinateSystemTransformMatrix` is applied here — the only place it is applied —
+    * so the rendition payload is world positions and its `surfaceToWorld` is the identity; the
     * matrix and its spaces are kept as `sourceTransform` for provenance. A transform into a space
-    * this build cannot place (`NIFTI_XFORM_UNKNOWN` and friends) is refused rather than guessed
-    * at, unless it is the identity and so says nothing. Where the GIFTI states its
-    * `AnatomicalStructurePrimary` it must agree with the declared hemisphere: left and right
-    * meshes of one template share a vertex count and a topology, so nothing downstream would
-    * catch the swap.
+    * this build cannot place (`NIFTI_XFORM_UNKNOWN` and friends) is refused rather than guessed at,
+    * unless it is the identity and so says nothing. Where the GIFTI states its
+    * `AnatomicalStructurePrimary` it must agree with the declared hemisphere: left and right meshes
+    * of one template share a vertex count and a topology, so nothing downstream would catch the
+    * swap.
     */
   def worldGeometry(
       assetId: String,
@@ -182,7 +182,9 @@ object Derivation:
         doc,
         Hemisphere.fromString(hemisphere),
         SurfaceKind.fromString(kind)
-      ).left.map(e => s"asset $assetId (surface $surfaceId) is not a readable GIFTI surface: ${e.message}")
+      ).left.map(e =>
+        s"asset $assetId (surface $surfaceId) is not a readable GIFTI surface: ${e.message}"
+      )
       placed <- {
         val coordinates = chosen match
           case Some((t, true)) => applyTransform(read.mesh.coordinates, t.matrixData)
@@ -259,13 +261,13 @@ object Derivation:
       )
     yield p
 
-  /** One scalar per vertex of `surface` from a GIFTI document: the first data array that is not
-    * the geometry (`NIFTI_INTENT_NONE`, `SHAPE`, or similar), narrowed to float32 by the caller.
+  /** One scalar per vertex of `surface` from a GIFTI document: the first data array that is not the
+    * geometry (`NIFTI_INTENT_NONE`, `SHAPE`, or similar), narrowed to float32 by the caller.
     *
-    * A sparse file — one carrying `NIFTI_INTENT_NODE_INDEX`, the layout Workbench and nibabel
-    * write for a field defined on part of a surface — is refused by name rather than having its
-    * vertex *indices* stored as values, and a rank-2 array (a `TIME_SERIES` of V×T, say) is
-    * refused for what it is rather than through a vertex-count message that names the wrong fault.
+    * A sparse file — one carrying `NIFTI_INTENT_NODE_INDEX`, the layout Workbench and nibabel write
+    * for a field defined on part of a surface — is refused by name rather than having its vertex
+    * *indices* stored as values, and a rank-2 array (a `TIME_SERIES` of V×T, say) is refused for
+    * what it is rather than through a vertex-count message that names the wrong fault.
     */
   def fieldValues(
       assetId: String,

@@ -867,6 +867,15 @@ fails without it.
   (`invalid/surface-asset-shared`) and is not both a geometry and a volume or
   vertex-field asset (`invalid/surface-asset-two-roles`); the ingestion cache
   is keyed by asset, so a geometry is read, placed, and proven once.
+- **A stored-rendition format break.** `space` is required on a
+  `surface-mesh@0` header and the decoder refuses one without it (strict on
+  purpose: absent-means-compatible would reproduce B1 on every rendition
+  written before this change). Renditions derived before this change must be
+  re-derived after deploy — and no command does that today: `reindex` rebuilds
+  the read model from the stored manifests and deliberately keeps
+  `derived_representations`, and `gc` deletes rendition sets only for
+  revisions that are no longer live. Re-deriving an existing revision needs a
+  new subcommand (or a job re-enqueue); it is not in this track.
 - **Smaller.** Float32-only GIFTI sources are stated in SPEC §5 and refused
   with the type to write instead (float64 support is filed upstream against
   ScalaFIM); the domain fingerprint is compared as parsed digests, not as
