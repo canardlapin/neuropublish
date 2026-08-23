@@ -1,0 +1,310 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://neuropublish.org/schema/0.1/manifest.schema.json",
+  "title": "Neuropublish manifest (core 0.1)",
+  "description": "Structural schema of a portable result snapshot (`manifest.json`). Cross-field invariants, the byte profile, digest procedure, ordering rules, and compatibility rules are stated in protocol/SPEC.md. Unknown fields at any open level must be preserved byte-for-byte (ADR 0001).",
+  "type": "object",
+  "required": ["core", "title", "sensitivity", "assets"],
+  "properties": {
+    "core": {
+      "description": "Core protocol version `major.minor`. Readers accept any 0.x with x >= 1 (see SPEC.md, Compatibility).",
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+$"
+    },
+    "title": { "type": "string", "minLength": 1 },
+    "synopsis": { "type": "string" },
+    "notes": { "type": "string" },
+    "migratedFrom": {
+      "description": "Set by a migration: the `core` the stored original bytes declared.",
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+$"
+    },
+    "sensitivity": {
+      "description": "Publication policy class; only `group-level` snapshots may be link-shared.",
+      "type": "string",
+      "enum": ["group-level", "subject-level"]
+    },
+    "warnings": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/warning" }
+    },
+    "axes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/axis" }
+    },
+    "domains": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/domain" }
+    },
+    "assets": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/asset" }
+    },
+    "analyses": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/analysis" }
+    },
+    "resultFields": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/resultField" }
+    },
+    "underlays": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/underlay" }
+    },
+    "provenance": { "$ref": "#/$defs/provenance" }
+  },
+  "unevaluatedProperties": true,
+  "$defs": {
+    "localId": {
+      "description": "Manifest-local identifier (assets, domains, analyses, estimands, fields, warnings, provenance nodes).",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "semanticId": {
+      "description": "Namespaced semantic id: reverse-DNS namespace, then `/`-separated kebab segments.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9-]*)+(/[a-z0-9][a-z0-9-]*)+$"
+    },
+    "sha256": {
+      "description": "Content identity: `sha256:` followed by 64 lowercase hex digits.",
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "schemaRef": {
+      "description": "Reference to a versioned record schema. `digest` is the SHA-256 of the schema document; required for trusted interpretation.",
+      "type": "object",
+      "required": ["id", "version"],
+      "properties": {
+        "id": { "$ref": "#/$defs/semanticId" },
+        "version": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)*$" },
+        "digest": { "$ref": "#/$defs/sha256" }
+      },
+      "additionalProperties": false
+    },
+    "openRecord": {
+      "description": "An open semantic record: schema reference plus a structured payload. Payload fields are never constrained here; unknown payloads are retained, not interpreted.",
+      "type": "object",
+      "required": ["schema"],
+      "properties": {
+        "schema": { "$ref": "#/$defs/schemaRef" },
+        "payload": { "type": "object", "unevaluatedProperties": true }
+      },
+      "unevaluatedProperties": true
+    },
+    "warning": {
+      "type": "object",
+      "required": ["id", "message"],
+      "properties": {
+        "id": { "$ref": "#/$defs/localId" },
+        "message": { "type": "string", "minLength": 1 },
+        "concerns": {
+          "description": "Scope of the warning: a manifest-local id per kind. Each must resolve (SPEC.md, Warning scope).",
+          "type": "object",
+          "properties": {
+            "analysis": { "$ref": "#/$defs/localId" },
+            "field": { "$ref": "#/$defs/localId" },
+            "provenance": { "$ref": "#/$defs/localId" }
+          },
+          "minProperties": 1,
+          "additionalProperties": false
+        }
+      },
+      "unevaluatedProperties": true
+    },
+    "axis": {
+      "type": "object",
+      "required": ["id", "values"],
+      "properties": {
+        "id": { "$ref": "#/$defs/localId" },
+        "label": { "type": "string" },
+        "values": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" },
+          "uniqueItems": true
+        }
+      },
+      "unevaluatedProperties": true
+    },
+    "domain": {
+      "description": "ADR 0005 domain hook: manifest-local id, open descriptor record, optional exact key.",
+      "type": "object",
+      "required": ["id", "descriptor"],
+      "properties": {
+        "id": { "$ref": "#/$defs/localId" },
+        "descriptor": { "$ref": "#/$defs/openRecord" },
+        "key": {
+          "type": "object",
+          "properties": {
+            "descriptor": { "$ref": "#/$defs/schemaRef" },
+            "size": { "type": "integer", "minimum": 0 },
+            "structuralFingerprint": { "$ref": "#/$defs/sha256" }
+          },
+          "unevaluatedProperties": true
+        }
+      },
+      "unevaluatedProperties": true
+    },
+    "asset": {
+      "description": "Canonical asset by content identity. A committed manifest never carries local paths; `npub pack` resolves them.",
+      "type": "object",
+      "required": ["id", "digest", "size", "mediaType"],
+      "properties": {
+        "id": { "$ref": "#/$defs/localId" },
+        "digest": { "$ref": "#/$defs/sha256" },
+        "size": { "type": "integer", "minimum": 0 },
+        "mediaType": { "type": "string", "pattern": "^[a-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+$" },
+        "catalog": {
+          "description": "Symbolic origin, informational once `digest` is present.",
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "not": { "required": ["path"] },
+      "unevaluatedProperties": true
+    },
+    "estimand": {
+      "type": "object",
+      "required": ["id", "label"],
+      "properties": {
+        "id": { "$ref": "#/$defs/localId" },
+        "label": { "type": "string", "minLength": 1 },
+        "order": { "type": "integer" }
+      },
+      "additionalProperties": false
+    },
+    "analysis": {
+      "type": "object",
+      "required": ["id", "label", "estimands"],
+      "properties": {
+        "id": { "$ref": "#/$defs/localId" },
+        "label": { "type": "string", "minLength": 1 },
+        "method": { "$ref": "#/$defs/openRecord" },
+        "sampleSize": { "type": "integer", "minimum": 0 },
+        "estimands": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/estimand" }
+        }
+      },
+      "unevaluatedProperties": true
+    },
+    "representation": {
+      "type": "object",
+      "required": ["kind", "asset"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["volume", "surface", "table", "preview"] },
+        "asset": { "$ref": "#/$defs/localId" }
+      },
+      "additionalProperties": false
+    },
+    "threshold": {
+      "type": "object",
+      "required": ["mode", "min"],
+      "properties": {
+        "mode": { "type": "string", "enum": ["two-sided", "positive", "negative", "off"] },
+        "min": { "type": "number", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "window": {
+      "type": "object",
+      "required": ["min", "max"],
+      "properties": {
+        "min": { "type": "number" },
+        "centre": { "type": "number" },
+        "max": { "type": "number" }
+      },
+      "additionalProperties": false
+    },
+    "publishedDisplay": {
+      "description": "Producer's display recommendation; metadata, never an inferential rule.",
+      "type": "object",
+      "required": ["threshold", "window", "colormap"],
+      "properties": {
+        "threshold": { "$ref": "#/$defs/threshold" },
+        "window": { "$ref": "#/$defs/window" },
+        "colormap": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,31}$" },
+        "opacity": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "resultField": {
+      "type": "object",
+      "required": ["id", "estimand", "measure", "domain", "selection", "representations"],
+      "properties": {
+        "id": { "$ref": "#/$defs/localId" },
+        "label": { "type": "string" },
+        "estimand": { "$ref": "#/$defs/localId" },
+        "measure": { "$ref": "#/$defs/semanticId" },
+        "domain": { "$ref": "#/$defs/localId" },
+        "selection": {
+          "description": "Axis id to axis value.",
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "representations": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/representation" }
+        },
+        "order": { "type": "integer" },
+        "publishedDisplay": { "$ref": "#/$defs/publishedDisplay" }
+      },
+      "unevaluatedProperties": true
+    },
+    "underlay": {
+      "type": "object",
+      "required": ["asset", "domain", "label"],
+      "properties": {
+        "asset": { "$ref": "#/$defs/localId" },
+        "domain": { "$ref": "#/$defs/localId" },
+        "label": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "provenanceEntity": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": { "$ref": "#/$defs/localId" },
+        "label": { "type": "string" },
+        "hosted": { "type": "boolean" },
+        "asset": { "$ref": "#/$defs/localId" }
+      },
+      "unevaluatedProperties": true
+    },
+    "provenanceActivity": {
+      "description": "An activity is an open record with a manifest-local id.",
+      "type": "object",
+      "required": ["id", "schema"],
+      "properties": {
+        "id": { "$ref": "#/$defs/localId" },
+        "label": { "type": "string" },
+        "schema": { "$ref": "#/$defs/schemaRef" },
+        "payload": { "type": "object", "unevaluatedProperties": true }
+      },
+      "unevaluatedProperties": true
+    },
+    "provenanceEdge": {
+      "type": "object",
+      "required": ["from", "to"],
+      "properties": {
+        "from": { "$ref": "#/$defs/localId" },
+        "to": { "$ref": "#/$defs/localId" },
+        "role": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "provenance": {
+      "type": "object",
+      "properties": {
+        "entities": { "type": "array", "items": { "$ref": "#/$defs/provenanceEntity" } },
+        "activities": { "type": "array", "items": { "$ref": "#/$defs/provenanceActivity" } },
+        "edges": { "type": "array", "items": { "$ref": "#/$defs/provenanceEdge" } }
+      },
+      "unevaluatedProperties": true
+    }
+  }
+}

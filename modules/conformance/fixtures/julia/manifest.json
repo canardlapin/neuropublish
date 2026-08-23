@@ -1,0 +1,298 @@
+{
+    "core": "0.1",
+    "title": "Julia producer — synthetic speech group model",
+    "synopsis": "Written by modules/conformance/julia/producer.jl from documented ingredients only.",
+    "sensitivity": "group-level",
+    "axes": [
+        {
+            "id": "level",
+            "label": "Level",
+            "values": [
+                "group"
+            ]
+        }
+    ],
+    "domains": [
+        {
+            "id": "grid-2mm",
+            "key": {
+                "descriptor": {
+                    "id": "org.neuropublish.domain/volume-grid",
+                    "version": "1.0",
+                    "digest": "sha256:c1871091d7dc2bf6c5d3b1acafdf2d9c0d47e62d5a737a571ed7433ba778b7ac"
+                },
+                "size": 3072,
+                "structuralFingerprint": "sha256:aa1d8cdb290b7739ff086b1f380552f59366c8671dc33425716abd5f2bce7687"
+            },
+            "descriptor": {
+                "schema": {
+                    "id": "org.neuropublish.domain/volume-grid",
+                    "version": "1.0",
+                    "digest": "sha256:c1871091d7dc2bf6c5d3b1acafdf2d9c0d47e62d5a737a571ed7433ba778b7ac"
+                },
+                "payload": {
+                    "space": "MNI152NLin2009cAsym",
+                    "coordinateConvention": "RAS+",
+                    "spatialUnit": "mm",
+                    "ordinalLayout": "x-fastest",
+                    "shape": [
+                        16,
+                        16,
+                        12
+                    ],
+                    "affine": [
+                        [
+                            2,
+                            0,
+                            0,
+                            -15
+                        ],
+                        [
+                            0,
+                            2,
+                            0,
+                            -15
+                        ],
+                        [
+                            0,
+                            0,
+                            2,
+                            -11
+                        ],
+                        [
+                            0,
+                            0,
+                            0,
+                            1
+                        ]
+                    ]
+                }
+            }
+        }
+    ],
+    "assets": [
+        {
+            "id": "t1",
+            "digest": "sha256:e986ac621562906c73f5e47d45cf6b8ff5ceb7ea7088b4abc20a538f052c817b",
+            "mediaType": "application/x-nifti",
+            "size": 12640,
+            "catalog": "synthetic:julia/t1",
+            "x-julia-voxelStats": {
+                "min": 0,
+                "max": 100
+            }
+        },
+        {
+            "id": "speech-effect",
+            "digest": "sha256:db3d613f2c0fe55ab44eff13ab8faec1755a52735d6bec1650e8fc7861df7a6e",
+            "mediaType": "application/x-nifti",
+            "size": 12640
+        },
+        {
+            "id": "speech-t",
+            "digest": "sha256:1b30fbe041e38735c401297b22cb1350caef234620c276e584c6966b6297d6dc",
+            "mediaType": "application/x-nifti",
+            "size": 12640
+        },
+        {
+            "id": "speech-z",
+            "digest": "sha256:039fae3046fe2a434ceb9b1b89f4977df875a9fe0fd82af86a45908245504268",
+            "mediaType": "application/x-nifti",
+            "size": 12640
+        }
+    ],
+    "analyses": [
+        {
+            "id": "group-model",
+            "label": "Group model · speech (synthetic)",
+            "method": {
+                "schema": {
+                    "id": "org.example.julia/reducer/mean",
+                    "version": "0.1",
+                    "digest": "sha256:cc00000000000000000000000000000000000000000000000000000000000003"
+                },
+                "payload": {
+                    "weights": "equal",
+                    "inputs": 12
+                }
+            },
+            "sampleSize": 12,
+            "estimands": [
+                {
+                    "id": "speech",
+                    "label": "speech coefficient",
+                    "order": 1
+                }
+            ]
+        }
+    ],
+    "resultFields": [
+        {
+            "id": "speech-effect",
+            "estimand": "speech",
+            "measure": "org.neuropublish.measure/effect",
+            "selection": {
+                "level": "group"
+            },
+            "domain": "grid-2mm",
+            "representations": [
+                {
+                    "kind": "volume",
+                    "asset": "speech-effect"
+                }
+            ],
+            "order": 1
+        },
+        {
+            "id": "speech-t",
+            "estimand": "speech",
+            "measure": "org.neuropublish.measure/t-statistic",
+            "selection": {
+                "level": "group"
+            },
+            "domain": "grid-2mm",
+            "representations": [
+                {
+                    "kind": "volume",
+                    "asset": "speech-t"
+                }
+            ],
+            "order": 2,
+            "publishedDisplay": {
+                "threshold": {
+                    "mode": "two-sided",
+                    "min": 2.5
+                },
+                "window": {
+                    "min": -6,
+                    "centre": 0,
+                    "max": 6
+                },
+                "colormap": "cold-hot"
+            }
+        },
+        {
+            "id": "speech-z",
+            "estimand": "speech",
+            "measure": "org.neuropublish.measure/z-statistic",
+            "selection": {
+                "level": "group"
+            },
+            "domain": "grid-2mm",
+            "representations": [
+                {
+                    "kind": "volume",
+                    "asset": "speech-z"
+                }
+            ],
+            "order": 3,
+            "publishedDisplay": {
+                "threshold": {
+                    "mode": "two-sided",
+                    "min": 2.3
+                },
+                "window": {
+                    "min": -5,
+                    "centre": 0,
+                    "max": 5
+                },
+                "colormap": "cold-hot"
+            }
+        }
+    ],
+    "underlays": [
+        {
+            "asset": "t1",
+            "domain": "grid-2mm",
+            "label": "Synthetic T1"
+        }
+    ],
+    "provenance": {
+        "entities": [
+            {
+                "id": "raw",
+                "label": "Synthetic raw data",
+                "hosted": false
+            }
+        ],
+        "activities": [
+            {
+                "id": "first-level-01",
+                "schema": {
+                    "id": "org.bbuchsbaum.fmrireg/analysis-receipt",
+                    "version": "1.0",
+                    "digest": "sha256:aa00000000000000000000000000000000000000000000000000000000000001"
+                },
+                "payload": {
+                    "subject": "01",
+                    "temporalNoise": "AR(2)",
+                    "drift": "cosine-128s",
+                    "hrf": "spmg1"
+                }
+            },
+            {
+                "id": "first-level-02",
+                "schema": {
+                    "id": "org.bbuchsbaum.fmrireg/analysis-receipt",
+                    "version": "1.0",
+                    "digest": "sha256:aa00000000000000000000000000000000000000000000000000000000000001"
+                },
+                "payload": {
+                    "subject": "02",
+                    "temporalNoise": "AR(1)",
+                    "drift": "cosine-128s",
+                    "hrf": "spmg1"
+                }
+            },
+            {
+                "id": "denoise",
+                "schema": {
+                    "id": "org.example.julia/denoise",
+                    "version": "0.1",
+                    "digest": "sha256:dd00000000000000000000000000000000000000000000000000000000000004"
+                },
+                "payload": {
+                    "method": "wavelet",
+                    "levels": 3,
+                    "threshold": 0.05
+                }
+            }
+        ],
+        "edges": [
+            {
+                "from": "raw",
+                "to": "first-level-01"
+            },
+            {
+                "from": "raw",
+                "to": "first-level-02"
+            },
+            {
+                "from": "first-level-01",
+                "to": "denoise"
+            },
+            {
+                "from": "first-level-02",
+                "to": "denoise"
+            },
+            {
+                "from": "denoise",
+                "to": "speech-t"
+            }
+        ]
+    },
+    "x-julia-producer": {
+        "version": "0.1",
+        "julia": "1.12",
+        "note": "unknown top-level extension; value preservation, not byte preservation",
+        "nested": {
+            "flags": [
+                true,
+                false
+            ],
+            "empty": [
+            ],
+            "ratio": 0.125
+        }
+    }
+}

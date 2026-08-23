@@ -318,7 +318,11 @@ to Stage 3 alongside the surface pane, since Stage 2 has no browser work.
 ### Protocol
 
 - define core JSON Schema 2020-12 documents and freeze the vocabulary needed
-  by the reference result;
+  by the reference result — `protocol/schemas/manifest.schema.json`,
+  `protocol/schemas/workspace-state.schema.json`,
+  `protocol/schemas/rendition-header.schema.json`,
+  `protocol/schemas/records/volume-grid-v1.schema.json`, with the prose
+  invariants in `protocol/SPEC.md`;
 - implement stable semantic IDs, schema references, open records, axes,
   the common domain envelope, the trusted volume-grid descriptor, result
   fields, representations, assets, provenance graphs, warnings, and
@@ -334,22 +338,28 @@ to Stage 3 alongside the surface pane, since Stage 2 has no browser work.
 - distinguish canonical assets (in the digest) from derived representations
   (recorded by the server);
 - keep wire DTOs separate from validated Scala domain types;
-- return accumulated errors with JSON Pointer paths;
-- create compatibility rules, migrations, and unknown-record preservation;
+- return accumulated errors with JSON Pointer paths (`Manifest.parse` →
+  `Either[List[Problem], …]`; `ApiError.problems`; `npub validate` /
+  `inspect` print `error  <pointer>: <message>`);
+- create compatibility rules, migrations, and unknown-record preservation
+  (`protocol/SPEC.md` §7–8; `Migrations` 0.0 → 0.1; `TrustedSchemas`);
 - specify the route scheme: project, revision, view, explore, and presentation
-  URLs, since saved views and share links depend on it.
+  URLs, since saved views and share links depend on it (`protocol/SPEC.md`
+  §9).
 
 Gaps surfaced by the governing-journey design
 ([canvas](https://claude.ai/code/artifact/b4e22461-776e-4553-a62a-d0c21d051af8)),
 to close before the freeze:
 
 - an analysis-level sample-size field in the core (or a trusted-module
-  summary fact), since the overview leads with `n`;
+  summary fact), since the overview leads with `n` — `analyses[].sampleSize`;
 - a project-level description/question as a server record, distinct from
   the snapshot synopsis;
-- explicit, normative ordering of estimands and measures under an analysis;
+- explicit, normative ordering of estimands and measures under an analysis —
+  `order`, ties by array position, unique per analysis/estimand (SPEC §5);
 - an optional scope pointer on each warning (field, analysis, or provenance
-  node), since warnings surface in three places;
+  node), since warnings surface in three places — `warnings[].concerns`,
+  resolved at admission;
 - confirmation that compatibility groups are server-computed from receipt
   fingerprints, and which receipt fields participate.
 
@@ -403,6 +413,19 @@ A tiny Julia program that does not use Neuropublish Scala classes must create a
 valid bundle and publish it through the documented HTTP or CLI boundary. The
 same fixture is decoded and re-encoded by Scala and R without losing unknown
 extension fields.
+
+Status (2026-08-22): done. `modules/conformance/julia/producer.jl` (Julia
+stdlib `SHA`/`Downloads` plus `JSON3`, no Neuropublish code) writes four
+float32 NIfTI volumes and a core 0.1 manifest with the ADR 0005 domain
+envelope, an unknown activity record, an unknown top-level field and an
+unknown field inside a known record, then publishes it through the documented
+upload-session/object/manifest/commit endpoints. `JuliaProducerSuite` asserts
+the Scala digest equals Julia's, drives the script against an in-process
+backend (stale re-push rejected, `--parent` accepted, every rendition `ready`),
+and checks that `roundtrip.R` (jsonlite) re-encodes to a value-equal manifest
+with the unknown fields intact. The committed output lives in
+`modules/conformance/fixtures/julia/` for CI without Julia; `scripts/e2e.sh`
+runs the producer as a second push against the live server.
 
 ### Exit criteria
 

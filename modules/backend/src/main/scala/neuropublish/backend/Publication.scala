@@ -129,7 +129,12 @@ final class Publication(
           case None => IO.pure(Left(err("bad_request", "manifest has not been uploaded")))
           case Some(bytes) =>
             Manifest.parse(bytes) match
-              case Left(m) => IO.pure(Left(err("bad_request", s"manifest rejected: $m")))
+              case Left(problems) =>
+                IO.pure(Left(ApiError(
+                  "bad_request",
+                  s"manifest rejected: ${problems.length} problem(s)",
+                  problems = Some(problems.map(p => Problem(p.pointer, p.message)))
+                )))
               case Right((digest, manifest)) =>
                 // every declared asset must exist with the declared size
                 manifest.assets.traverse(a => objects.size(a.digest).map(sz => (a, sz))).flatMap {
@@ -205,7 +210,9 @@ final class Publication(
           objects.get(Sha256.unsafe(rec.manifestDigest)).flatMap {
             case None => IO.pure(Left(err("not_found", "manifest bytes missing")))
             case Some(bytes) =>
-              IO.fromEither(Manifest.parse(bytes).leftMap(IllegalStateException(_))).flatMap {
+              IO.fromEither(Manifest.parse(bytes).leftMap(ps =>
+                IllegalStateException(neuropublish.protocol.json.Problem.render(ps))
+              )).flatMap {
                 (_, m) =>
                   m.volumeAssetIds.traverse(a =>
                     ingestion.status(id, a).map(st =>

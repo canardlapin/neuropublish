@@ -14,6 +14,8 @@ object Versions {
   val decline = "2.5.0"
   val laminar = "17.2.1"
   val waypoint = "9.0.0"
+  val jsonSchemaValidator = "1.5.9"
+  val slf4j = "2.0.17"
 
   val munit = "1.3.0"
   val munitScalacheck = "1.1.0"

@@ -3,20 +3,37 @@ package neuropublish.conformance
 import java.nio.{ByteBuffer, ByteOrder}
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path}
-import io.circe.HCursor
+import io.circe.{HCursor, Json}
 import io.circe.parser.parse
 import munit.FunSuite
 import scala.jdk.CollectionConverters.*
 import neuropublish.protocol.Sha256
-import neuropublish.protocol.json.ByteProfile
+import neuropublish.protocol.json.*
+import neuropublish.rendition.VolumeRendition
+import neuropublish.viewer.{Workspace, WorkspaceLayout, WorkspaceState}
 
-/** The hand-written reference bundle and the invalid-manifest suite. */
+/** The golden bundles: reference, valid, invalid, old-version, new-extension, and
+  * schema-digest-mismatch, plus the schema documents' single-source-of-truth rules.
+  */
 class FixtureSuite extends FunSuite:
   private val VolumeGridMagic = "NPUDOM1\u0000".getBytes(StandardCharsets.US_ASCII)
   private val fixtures =
     List("fixtures", "modules/conformance/fixtures").map(Path.of(_)).find(Files.isDirectory(_))
       .getOrElse(fail("fixtures directory not found from " + Path.of("").toAbsolutePath))
+  private val schemas =
+    List("../../protocol/schemas", "protocol/schemas").map(Path.of(_)).find(Files.isDirectory(_))
+      .getOrElse(fail("protocol/schemas not found"))
   private def read(p: String) = Files.readAllBytes(fixtures.resolve(p))
+  private def cases(dir: String): List[Path] =
+    Files.list(fixtures.resolve(dir)).toList.asScala.filter(_.toString.endsWith(".json")).toList
+      .sortBy(_.getFileName.toString)
+  private def expect(p: Path): String =
+    Files.readString(Path.of(p.toString.stripSuffix(".json") + ".expect")).trim
+  private def admitted(p: Path): Manifest =
+    Manifest.parse(Files.readAllBytes(p)).fold(
+      ps => fail(s"${p.getFileName} rejected: ${Problem.render(ps)}"),
+      _._2
+    )
 
   private def required[A](value: Either[io.circe.DecodingFailure, A]): A =
     value.fold(e => fail(e.message), identity)
@@ -70,6 +87,27 @@ class FixtureSuite extends FunSuite:
     assertEquals(ours.hex, Files.readString(fixtures.resolve("reference/manifest.sha256")).trim)
   }
 
+  test("reference manifest passes full admission; its records are read as intended") {
+    val (digest, m) = Manifest.parse(read("reference/manifest.json")).fold(
+      ps => fail(Problem.render(ps)),
+      identity
+    )
+    assertEquals(digest.hex, Files.readString(fixtures.resolve("reference/manifest.sha256")).trim)
+    assertEquals(m.sensitivity, Some("group-level"))
+    val how = m.openRecords.map((p, _, i) => p -> i.getClass.getSimpleName).toMap
+    assertEquals(how("/domains/0/descriptor"), "Understood")
+    assertEquals(how("/analyses/0/method"), "Unsupported")
+    assertEquals(how("/provenance/activities/2"), "Unsupported")
+    assertEquals(
+      m.analyses.flatMap(a => m.orderedEstimands(a).map(_.id)),
+      List("speech", "articulatory-rate", "speech-vs-silence")
+    )
+    assertEquals(
+      m.orderedFields("speech").map(_.id),
+      List("speech-effect", "speech-se", "speech-t", "speech-z")
+    )
+  }
+
   test("reference volume domain uses the open descriptor and recomputable exact key") {
     val domain = referenceDomain
     assertEquals(domain.downField("kind").focus, None)
@@ -108,17 +146,149 @@ class FixtureSuite extends FunSuite:
     assertEquals(required(schema.get[String]("digest")), Sha256.of(schemaBytes).render)
   }
 
-  test("every invalid fixture is rejected with the documented reason") {
-    val dir = fixtures.resolve("invalid")
-    val cases = Files.list(dir).toList.asScala.filter(_.toString.endsWith(".json")).toList
-    assert(cases.nonEmpty)
-    cases.foreach { p =>
-      val expect = Files.readString(Path.of(p.toString.stripSuffix(".json") + ".expect")).trim
-      ByteProfile.admit(Files.readAllBytes(p)) match
+  test("the trusted volume-grid schema is the one under protocol/schemas/records") {
+    val protocolCopy = Files.readAllBytes(schemas.resolve("records/volume-grid-v1.schema.json"))
+    assert(java.util.Arrays.equals(
+      protocolCopy,
+      read("reference/schemas/volume-grid-v1.schema.json")
+    ))
+    assertEquals(
+      TrustedSchemas.VolumeGridV1.digest.map(_.render),
+      Some(Sha256.of(protocolCopy).render)
+    )
+  }
+
+  test("every valid fixture is admitted") {
+    val all = cases("valid")
+    assert(all.nonEmpty)
+    all.foreach(admitted)
+    val unknown = admitted(fixtures.resolve("valid/unknown-fields.json"))
+    assertEquals(unknown.raw.hcursor.downField("acknowledgements").succeeded, true)
+    assert(unknown.openRecords.exists {
+      case (p, r, Interpretation.Unsupported(_)) =>
+        p == "/provenance/activities/4" && r.schema.id == "org.example.lab/denoise"
+      case _ => false
+    })
+  }
+
+  test(
+    "every invalid fixture is rejected at the documented pointer (or with the documented reason)"
+  ) {
+    val all = cases("invalid")
+    assert(all.length >= 20, all.length)
+    all.foreach { p =>
+      val e = expect(p)
+      Manifest.parse(Files.readAllBytes(p)) match
         case Right(_) => fail(s"${p.getFileName} was admitted")
-        case Left(vs) => assert(
-            vs.exists(_.message.contains(expect)),
-            s"${p.getFileName}: expected '$expect' in ${vs.map(_.render)}"
+        case Left(ps) => assert(
+            ps.exists(x => x.pointer == e || x.message.contains(e)),
+            s"${p.getFileName}: expected '$e' in ${ps.map(_.render)}"
           )
     }
+  }
+
+  test("invalid byte-profile fixtures still report byte offsets, and duplicate keys a pointer") {
+    val dup = Manifest.parse(read("invalid/duplicate-nested.json")).left.getOrElse(Nil)
+    assert(dup.exists(p => p.pointer.nonEmpty && p.message.startsWith("byte ")), dup)
+  }
+
+  test("old-version: core 0.0 is brought to 0.1 by the migration, original bytes keep the digest") {
+    val p = fixtures.resolve("old-version/core-0.0.json")
+    val bytes = Files.readAllBytes(p)
+    val (digest, m) = Manifest.parse(bytes).fold(ps => fail(Problem.render(ps)), identity)
+    assertEquals(digest.hex, Sha256.of(bytes).hex)
+    assertEquals(m.migratedFrom, Some("0.0"))
+    assertEquals(m.core, "0.1")
+    assertEquals(m.synopsis.isDefined, true)
+    assertEquals(m.raw.hcursor.downField("description").succeeded, false)
+    assertEquals(expect(p), "migratedFrom 0.0")
+    // the original is still what the producer wrote
+    val original = parse(new String(bytes, "UTF-8")).toOption.get
+    assertEquals(original.hcursor.get[String]("core"), Right("0.0"))
+    assert(original.hcursor.downField("description").succeeded)
+  }
+
+  test("new-extension: core 0.2 with unknown fields is admitted and round-trips value-for-value") {
+    val p = fixtures.resolve("new-extension/core-0.2-extensions.json")
+    val bytes = Files.readAllBytes(p)
+    val original = parse(new String(bytes, "UTF-8")).toOption.get
+    val (_, m) = Manifest.parse(bytes).fold(ps => fail(Problem.render(ps)), identity)
+    assertEquals(m.core, "0.2")
+    assertEquals(m.migratedFrom, None)
+    assertEquals(m.raw, original)
+    // encode → decode → encode is the identity on the JSON value (not on whitespace)
+    val reencoded = parse(m.raw.spaces2).toOption.get
+    assertEquals(reencoded, original)
+    val again = Manifest.parse(m.raw.noSpaces.getBytes("UTF-8")).fold(
+      ps => fail(Problem.render(ps)),
+      _._2
+    )
+    assertEquals(again.raw, original)
+    for pointer <- List(
+        "/license",
+        "/assets/3/compression/codec",
+        "/analyses/0/preregistration",
+        "/resultFields/2/uncertainty/level",
+        "/domains/0/descriptor/payload/voxelUnits/2"
+      )
+    do assert(at(again.raw, pointer).isDefined, s"$pointer lost")
+  }
+
+  private def at(json: Json, pointer: String): Option[Json] =
+    pointer.split('/').drop(1).foldLeft(Option(json)) { (acc, tok) =>
+      acc.flatMap(j => j.asArray.flatMap(_.lift(tok.toInt)).orElse(j.asObject.flatMap(_(tok))))
+    }
+
+  test("schema-digest-mismatch: trusted id rejected, unknown id retained as unsupported") {
+    val trusted = fixtures.resolve("schema-digest-mismatch/trusted-volume-grid.json")
+    Manifest.parse(Files.readAllBytes(trusted)) match
+      case Right(_) => fail("trusted id with a foreign digest was admitted")
+      case Left(ps) => assertEquals(ps.map(_.pointer), List(expect(trusted)))
+    val unknown = fixtures.resolve("schema-digest-mismatch/unknown-volume-grid.json")
+    val m = admitted(unknown)
+    val d = m.openRecords.find(_._1 == "/domains/0/descriptor").map(_._3)
+    assert(d.exists(_.isInstanceOf[Interpretation.Unsupported]), d)
+    assertEquals(expect(unknown), "unsupported org.example.lab/volume-grid@1.0")
+  }
+
+  test("rendition-header.schema.json accepts the reference rendition headers") {
+    for id <- List("t1", "speech-t", "speech-z") do
+      val text = new String(read(s"reference/renditions/$id.json"), StandardCharsets.UTF_8)
+      val json = parse(text).toOption.get
+      assertEquals(SchemaCheck.renditionHeader(json), Nil, id)
+      assert(VolumeRendition.decodeHeader(text).isRight)
+    val bad =
+      parse("""{"profile":"org.neuropublish.rendition/volume-f32@0","shape":[1,2],"affine":[],
+      "dtype":"float64","byteOrder":"little","order":"x-fastest","missing":"nan"}""").toOption.get
+    val ps = SchemaCheck.renditionHeader(bad).map(_.pointer)
+    assert(ps.contains("/shape"), ps)
+    assert(ps.contains("/dtype"), ps)
+  }
+
+  test("workspace-state.schema.json accepts what WorkspaceState encodes") {
+    val ws = Workspace(Vector.empty, Some((1.0, -2.0, 3.5)), WorkspaceLayout.default, "layers")
+    val json = WorkspaceState.encode(ws)
+    assertEquals(SchemaCheck.workspaceState(json), Nil)
+    assertEquals(WorkspaceState.decode(json).map(_.cursor), Right(ws.cursor))
+    val bad = json.hcursor.downField("payload").downField("inspector").set(Json.fromString("x")).top
+      .get
+    assertEquals(SchemaCheck.workspaceState(bad).map(_.pointer), List("/payload/inspector"))
+  }
+
+  test("the committed Julia bundle is admitted with its recorded digest and unknown fields") {
+    val jbytes = Files.readAllBytes(fixtures.resolve("julia/manifest.json"))
+    val (digest, manifest) = Manifest.parse(jbytes).fold(ps => fail(ps.mkString("; ")), identity)
+    assertEquals(digest.hex, Files.readString(fixtures.resolve("julia/manifest.sha256")).trim)
+    assertEquals(manifest.core, "0.1")
+    assertEquals(manifest.volumeAssetIds.sorted, List("speech-effect", "speech-t", "speech-z", "t1"))
+    manifest.assets.foreach { a =>
+      val file = Files.readAllBytes(fixtures.resolve(s"julia/assets/${a.id}.nii"))
+      assertEquals(Sha256.of(file).render, a.digest.render, a.id)
+      assertEquals(file.length.toLong, a.size, a.id)
+    }
+    val raw = manifest.raw.hcursor
+    assertEquals(raw.downField("x-julia-producer").downField("version").as[String], Right("0.1"))
+    assert(raw.downField("provenance").downField("activities").values.exists(_.exists(
+      _.hcursor.downField("schema").downField("id").as[String] == Right("org.example.julia/denoise")
+    )))
   }
