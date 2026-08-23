@@ -72,6 +72,7 @@ np_run <- function(args, echo = FALSE) {
     argv <- c(bin, args)
   }
   if (requireNamespace("processx", quietly = TRUE)) {
+    # processx echoes each chunk as it arrives *and* returns it
     res <- processx::run(cmd, argv, error_on_status = FALSE, echo = echo, echo_cmd = FALSE)
     list(
       status = res$status,
@@ -79,25 +80,34 @@ np_run <- function(args, echo = FALSE) {
       stderr = np_lines(res$stderr)
     )
   } else {
-    err <- tempfile("npub-stderr")
-    on.exit(unlink(err), add = TRUE)
-    if (echo) {
-      # stdout = "" streams the CLI's output to the console as it arrives;
-      # capturing it (stdout = TRUE) would hold the device-flow URL and code
-      # back until the command exits, i.e. until the user has approved them.
-      status <- suppressWarnings(system2(cmd, shQuote(argv), stdout = "", stderr = err))
-      out <- character()
-    } else {
-      out <- suppressWarnings(system2(cmd, shQuote(argv), stdout = TRUE, stderr = err))
-      status <- attr(out, "status")
-      if (is.null(status)) status <- 0L
-    }
-    list(
-      status = status,
-      stdout = as.character(out),
-      stderr = if (file.exists(err)) readLines(err, warn = FALSE) else character()
-    )
+    np_run_system2(cmd, argv, echo)
   }
+}
+
+#' The `system2()` fallback for [np_run()]
+#'
+#' `system2(stdout = TRUE)` buffers the child's output and hands it back only
+#' when the child exits, which for `npub login` is *after* the user has
+#' approved the code the CLI was waiting to show. So when `echo` is on, both
+#' streams are connected to the console (`stdout = ""`, `stderr = ""`): the
+#' verification URL and the user code appear while the CLI waits, and nothing
+#' is captured (the returned `stdout`/`stderr` are empty, by construction).
+#' @noRd
+np_run_system2 <- function(cmd, argv, echo = FALSE) {
+  if (echo) {
+    status <- suppressWarnings(system2(cmd, shQuote(argv), stdout = "", stderr = ""))
+    return(list(status = as.integer(status), stdout = character(), stderr = character()))
+  }
+  err <- tempfile("npub-stderr")
+  on.exit(unlink(err), add = TRUE)
+  out <- suppressWarnings(system2(cmd, shQuote(argv), stdout = TRUE, stderr = err))
+  status <- attr(out, "status")
+  if (is.null(status)) status <- 0L
+  list(
+    status = as.integer(status),
+    stdout = as.character(out),
+    stderr = if (file.exists(err)) readLines(err, warn = FALSE) else character()
+  )
 }
 
 np_is_script <- function(path) {
@@ -272,6 +282,10 @@ np_pack_assets <- function(assets) {
 #' (`$NPUB_CONFIG_DIR/credentials.json`, keyed by server). Batch jobs should
 #' use a project-scoped publisher credential in `NP_TOKEN` instead.
 #'
+#' This is the one call whose output must appear *while* the CLI runs — the
+#' code is useless after it exits — so the CLI's streams are connected to the
+#' console instead of captured.
+#'
 #' @param server The control-plane URL (e.g. `"http://127.0.0.1:8080"`).
 #' @return `TRUE` invisibly on success.
 #' @examples
@@ -281,7 +295,17 @@ np_pack_assets <- function(assets) {
 #' @export
 np_login <- function(server) {
   res <- np_run(c("login", "--server", server), echo = TRUE)
-  if (res$status != 0L) np_cli_error(res, "login")
+  if (res$status != 0L) {
+    shown <- c(
+      grep("^error", res$stdout, value = TRUE),
+      grep("^(SLF4J|WARNING)", res$stderr, value = TRUE, invert = TRUE)
+    )
+    stop(
+      "npub login failed (exit ", res$status, ")",
+      if (length(shown)) paste0(":\n", paste(shown, collapse = "\n")) else "; see the output above",
+      call. = FALSE
+    )
+  }
   invisible(TRUE)
 }
 

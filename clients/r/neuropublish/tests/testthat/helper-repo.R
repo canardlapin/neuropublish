@@ -25,6 +25,22 @@ np_fixture <- function(...) {
   if (file.exists(p)) p else NULL
 }
 
+# A rotated, full-precision affine (2 mm voxels, 1 degree about z). The affine
+# that is hashed must be the affine the JSON parses back to: the server
+# recomputes the volume-grid key from the parsed descriptor payload, so a
+# number the writer rounds is a rejected revision. jsonlite's default
+# (`digits = NA`, 15 significant digits) does not round-trip cos/sin of one
+# degree; `digits = I(17)` round-trips every double.
+np_oblique_affine <- function() {
+  a <- 1 * pi / 180
+  affine <- diag(4)
+  affine[1:3, 1:3] <- matrix(
+    c(cos(a), sin(a), 0, -sin(a), cos(a), 0, 0, 0, 1), 3, 3
+  ) %*% diag(c(2, 2, 2))
+  affine[1:3, 4] <- c(-22.5, -30.25, -18.125)
+  affine
+}
+
 # A temporary directory for one test. Base R only (withr is a Suggests): the
 # session's tempdir() is removed when R exits, so nothing is left behind.
 np_tempdir <- function() {
