@@ -9,7 +9,7 @@ object ManifestChecks:
 
   def all(m: Manifest): List[Problem] =
     uniqueIds(m) ++ referenceClosure(m) ++ estimandClosure(m) ++ orders(m) ++ measures(m) ++
-      sensitivity(m) ++ warningScopes(m) ++ openRecords(m) ++ provenanceEdges(m)
+      sensitivity(m) ++ warningScopes(m) ++ openRecords(m) ++ domains(m) ++ provenanceEdges(m)
 
   private def dupes(pointer: Int => String, ids: List[String], what: String): List[Problem] =
     ids.zipWithIndex.groupBy(_._1).toList.filter(_._2.size > 1).flatMap { (id, occ) =>
@@ -170,6 +170,20 @@ object ManifestChecks:
     m.openRecords.flatMap {
       case (_, _, Interpretation.Invalid(_, ps)) => ps
       case _ => Nil
+    }
+
+  /** Trusted domain descriptors: the exact key (`descriptor`, `size`, `structuralFingerprint`) is
+    * recomputed from the descriptor payload (SPEC §6); a declared key that disagrees is rejected.
+    * Only understood descriptors are checked; an invalid trusted record is already reported by
+    * [[openRecords]] and an unsupported one gains no behaviour to check.
+    */
+  def domains(m: Manifest): List[Problem] =
+    m.domains.zipWithIndex.flatMap { (d, i) =>
+      val at = s"/domains/$i"
+      TrustedSchemas.interpret(s"$at/descriptor", d.descriptor) match
+        case Interpretation.Understood(r, _) if r.schema.id == TrustedSchemas.VolumeGridV1.id =>
+          VolumeGrid.check(at, r, d.key)
+        case _ => Nil
     }
 
   /** Provenance edges connect entities, activities, assets, or result fields. */

@@ -27,8 +27,15 @@ scientific meaning.
 
 ## Status
 
-Planning-stage greenfield project; no code yet. Everything in `docs/` is
-subject to change until the first vertical slice ships.
+Stages 0–4 of the [implementation plan](docs/implementation-plan.md) are done:
+the language-neutral protocol (`protocol/`), the Stage 2 publication spine
+(upload sessions, immutable revisions, PostgreSQL read model, S3-compatible
+object store, ingestion worker), the `npub` publisher CLI, the volume
+workspace, identity, saved views, and share links. The first product slice is
+proven end to end: a Julia program with no Neuropublish code publishes a bundle
+the server admits, and the result is explored in the browser and opened through
+a read-only link. See [DEVELOPMENT.md](DEVELOPMENT.md) for building, testing,
+and running it locally.
 
 ## Planning documents
 
@@ -39,7 +46,6 @@ subject to change until the first vertical slice ships.
 - [ADR 0002: preset workspaces before arbitrary docking](docs/decisions/0002-preset-workspaces-before-arbitrary-docking.md)
 - [ADR 0003: Typelevel backend stack and Laminar frontend](docs/decisions/0003-typelevel-backend-and-laminar-frontend.md)
 - [ADR 0004: single-workspace alpha on a multi-workspace schema](docs/decisions/0004-single-workspace-alpha-on-multi-workspace-schema.md)
-- [ADR 0005: finite indexed domains and spatial support mappings](docs/decisions/0005-finite-indexed-domains-and-spatial-support-mappings.md)
 - [ADR 0005: finite indexed domains and spatial-support mappings](docs/decisions/0005-finite-indexed-domains-and-spatial-support-mappings.md)
 - [UI design concept and adoption table](docs/design/README.md)
 

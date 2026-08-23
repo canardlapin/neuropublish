@@ -13,9 +13,28 @@ final case class SchemaRefWire(id: String, version: String, digest: Option[Sha25
 final case class OpenRecord(schema: SchemaRefWire, payload: Json)
 
 object OpenRecord:
-  given Decoder[Sha256] = Decoder.decodeString.emap(Sha256.parse)
-  given Decoder[SchemaRefWire] =
-    Decoder.forProduct3("id", "version", "digest")(SchemaRefWire.apply)
+  /** The wire grammar of a digest (`manifest.schema.json#/$defs/sha256`): the prefix is mandatory.
+    */
+  val strictSha256: Decoder[Sha256] = Decoder.decodeString.emap { s =>
+    if s.startsWith("sha256:") then Sha256.parse(s)
+    else Left(s"not a sha256 identity: '$s' (expected sha256:<64 lowercase hex>)")
+  }
+  private val Version = "^[0-9]+(\\.[0-9]+)*$".r
+  given Decoder[Sha256] = strictSha256
+  given Decoder[SchemaRefWire] = Decoder.instance { c =>
+    for
+      id <- c.get[String]("id")
+      version <- c.get[String]("version").flatMap(v =>
+        if Version.matches(v) then Right(v)
+        else
+          Left(io.circe.DecodingFailure(
+            s"schema version '$v' is not dotted digits (for example 1.0)",
+            c.downField("version").history
+          ))
+      )
+      digest <- c.get[Option[Sha256]]("digest")
+    yield SchemaRefWire(id, version, digest)
+  }
   given Decoder[OpenRecord] = Decoder.instance { c =>
     for
       schema <- c.downField("schema").as[SchemaRefWire]
@@ -65,7 +84,7 @@ object TrustedSchemas:
   val VolumeGridV1 = SchemaRefWire(
     "org.neuropublish.domain/volume-grid",
     "1.0",
-    Some(Sha256.unsafe("c1871091d7dc2bf6c5d3b1acafdf2d9c0d47e62d5a737a571ed7433ba778b7ac"))
+    Some(Sha256.unsafe("69c25b8868349828e41cd6d610ac619af118fb7b807b7306f706b727ed23dfb7"))
   )
 
   val all: List[SchemaRefWire] = List(VolumeGridV1)

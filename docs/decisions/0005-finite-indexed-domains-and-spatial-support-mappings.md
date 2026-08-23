@@ -81,14 +81,19 @@ A result field is defined over a domain. Every published domain has:
 - an ordering rule that is part of its identity.
 
 The descriptor is an open record, so the protocol does not need a closed enum
-of every future scientific domain. Neuropublish ships trusted descriptors for
-the common structural cases:
+of every future scientific domain. Neuropublish defines trusted descriptors
+for the common structural cases:
 
 ```text
-org.neuropublish.domain/finite-indexed
-org.neuropublish.domain/volume-grid
-org.neuropublish.domain/surface-vertices
+org.neuropublish.domain/finite-indexed    (defined; not yet trusted in code — Stage 5b)
+org.neuropublish.domain/volume-grid       (trusted: records/volume-grid-v1.schema.json)
+org.neuropublish.domain/surface-vertices  (defined; not yet trusted in code — Stage 5b)
 ```
+
+Only `volume-grid@1.0` is in the implementation's trusted list today; a record
+naming `finite-indexed` or `surface-vertices` is in the trusted namespace
+without a known schema and is rejected, not silently admitted, until the
+Stage 5b module lands with its schema digest.
 
 An unknown descriptor is preserved. It is usable for download and generic
 inspection, but it does not gain rendering or alignment behavior until a

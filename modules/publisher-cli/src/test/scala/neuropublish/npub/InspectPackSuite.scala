@@ -16,8 +16,17 @@ class InspectPackSuite extends CatsEffectSuite:
 
   private def bytes(p: String) = Files[IO].readAll(fixtures / p).compile.to(Array)
 
-  /** A staging bundle: the reference manifest with `path` instead of `digest`/`size` for the two
-    * real assets and a dropped placeholder pair, plus an unknown field that must survive.
+  /** The bytes of the two digest-only assets in the staging bundle (`speech-effect`, `speech-se`),
+    * staged at their normalized location with matching `digest`/`size`.
+    */
+  private val digestOnly: Map[String, Array[Byte]] = Map(
+    "speech-effect" -> "effect bytes".getBytes("UTF-8"),
+    "speech-se" -> "standard error bytes".getBytes("UTF-8")
+  )
+
+  /** A staging bundle: the reference manifest with `path` instead of `digest`/`size` for the three
+    * real assets, two digest-only assets whose bytes sit under `assets/sha256/`, plus an unknown
+    * field that must survive.
     */
   private def staging(dir: Path, extra: String => String = identity): IO[Unit] =
     for
@@ -27,9 +36,13 @@ class InspectPackSuite extends CatsEffectSuite:
       staged = assets.map { a =>
         val id = a.hcursor.get[String]("id").toOption.get
         a.mapObject(o =>
-          if id == "speech-effect" || id == "speech-se" then o
-          else
-            o.remove("digest").remove("size").add("path", io.circe.Json.fromString(s"in/$id.nii"))
+          digestOnly.get(id) match
+            case Some(b) =>
+              o.add("digest", io.circe.Json.fromString(Sha256.of(b).render))
+                .add("size", io.circe.Json.fromInt(b.length))
+            case None =>
+              o.remove("digest").remove("size")
+                .add("path", io.circe.Json.fromString(s"in/$id.nii"))
         )
       }
       manifest = json.mapObject(
@@ -39,6 +52,12 @@ class InspectPackSuite extends CatsEffectSuite:
       _ <- List("t1", "speech-t", "speech-z").traverse_(id =>
         Files[IO].copy(fixtures / "reference" / "assets" / s"$id.nii", dir / "in" / s"$id.nii")
       )
+      _ <- digestOnly.values.toList.traverse_ { b =>
+        val d = Sha256.of(b)
+        val sub = dir / "assets" / "sha256" / d.hex.take(2)
+        Files[IO].createDirectories(sub) *>
+          fs2.Stream.emits(b).through(Files[IO].writeAll(sub / d.hex)).compile.drain
+      }
       _ <- fs2.Stream.emits(extra(manifest.spaces2).getBytes("UTF-8"))
         .through(Files[IO].writeAll(dir / "manifest.json")).compile.drain
     yield ()
@@ -55,7 +74,17 @@ class InspectPackSuite extends CatsEffectSuite:
       yield
         val (digest, m) = Manifest.parse(written).fold(ps => fail(ps.mkString("; ")), identity)
         assertEquals(digest.hex, packed.manifestDigest.hex)
-        assertEquals(packed.assets.map(_._1), List("t1", "speech-t", "speech-z"))
+        assertEquals(
+          packed.assets.map(_._1),
+          List("t1", "speech-effect", "speech-se", "speech-t", "speech-z")
+        )
+        // digest-only assets are copied from the staging layout into the output
+        digestOnly.foreach { (id, b) =>
+          val d = Sha256.of(b)
+          val copied = out / "assets" / "sha256" / d.hex.take(2) / d.hex
+          assert(java.nio.file.Files.exists(copied.toNioPath), id)
+          assertEquals(m.asset(id).map(_.size), Some(b.length.toLong))
+        }
         val t1Digest = Sha256.of(t1)
         assertEquals(m.asset("t1").map(_.digest.hex), Some(t1Digest.hex))
         assertEquals(m.asset("t1").map(_.size), Some(t1.length.toLong))
@@ -83,6 +112,53 @@ class InspectPackSuite extends CatsEffectSuite:
       assertEquals(r.left.map(_.map(_.pointer)), Left(List("/assets/0/path")))
       assert(r.left.exists(_.head.message.contains("escapes")))
       assert(!java.nio.file.Files.exists((dir / "out.npub").toNioPath))
+  }
+
+  tmp.test("pack never overwrites a declared digest or size that disagrees with the file") { dir =>
+    val wrong = "sha256:" + "1" * 64
+    for
+      _ <- staging(
+        dir / "staging",
+        _.replace(
+          "\"path\" : \"in/t1.nii\"",
+          s"\"path\" : \"in/t1.nii\", \"digest\" : \"$wrong\", \"size\" : 7"
+        )
+      )
+      r <- Pack.pack(dir / "staging", dir / "out.npub")
+      se = Sha256.of(digestOnly("speech-se")).render
+      _ <- staging(dir / "staging2", _.replace(s"\"digest\" : \"$se\"", s"\"digest\" : \"$wrong\""))
+      r2 <- Pack.pack(dir / "staging2", dir / "out2.npub")
+    yield
+      assertEquals(r.left.map(_.map(_.pointer)), Left(List("/assets/0/digest", "/assets/0/size")))
+      // a digest-only asset whose bytes are not staged under that digest
+      assertEquals(r2.left.map(_.map(_.pointer)), Left(List("/assets/2")))
+      assert(!java.nio.file.Files.exists((dir / "out.npub").toNioPath))
+  }
+
+  tmp.test("pack refuses a directory path, a non-array assets, and an existing output") { dir =>
+    for
+      _ <- staging(dir / "staging", _.replace("\"path\" : \"in/t1.nii\"", "\"path\" : \".\""))
+      r <- Pack.pack(dir / "staging", dir / "out.npub")
+      _ <- staging(
+        dir / "staging2",
+        s => {
+          val i = s.indexOf("\"assets\" : [")
+          val j = s.indexOf("\n  ]", i)
+          s.substring(0, i) + "\"assets\" : {}" + s.substring(j + 4)
+        }
+      )
+      r2 <- Pack.pack(dir / "staging2", dir / "out2.npub")
+      _ <- staging(dir / "staging3")
+      ok <- Pack.pack(dir / "staging3", dir / "out3.npub")
+      again <- Pack.pack(dir / "staging3", dir / "out3.npub")
+      forced <- Pack.pack(dir / "staging3", dir / "out3.npub", force = true)
+    yield
+      assertEquals(r.left.map(_.map(_.pointer)), Left(List("/assets/0/path")))
+      assert(r.left.exists(_.head.message.contains("not a regular file")), r)
+      assertEquals(r2.left.map(_.map(_.pointer)), Left(List("/assets")))
+      assert(ok.isRight, ok)
+      assert(again.left.exists(_.head.message.contains("--force")), again)
+      assert(forced.isRight, forced)
   }
 
   tmp.test("pack refuses an unresolved catalog reference and a missing file") { dir =>

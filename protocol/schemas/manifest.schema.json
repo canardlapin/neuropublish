@@ -2,12 +2,12 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://neuropublish.org/schema/0.1/manifest.schema.json",
   "title": "Neuropublish manifest (core 0.1)",
-  "description": "Structural schema of a portable result snapshot (`manifest.json`). Cross-field invariants, the byte profile, digest procedure, ordering rules, and compatibility rules are stated in protocol/SPEC.md. Unknown fields at any open level must be preserved byte-for-byte (ADR 0001).",
+  "description": "Structural schema of a portable result snapshot (`manifest.json`). Cross-field invariants, the byte profile, digest procedure, ordering rules, and compatibility rules are stated in protocol/SPEC.md. Unknown fields at any open level (`unevaluatedProperties: true`) are admitted and must survive decode/re-encode value-for-value (the same JSON values, not the same bytes; the stored manifest keeps the producer's bytes, ADR 0001). Closed structures (`additionalProperties: false`) reject unknown members. Readers accept core `0.x` for any x >= 0: newer minors as written, older minors through migration (SPEC.md §8).",
   "type": "object",
   "required": ["core", "title", "sensitivity", "assets"],
   "properties": {
     "core": {
-      "description": "Core protocol version `major.minor`. Readers accept any 0.x with x >= 1 (see SPEC.md, Compatibility).",
+      "description": "Core protocol version `major.minor`. Readers accept any 0.x with x >= 0: x >= 1 as written, x = 0 via migration (SPEC.md §8).",
       "type": "string",
       "pattern": "^[0-9]+\\.[0-9]+$"
     },
@@ -15,7 +15,7 @@
     "synopsis": { "type": "string" },
     "notes": { "type": "string" },
     "migratedFrom": {
-      "description": "Set by a migration: the `core` the stored original bytes declared.",
+      "description": "Stamped by a reader after migration: the `core` the stored original bytes declared. A producer never writes it; a document that carries it is rejected at /migratedFrom.",
       "type": "string",
       "pattern": "^[0-9]+\\.[0-9]+$"
     },
@@ -159,9 +159,9 @@
           "description": "Symbolic origin, informational once `digest` is present.",
           "type": "string",
           "minLength": 1
-        }
+        },
+        "path": false
       },
-      "not": { "required": ["path"] },
       "unevaluatedProperties": true
     },
     "estimand": {

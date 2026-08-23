@@ -1,6 +1,5 @@
 package neuropublish.conformance
 
-import java.nio.{ByteBuffer, ByteOrder}
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path}
 import io.circe.{HCursor, Json}
@@ -14,9 +13,13 @@ import neuropublish.viewer.{Workspace, WorkspaceLayout, WorkspaceState}
 
 /** The golden bundles: reference, valid, invalid, old-version, new-extension, and
   * schema-digest-mismatch, plus the schema documents' single-source-of-truth rules.
+  *
+  * An invalid fixture's `.expect` file lists the exact problems admission must report, one per
+  * line, in order: each line is a prefix of the rendered problem (`<pointer>: <message>`, or just
+  * `<message>` for a whole-document problem). Admission must report exactly those problems — a
+  * spurious extra problem fails the fixture as surely as a missing one.
   */
 class FixtureSuite extends FunSuite:
-  private val VolumeGridMagic = "NPUDOM1\u0000".getBytes(StandardCharsets.US_ASCII)
   private val fixtures =
     List("fixtures", "modules/conformance/fixtures").map(Path.of(_)).find(Files.isDirectory(_))
       .getOrElse(fail("fixtures directory not found from " + Path.of("").toAbsolutePath))
@@ -29,6 +32,8 @@ class FixtureSuite extends FunSuite:
       .sortBy(_.getFileName.toString)
   private def expect(p: Path): String =
     Files.readString(Path.of(p.toString.stripSuffix(".json") + ".expect")).trim
+  private def expectedProblems(p: Path): List[String] =
+    expect(p).linesIterator.map(_.trim).filter(_.nonEmpty).toList
   private def admitted(p: Path): Manifest =
     Manifest.parse(Files.readAllBytes(p)).fold(
       ps => fail(s"${p.getFileName} rejected: ${Problem.render(ps)}"),
@@ -37,40 +42,6 @@ class FixtureSuite extends FunSuite:
 
   private def required[A](value: Either[io.circe.DecodingFailure, A]): A =
     value.fold(e => fail(e.message), identity)
-
-  private def putString(buffer: ByteBuffer, value: String): Unit =
-    val bytes = value.getBytes(StandardCharsets.UTF_8)
-    buffer.putInt(bytes.length)
-    val _ = buffer.put(bytes)
-
-  private def volumeGridPreimage(
-      descriptorId: String,
-      descriptorVersion: String,
-      space: String,
-      coordinateConvention: String,
-      spatialUnit: String,
-      ordinalLayout: String,
-      shape: Vector[Int],
-      affine: Vector[Double]
-  ): Array[Byte] =
-    val strings =
-      Vector(
-        descriptorId,
-        descriptorVersion,
-        space,
-        coordinateConvention,
-        spatialUnit,
-        ordinalLayout
-      )
-    val stringBytes = strings.map(_.getBytes(StandardCharsets.UTF_8))
-    val size = VolumeGridMagic.length + stringBytes.map(bytes => 4 + bytes.length).sum + 3 * 4 +
-      16 * 8
-    val buffer = ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN)
-    buffer.put(VolumeGridMagic)
-    strings.foreach(value => putString(buffer, value))
-    shape.foreach(buffer.putInt)
-    affine.foreach(value => buffer.putDouble(if value == 0.0 then 0.0 else value))
-    buffer.array()
 
   private def referenceDomain: HCursor =
     val manifest = parse(new String(read("reference/manifest.json"), StandardCharsets.UTF_8))
@@ -120,30 +91,60 @@ class FixtureSuite extends FunSuite:
 
     val descriptorId = required(schema.get[String]("id"))
     val descriptorVersion = required(schema.get[String]("version"))
-    val shape = required(payload.get[Vector[Int]]("shape"))
-    val affineRows = required(payload.get[Vector[Vector[Double]]]("affine"))
-    val affine = affineRows.flatten
-    assertEquals(shape.length, 3)
-    assertEquals(affineRows.map(_.length), Vector.fill(4)(4))
-    assertEquals(required(key.get[Long]("size")), shape.map(_.toLong).product)
+    val p = VolumeGrid.readPayload("/domains/0/descriptor/payload", payload.focus.get)
+      .fold(ps => fail(Problem.render(ps)), identity)
+    assertEquals(p.shape.length, 3)
+    assertEquals(p.affine.map(_.length), Vector.fill(4)(4))
+    assertEquals(required(key.get[Long]("size")), p.shape.map(_.toLong).product)
 
-    val preimage = volumeGridPreimage(
+    // the preimage is spelled out here independently of VolumeGrid (ADR 0005 §2 words)
+    val strings = Vector(
       descriptorId,
       descriptorVersion,
-      required(payload.get[String]("space")),
-      required(payload.get[String]("coordinateConvention")),
-      required(payload.get[String]("spatialUnit")),
-      required(payload.get[String]("ordinalLayout")),
-      shape,
-      affine
-    )
+      p.space,
+      p.coordinateConvention,
+      p.spatialUnit,
+      p.ordinalLayout
+    ).map(_.getBytes(StandardCharsets.UTF_8))
+    val buffer = java.nio.ByteBuffer.allocate(8 + strings.map(4 + _.length).sum + 12 + 128)
+      .order(java.nio.ByteOrder.LITTLE_ENDIAN)
+    buffer.put("NPUDOM1\u0000".getBytes(StandardCharsets.US_ASCII))
+    strings.foreach(s => { buffer.putInt(s.length); buffer.put(s) })
+    p.shape.foreach(buffer.putInt)
+    p.affine.flatten.foreach(v => buffer.putDouble(if v == 0.0 then 0.0 else v))
     assertEquals(
       required(key.get[String]("structuralFingerprint")),
-      Sha256.of(preimage).render
+      Sha256.of(buffer.array()).render
+    )
+    assertEquals(
+      VolumeGrid.fingerprint(descriptorId, descriptorVersion, p).render,
+      Sha256.of(buffer.array()).render
     )
 
     val schemaBytes = read("reference/schemas/volume-grid-v1.schema.json")
     assertEquals(required(schema.get[String]("digest")), Sha256.of(schemaBytes).render)
+  }
+
+  test("a volume-grid key the server cannot recompute is rejected at the key member") {
+    val bytes = read("reference/manifest.json")
+    val json = parse(new String(bytes, StandardCharsets.UTF_8)).toOption.get
+    def problemsWith(f: Json => Json): List[String] =
+      Manifest.admit(f(json)).fold(_.map(_.pointer), _ => fail("admitted"))
+    val key = json.hcursor.downField("domains").downArray.downField("key")
+    assertEquals(
+      problemsWith(_ => key.downField("size").set(Json.fromInt(1)).top.get),
+      List("/domains/0/key/size")
+    )
+    assertEquals(
+      problemsWith(_ => key.delete.top.get),
+      List("/domains/0/key")
+    )
+    val affine = json.hcursor.downField("domains").downArray.downField("descriptor")
+      .downField("payload").downField("affine").downArray.downArray
+    assertEquals(
+      problemsWith(_ => affine.set(Json.fromDoubleOrNull(2.5)).top.get),
+      List("/domains/0/key/structuralFingerprint")
+    )
   }
 
   test("the trusted volume-grid schema is the one under protocol/schemas/records") {
@@ -171,18 +172,23 @@ class FixtureSuite extends FunSuite:
     })
   }
 
-  test(
-    "every invalid fixture is rejected at the documented pointer (or with the documented reason)"
-  ) {
+  test("every invalid fixture is rejected with exactly the problems its .expect lists") {
     val all = cases("invalid")
-    assert(all.length >= 20, all.length)
+    assert(all.length >= 27, all.length)
     all.foreach { p =>
-      val e = expect(p)
+      val expected = expectedProblems(p)
+      assert(expected.nonEmpty, s"${p.getFileName}: empty .expect")
       Manifest.parse(Files.readAllBytes(p)) match
         case Right(_) => fail(s"${p.getFileName} was admitted")
-        case Left(ps) => assert(
-            ps.exists(x => x.pointer == e || x.message.contains(e)),
-            s"${p.getFileName}: expected '$e' in ${ps.map(_.render)}"
+        case Left(ps) =>
+          val rendered = ps.map(_.render)
+          assertEquals(
+            rendered.length,
+            expected.length,
+            s"${p.getFileName}: expected exactly ${expected.mkString(" | ")}, got ${rendered.mkString(" | ")}"
+          )
+          rendered.zip(expected).foreach((got, want) =>
+            assert(got.startsWith(want), s"${p.getFileName}: expected '$want', got '$got'")
           )
     }
   }
@@ -243,7 +249,8 @@ class FixtureSuite extends FunSuite:
     val trusted = fixtures.resolve("schema-digest-mismatch/trusted-volume-grid.json")
     Manifest.parse(Files.readAllBytes(trusted)) match
       case Right(_) => fail("trusted id with a foreign digest was admitted")
-      case Left(ps) => assertEquals(ps.map(_.pointer), List(expect(trusted)))
+      case Left(ps) =>
+        assertEquals(ps.map(_.pointer), expectedProblems(trusted).map(_.takeWhile(_ != ':')))
     val unknown = fixtures.resolve("schema-digest-mismatch/unknown-volume-grid.json")
     val m = admitted(unknown)
     val d = m.openRecords.find(_._1 == "/domains/0/descriptor").map(_._3)
@@ -291,6 +298,12 @@ class FixtureSuite extends FunSuite:
     }
     val raw = manifest.raw.hcursor
     assertEquals(raw.downField("x-julia-producer").downField("version").as[String], Right("0.1"))
+    // deterministic output: nothing in the bundle names the Julia that wrote it
+    assertEquals(raw.downField("x-julia-producer").downField("julia").succeeded, false)
+    assertEquals(
+      manifest.domains.headOption.flatMap(_.key).flatMap(_.hcursor.get[Long]("size").toOption),
+      Some(16L * 16 * 12)
+    )
     assert(raw.downField("provenance").downField("activities").values.exists(_.exists(
       _.hcursor.downField("schema").downField("id").as[String] == Right("org.example.julia/denoise")
     )))

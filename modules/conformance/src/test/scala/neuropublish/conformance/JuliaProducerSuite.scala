@@ -1,6 +1,7 @@
 package neuropublish.conformance
 
 import cats.effect.{IO, Resource}
+import cats.syntax.all.*
 import com.comcast.ip4s.*
 import fs2.io.file.{Files, Path}
 import io.circe.Json
@@ -22,8 +23,11 @@ import scala.sys.process.*
   * documented HTTP API against an in-process server, and its manifest survives an R round trip with
   * unknown fields intact.
   *
-  * Needs `julia` (with JSON3) and `Rscript` (with jsonlite) on PATH; each test skips with a message
-  * otherwise. `fixtures/julia` is the committed output of the same script for CI.
+  * Needs `julia` (with JSON3) and `Rscript` (with jsonlite and neuroim2) on PATH. Each test skips
+  * with a message when a tool is absent, unless `NP_TEST_REQUIRE_TOOLS=1` or `CI=true` is set, in
+  * which case a missing tool fails the suite (CI installs both and must run the proof, not skip
+  * it). `fixtures/julia` is the committed output of the same script; one test regenerates it and
+  * compares byte for byte, so the producer cannot drift silently on another Julia.
   */
 class JuliaProducerSuite extends CatsEffectSuite:
   private val scripts = List("julia", "modules/conformance/julia").map(Path(_))
@@ -31,13 +35,24 @@ class JuliaProducerSuite extends CatsEffectSuite:
     .getOrElse(fail("julia directory not found from " + Path("").absolute))
   private val producer = (scripts / "producer.jl").absolute.toString
   private val roundtrip = (scripts / "roundtrip.R").absolute.toString
+  private val niftiCheck = (scripts / "nifti-check.R").absolute.toString
+  private val committed = List("fixtures/julia", "modules/conformance/fixtures/julia").map(Path(_))
+    .find(p => java.nio.file.Files.isDirectory(p.toNioPath))
+    .getOrElse(fail("fixtures/julia not found"))
+
+  /** Tools are required (not merely assumed) when the environment says so. */
+  private val toolsRequired: Boolean =
+    sys.env.get("NP_TEST_REQUIRE_TOOLS").exists(v => v == "1" || v.equalsIgnoreCase("true")) ||
+      sys.env.get("CI").exists(_.equalsIgnoreCase("true"))
 
   private def onPath(tool: String): Boolean =
     try Process(Seq("which", tool)).!(ProcessLogger(_ => ())) == 0
     catch case _: Exception => false
 
   private def requireTool(tool: String): Unit =
-    assume(onPath(tool), s"$tool is not on PATH; skipping the Julia producer proof")
+    if toolsRequired then
+      assert(onPath(tool), s"$tool is not on PATH and NP_TEST_REQUIRE_TOOLS/CI is set")
+    else assume(onPath(tool), s"$tool is not on PATH; skipping the Julia producer proof")
 
   /** Runs a command, capturing stdout lines; fails with stderr on a non-zero exit. */
   private def run(cmd: Seq[String]): IO[List[String]] = IO.blocking {
@@ -100,6 +115,47 @@ class JuliaProducerSuite extends CatsEffectSuite:
           assertEquals(Sha256.of(file).render, a.digest.render, a.id)
           assertEquals(file.length.toLong, a.size, a.id)
         }
+  }
+
+  bundle.test("producer.jl --out reproduces the committed fixtures/julia byte for byte") { dir =>
+    requireTool("julia")
+    def bytes(p: Path) = Files[IO].readAll(p).compile.to(Array)
+    for
+      _ <- run(Seq("julia", producer, "--out", dir.toString))
+      written <- Files[IO].walk(dir).evalFilter(p => Files[IO].isRegularFile(p)).compile.toList
+      rel = written.map(p => dir.toNioPath.relativize(p.toNioPath).toString).sorted
+      expected <- Files[IO].walk(committed).evalFilter(p => Files[IO].isRegularFile(p))
+        .compile.toList
+        .map(_.map(p => committed.toNioPath.relativize(p.toNioPath).toString).sorted)
+      _ = assertEquals(rel, expected)
+      _ <- rel.traverse_ { r =>
+        (bytes(dir / r), bytes(committed / r)).mapN { (a, b) =>
+          assert(
+            java.util.Arrays.equals(a, b),
+            s"$r differs from the committed fixture; regenerate fixtures/julia with producer.jl --out and review the diff"
+          )
+        }
+      }
+    yield ()
+  }
+
+  bundle.test("neuroim2 reads back the Julia volumes with the shape, affine, and values written") {
+    dir =>
+      requireTool("julia")
+      requireTool("Rscript")
+      for
+        _ <- run(Seq("julia", producer, "--out", dir.toString))
+        lines <- run(Seq("Rscript", niftiCheck, dir.toString))
+        _ = assert(lines.exists(_.startsWith("checked 4 volumes")), lines.mkString("\n"))
+        // the check is not vacuous: a corrupted volume fails it
+        t1 = dir / "assets" / "t1.nii"
+        bytes <- Files[IO].readAll(t1).compile.to(Array)
+        _ = { bytes(352) = (bytes(352) ^ 0x40).toByte }
+        _ <- fs2.Stream.emits(bytes).through(Files[IO].writeAll(t1)).compile.drain
+        bad <- IO.blocking(Process(Seq("Rscript", niftiCheck, dir.toString)).!(ProcessLogger(_ =>
+          ()
+        )))
+      yield assertNotEquals(bad, 0, "a corrupted volume passed nifti-check.R")
   }
 
   bundle.test("the Julia producer publishes over the HTTP API and every rendition is ready") {

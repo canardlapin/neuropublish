@@ -6,8 +6,10 @@ import neuropublish.protocol.Sha256
 /** The parts of a manifest the server and CLI act on. Everything else is retained as raw JSON
   * (`raw`) — unknown records are preserved, never interpreted (axiom 7). The JSON Schema
   * (`protocol/schemas/manifest.schema.json`) is the normative definition; this decoder is a
-  * projection of it and is deliberately lenient (it also decodes the shared presentation subset,
-  * which omits sensitivity and provenance).
+  * projection of it. It enforces the parts of the schema the projection acts on (required members,
+  * the `sha256:` digest grammar, the schema-reference version grammar, non-negative sizes) so the
+  * Scala.js build, which has no JSON Schema validator, rejects the same structural faults; what it
+  * does not enforce is listed in SPEC §3 ("JS-lenient subset").
   */
 final case class ManifestAsset(
     id: String,
@@ -24,6 +26,7 @@ final case class ResultField(
     estimand: String,
     measure: String,
     domain: String,
+    selection: Map[String, String],
     representations: List[Representation],
     order: Option[Int],
     publishedDisplay: Option[Json]
@@ -80,23 +83,43 @@ final case class Manifest(
       .sortBy((f, i) => (f.order.getOrElse(Int.MaxValue), i)).map(_._1)
 
 object Manifest:
-  given Decoder[Sha256] = Decoder.decodeString.emap(Sha256.parse)
-  given Decoder[ManifestAsset] =
-    Decoder.forProduct5("id", "digest", "size", "mediaType", "catalog")(ManifestAsset.apply)
+  /** Wire digests are strict: `sha256:` + 64 lowercase hex (`Sha256.parse` stays lenient for
+    * internal use, where bare hex circulates).
+    */
+  given Decoder[Sha256] = OpenRecord.strictSha256
+  private val nonNegative: Decoder[Long] =
+    Decoder.decodeLong.emap(n => if n >= 0 then Right(n) else Left("must be >= 0"))
+  given Decoder[ManifestAsset] = Decoder.instance { c =>
+    for
+      id <- c.get[String]("id")
+      digest <- c.get[Sha256]("digest")
+      size <- c.get[Long]("size")(using nonNegative)
+      mediaType <- c.get[String]("mediaType")
+      catalog <- c.get[Option[String]]("catalog")
+    yield ManifestAsset(id, digest, size, mediaType, catalog)
+  }
   given Decoder[Representation] = Decoder.forProduct2("kind", "asset")(Representation.apply)
-  given Decoder[ResultField] = Decoder.forProduct7(
+  given Decoder[ResultField] = Decoder.forProduct8(
     "id",
     "estimand",
     "measure",
     "domain",
+    "selection",
     "representations",
     "order",
     "publishedDisplay"
   )(ResultField.apply)
   given Decoder[Underlay] = Decoder.forProduct3("asset", "domain", "label")(Underlay.apply)
   given Decoder[Estimand] = Decoder.forProduct3("id", "label", "order")(Estimand.apply)
-  given Decoder[Analysis] =
-    Decoder.forProduct5("id", "label", "estimands", "sampleSize", "method")(Analysis.apply)
+  given Decoder[Analysis] = Decoder.instance { c =>
+    for
+      id <- c.get[String]("id")
+      label <- c.get[String]("label")
+      estimands <- c.get[List[Estimand]]("estimands")
+      sampleSize <- c.get[Option[Long]]("sampleSize")(using Decoder.decodeOption(using nonNegative))
+      method <- c.get[Option[Json]]("method")
+    yield Analysis(id, label, estimands, sampleSize.map(_.toInt), method)
+  }
   given Decoder[Domain] = Decoder.forProduct3("id", "descriptor", "key")(Domain.apply)
   given Decoder[Warning] = Decoder.forProduct3("id", "message", "concerns")(Warning.apply)
 
@@ -150,15 +173,20 @@ object Manifest:
     Migrations.bring(json) match
       case Left(p) => Left(List(p))
       case Right(current) =>
-        // schema and raw-JSON checks run whether or not the structural decoder succeeds
-        val early = SchemaCheck.manifest(current) ++ ManifestChecks.catalogs(current)
+        // schema and raw-JSON checks run whether or not the structural decoder succeeds; where
+        // both speak to one pointer the raw check's message (which names the remedy) is kept
+        val raw = ManifestChecks.catalogs(current)
+        val rawAt = raw.map(_.pointer).toSet
+        val early = SchemaCheck.manifest(current).filterNot(p => rawAt(p.pointer)) ++ raw
         current.as[Manifest] match
           case Left(e) =>
             val at = JsonPointer.ofFailure(e)
             val decoder = Option.when(!early.exists(_.pointer == at))(Problem(at, e.message))
             Left((early ++ decoder).distinct)
           case Right(m) =>
-            val all = (early ++ ManifestChecks.all(m)).distinct
+            // a pointer the schema already reported is not reported again by a semantic check
+            val reported = early.map(_.pointer).toSet
+            val all = (early ++ ManifestChecks.all(m).filterNot(p => reported(p.pointer))).distinct
             if all.isEmpty then Right(m) else Left(all)
 
   /** Every representation and underlay must reference a declared asset. */

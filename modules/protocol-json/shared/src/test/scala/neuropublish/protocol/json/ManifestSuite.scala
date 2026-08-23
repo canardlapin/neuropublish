@@ -78,10 +78,45 @@ class ManifestSuite extends FunSuite:
   }
   test("JSON pointer escaping and decoding-failure paths") {
     assertEquals(JsonPointer.of(List("a/b", "m~n", "0")), "/a~1b/m~0n/0")
-    assertEquals(JsonPointer.fromDotPath(".assets[0].digest"), "/assets/0/digest")
     val noDigest = text.replace(
       "\"digest\": \"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\", ",
       ""
     )
     assert(problems(noDigest).exists(_.pointer == "/assets/0/digest"))
+  }
+  test("decoding-failure pointers come from the cursor history, so odd keys are exact") {
+    import io.circe.Decoder
+    val doc = io.circe.parser.parse(
+      """{"a.b": [{"c[0]": {"x/y": "no"}}, {"c[0]": {"x/y": 1}}]}"""
+    ).toOption.get
+    val d = Decoder.instance { c =>
+      c.downField("a.b").downArray.right.downField("c[0]").downField("x/y").as[String]
+    }
+    val failure = doc.as(using d).swap.toOption.get
+    assertEquals(JsonPointer.ofFailure(failure), "/a.b/1/c[0]/x~1y")
+    val digest = Decoder.instance(_.downField("assets").downN(2).downField("digest").as[String])
+    val f2 = io.circe.parser.parse("""{"assets":[{},{},{}]}""").toOption.get.as(using digest)
+    assertEquals(JsonPointer.ofFailure(f2.swap.toOption.get), "/assets/2/digest")
+  }
+  test("a producer may not write migratedFrom; an unsupported major is named as such") {
+    val claimed = text.replace("\"core\": \"0.1\"", "\"core\": \"0.1\", \"migratedFrom\": \"0.0\"")
+    assertEquals(problems(claimed).map(_.pointer), List("/migratedFrom"))
+    val major = problems(text.replace("\"core\": \"0.1\"", "\"core\": \"2.3\""))
+    assertEquals(major.map(_.pointer), List("/core"))
+    assert(major.head.message.contains("major 2"), major.head.message)
+  }
+  test("wire strictness: digest prefix, schema version grammar, non-negative sizes, selection") {
+    val bare = text.replace("\"digest\": \"sha256:", "\"digest\": \"")
+    assert(problems(bare).exists(_.pointer == "/assets/0/digest"), problems(bare))
+    val ver = text.replace("\"version\": \"1\"", "\"version\": \"v1\"")
+    assert(
+      problems(ver).exists(_.pointer == "/domains/0/descriptor/schema/version"),
+      problems(ver)
+    )
+    val size = text.replace("\"size\": 0", "\"size\": -1")
+    assert(problems(size).exists(_.pointer == "/assets/0/size"), problems(size))
+    val n = text.replace("\"label\": \"A\"", "\"label\": \"A\", \"sampleSize\": -3")
+    assert(problems(n).exists(_.pointer == "/analyses/0/sampleSize"), problems(n))
+    val sel = text.replace("\"selection\": {}, ", "")
+    assert(problems(sel).exists(_.pointer == "/resultFields/0/selection"), problems(sel))
   }

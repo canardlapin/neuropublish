@@ -19,7 +19,7 @@
                 "descriptor": {
                     "id": "org.neuropublish.domain/volume-grid",
                     "version": "1.0",
-                    "digest": "sha256:c1871091d7dc2bf6c5d3b1acafdf2d9c0d47e62d5a737a571ed7433ba778b7ac"
+                    "digest": "sha256:69c25b8868349828e41cd6d610ac619af118fb7b807b7306f706b727ed23dfb7"
                 },
                 "size": 3072,
                 "structuralFingerprint": "sha256:aa1d8cdb290b7739ff086b1f380552f59366c8671dc33425716abd5f2bce7687"
@@ -28,7 +28,7 @@
                 "schema": {
                     "id": "org.neuropublish.domain/volume-grid",
                     "version": "1.0",
-                    "digest": "sha256:c1871091d7dc2bf6c5d3b1acafdf2d9c0d47e62d5a737a571ed7433ba778b7ac"
+                    "digest": "sha256:69c25b8868349828e41cd6d610ac619af118fb7b807b7306f706b727ed23dfb7"
                 },
                 "payload": {
                     "space": "MNI152NLin2009cAsym",
@@ -283,7 +283,6 @@
     },
     "x-julia-producer": {
         "version": "0.1",
-        "julia": "1.12",
         "note": "unknown top-level extension; value preservation, not byte preservation",
         "nested": {
             "flags": [

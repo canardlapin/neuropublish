@@ -28,23 +28,44 @@ class ResumeSuite extends CatsEffectSuite:
         "(\\d+) of \\d+ objects missing".r.findFirstMatchIn(l).get.group(1).toInt
     }.get
 
+  /** The object digest a PUT addresses, from its `/objects/{digest}` path. */
+  private def objectDigest(req: org.http4s.Request[IO]): Option[String] =
+    Option.when(req.method == Method.PUT)(req.uri.path.renderString)
+      .flatMap(p => "/objects/([^/]+)$".r.findFirstMatchIn(p).map(_.group(1)))
+
+  /** Records the digest of every object PUT a client completes with 204. */
+  private def recording(
+      inner: Client[IO],
+      done: Ref[IO, Set[String]]
+  ): Client[IO] = Client[IO] { req =>
+    objectDigest(req) match
+      case Some(d) =>
+        inner.run(req).evalTap(r =>
+          if r.status == Status.NoContent then done.update(_ + d) else IO.unit
+        )
+      case None => inner.run(req)
+  }
+
   app.test("a second push after an interrupted one skips every object already uploaded") { app =>
     val healthy = Client.fromHttpApp(app)
     for
-      uploaded <- Ref[IO].of(0)
+      first <- Ref[IO].of(Set.empty[String])
+      second <- Ref[IO].of(Set.empty[String])
       // dies for good once one object PUT has succeeded: every later PUT fails at the transport
       flaky = Client[IO] { req =>
-        if req.method == Method.PUT && req.uri.path.renderString.contains("/objects/") then
-          cats.effect.Resource.eval(uploaded.get).flatMap { n =>
-            if n > 0 then
+        if objectDigest(req).isDefined then
+          cats.effect.Resource.eval(first.get).flatMap { n =>
+            if n.nonEmpty then
               cats.effect.Resource.eval(IO.raiseError(new java.io.IOException("connection reset")))
-            else
-              healthy.run(req).evalTap(r =>
-                if r.status == Status.NoContent then uploaded.update(_ + 1) else IO.unit
-              )
+            else recording(healthy, first).run(req)
           }
         else healthy.run(req)
       }
+      all <- Files[IO].readAll(fixtures / "reference" / "manifest.json").compile.to(Array)
+        .map(b =>
+          neuropublish.protocol.json.Manifest.parse(b).toOption.get._2.assets
+            .map(_.digest.render).toSet
+        )
       out1 <- Ref[IO].of(List.empty[String])
       code1 <- Push.run(
         fixtures / "reference",
@@ -59,14 +80,16 @@ class ResumeSuite extends CatsEffectSuite:
       lines1 <- out1.get
       _ = assertEquals(code1, ExitCode.Error)
       _ = assertEquals(missingLine(lines1), 5)
-      done <- uploaded.get
-      _ = assert(done >= 1, "at least one object must have been uploaded before the interruption")
+      done <- first.get
+      _ =
+        assert(done.nonEmpty, "at least one object must have been uploaded before the interruption")
+      _ = assert(done.subsetOf(all), done)
       _ = assert(lines1.exists(_.contains("retry 2/3")), lines1.mkString("\n"))
       _ = assert(lines1.exists(_.contains("after 3 attempts")), lines1.mkString("\n"))
       out2 <- Ref[IO].of(List.empty[String])
       code2 <- Push.run(
         fixtures / "reference",
-        new Api(healthy, server),
+        new Api(recording(healthy, second), server),
         "rotman",
         "sherlock",
         None,
@@ -76,10 +99,42 @@ class ResumeSuite extends CatsEffectSuite:
       )
       lines2 <- out2.get
       _ = assertEquals(code2, ExitCode.Success, lines2.mkString("\n"))
-      _ = assertEquals(missingLine(lines2), 5 - done)
+      resumed <- second.get
+      // the second session asks for exactly the objects the interruption left behind
+      _ = assertEquals(resumed, all -- done)
+      _ = assertEquals(missingLine(lines2), resumed.size)
       _ = assertEquals(
         lines2.count(l => l.startsWith("uploading") && l.endsWith("ok")),
-        5 - done + 1
+        resumed.size + 1
       ) // + manifest
     yield assert(lines2.exists(_.startsWith("view ")))
+  }
+
+  app.test("re-pushing the bundle that is already the head is reported, not rejected") { app =>
+    val healthy = Client.fromHttpApp(app)
+    def push(out: Ref[IO, List[String]]) = Push.run(
+      fixtures / "reference",
+      new Api(healthy, server),
+      "rotman",
+      "sherlock",
+      None,
+      None,
+      token,
+      l => out.update(_ :+ l)
+    )
+    for
+      out1 <- Ref[IO].of(List.empty[String])
+      code1 <- push(out1)
+      _ = assertEquals(code1, ExitCode.Success)
+      lines1 <- out1.get
+      head = lines1.collectFirst {
+        case l if l.startsWith("committing") => l.split(" -> ")(1).trim.split(" ")(0)
+      }.get
+      out2 <- Ref[IO].of(List.empty[String])
+      code2 <- push(out2)
+      lines2 <- out2.get
+    yield
+      assertEquals(code2, ExitCode.Success, lines2.mkString("\n"))
+      assert(lines2.exists(_.contains(s"already published as $head")), lines2.mkString("\n"))
+      assert(!lines2.exists(_.contains("--parent")), lines2.mkString("\n"))
   }
