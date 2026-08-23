@@ -1,0 +1,325 @@
+{
+  "core": "0.1",
+  "title": "Sherlock naturalistic movie — speech-feature group model",
+  "synopsis": "Group meta random-effects over 26 first-level speech-feature GLMs.",
+  "warnings": [
+    {
+      "id": "heterogeneous-temporal-noise",
+      "message": "First-level temporal noise models differ across inputs: 22 use AR(2), 4 use AR(1).",
+      "concerns": {
+        "analysis": "group-model"
+      }
+    }
+  ],
+  "sensitivity": "group-level",
+  "axes": [
+    {
+      "id": "level",
+      "label": "Level",
+      "values": [
+        "group"
+      ]
+    }
+  ],
+  "domains": [
+    {
+      "id": "mni-2mm",
+      "key": {
+        "descriptor": {
+          "id": "org.neuropublish.domain/volume-grid",
+          "version": "1.0",
+          "digest": "sha256:c1871091d7dc2bf6c5d3b1acafdf2d9c0d47e62d5a737a571ed7433ba778b7ac"
+        },
+        "size": 13440,
+        "structuralFingerprint": "sha256:655d2d778d0cc2fd8f25226d044d65868984fe84510944c86b26bac93b251a37"
+      },
+      "descriptor": {
+        "schema": {
+          "id": "org.neuropublish.domain/volume-grid",
+          "version": "1.0",
+          "digest": "sha256:c1871091d7dc2bf6c5d3b1acafdf2d9c0d47e62d5a737a571ed7433ba778b7ac"
+        },
+        "payload": {
+          "space": "MNI152NLin2009cAsym",
+          "coordinateConvention": "RAS+",
+          "spatialUnit": "mm",
+          "ordinalLayout": "x-fastest",
+          "shape": [
+            24,
+            28,
+            20
+          ],
+          "affine": [
+            [
+              2.0,
+              0.0,
+              0.0,
+              -22.0
+            ],
+            [
+              0.0,
+              2.0,
+              0.0,
+              -30.0
+            ],
+            [
+              0.0,
+              0.0,
+              2.0,
+              -18.0
+            ],
+            [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          ]
+        }
+      }
+    }
+  ],
+  "assets": [
+    {
+      "id": "t1",
+      "digest": "sha256:7df88c4c806f5d41a342c15b546ff1849e00d462000bf8b6ecef8da55f31fa98",
+      "mediaType": "application/x-nifti",
+      "size": 54112,
+      "catalog": "templateflow:MNI152NLin2009cAsym/T1w/res-02"
+    },
+    {
+      "id": "speech-effect",
+      "digest": "sha256:2b38327c1c4606258b9c7bcfd169ce769f32a398aa0d56e1e192d09d0ddf6091",
+      "mediaType": "application/x-nifti",
+      "size": 54112
+    },
+    {
+      "id": "speech-se",
+      "digest": "sha256:25600aaf1da936cd6689ff696be414da43f81eb5420510f46a8527cdf63d7a89",
+      "mediaType": "application/x-nifti",
+      "size": 54112
+    },
+    {
+      "id": "speech-t",
+      "digest": "sha256:c38a5f5b2cb758f50433854ccc91e93e58e8d0a78b932dbaad54c197c698e482",
+      "mediaType": "application/x-nifti",
+      "size": 54112
+    },
+    {
+      "id": "speech-z",
+      "digest": "sha256:067ebf74826d5d880dca7ff9879d9a55a69ec548e73f9a6c41c775122be53909",
+      "mediaType": "application/x-nifti",
+      "size": 54112
+    }
+  ],
+  "analyses": [
+    {
+      "id": "group-model",
+      "label": "Group model · speech features",
+      "method": {
+        "schema": {
+          "id": "org.bbuchsbaum.fmrigds/reducer/meta-random-effects",
+          "version": "1.2",
+          "digest": "sha256:5d0a000000000000000000000000000000000000000000000000000000000c31"
+        },
+        "payload": {
+          "weights": "inverse-variance",
+          "df": 25,
+          "inputs": 26
+        }
+      },
+      "sampleSize": 26,
+      "estimands": [
+        {
+          "id": "speech",
+          "label": "speech coefficient",
+          "order": 1
+        },
+        {
+          "id": "articulatory-rate",
+          "label": "articulatory rate",
+          "order": 2
+        },
+        {
+          "id": "speech-vs-silence",
+          "label": "speech > silence",
+          "order": 1
+        }
+      ]
+    }
+  ],
+  "resultFields": [
+    {
+      "id": "speech-effect",
+      "estimand": "speech",
+      "measure": "org.neuropublish.measure/effect",
+      "selection": {
+        "level": "group"
+      },
+      "domain": "mni-2mm",
+      "representations": [
+        {
+          "kind": "volume",
+          "asset": "speech-effect"
+        }
+      ],
+      "order": 1
+    },
+    {
+      "id": "speech-se",
+      "estimand": "speech",
+      "measure": "org.neuropublish.measure/standard-error",
+      "selection": {
+        "level": "group"
+      },
+      "domain": "mni-2mm",
+      "representations": [
+        {
+          "kind": "volume",
+          "asset": "speech-se"
+        }
+      ],
+      "order": 2
+    },
+    {
+      "id": "speech-t",
+      "estimand": "speech",
+      "measure": "org.neuropublish.measure/t-statistic",
+      "selection": {
+        "level": "group"
+      },
+      "domain": "mni-2mm",
+      "representations": [
+        {
+          "kind": "volume",
+          "asset": "speech-t"
+        }
+      ],
+      "order": 3,
+      "publishedDisplay": {
+        "threshold": {
+          "mode": "two-sided",
+          "min": 3.1
+        },
+        "window": {
+          "min": -8.0,
+          "centre": 0.0,
+          "max": 8.0
+        },
+        "colormap": "cold-hot"
+      }
+    },
+    {
+      "id": "speech-z",
+      "estimand": "speech",
+      "measure": "org.neuropublish.measure/z-statistic",
+      "selection": {
+        "level": "group"
+      },
+      "domain": "mni-2mm",
+      "representations": [
+        {
+          "kind": "volume",
+          "asset": "speech-z"
+        }
+      ],
+      "order": 4
+    }
+  ],
+  "underlays": [
+    {
+      "asset": "t1",
+      "domain": "mni-2mm",
+      "label": "MNI152NLin2009cAsym T1"
+    }
+  ],
+  "provenance": {
+    "entities": [
+      {
+        "id": "raw-bids",
+        "label": "Raw BIDS dataset",
+        "hosted": false
+      }
+    ],
+    "activities": [
+      {
+        "id": "first-level-01",
+        "schema": {
+          "id": "org.bbuchsbaum.fmrireg/analysis-receipt",
+          "version": "1.0",
+          "digest": "sha256:aa00000000000000000000000000000000000000000000000000000000000001"
+        },
+        "payload": {
+          "subject": "01",
+          "temporalNoise": "AR(2)",
+          "drift": "cosine-128s",
+          "hrf": "spmg1"
+        }
+      },
+      {
+        "id": "first-level-02",
+        "schema": {
+          "id": "org.bbuchsbaum.fmrireg/analysis-receipt",
+          "version": "1.0",
+          "digest": "sha256:aa00000000000000000000000000000000000000000000000000000000000001"
+        },
+        "payload": {
+          "subject": "02",
+          "temporalNoise": "AR(1)",
+          "drift": "cosine-128s",
+          "hrf": "spmg1"
+        }
+      },
+      {
+        "id": "smoothing",
+        "schema": {
+          "id": "org.example.lab/smooth",
+          "version": "0.3",
+          "digest": "sha256:bb00000000000000000000000000000000000000000000000000000000000002"
+        },
+        "payload": {
+          "fwhmMm": 6
+        }
+      },
+      {
+        "id": "group-reduce",
+        "schema": {
+          "id": "org.bbuchsbaum.fmrigds/reducer/meta-random-effects",
+          "version": "1.2",
+          "digest": "sha256:5d0a000000000000000000000000000000000000000000000000000000000c31"
+        },
+        "payload": {
+          "software": "fmrigds 0.7.2",
+          "runtime": "R 4.5.1",
+          "git": "3f2a1c0"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "from": "raw-bids",
+        "to": "first-level-01"
+      },
+      {
+        "from": "raw-bids",
+        "to": "first-level-02"
+      },
+      {
+        "from": "first-level-01",
+        "to": "smoothing"
+      },
+      {
+        "from": "first-level-02",
+        "to": "smoothing"
+      },
+      {
+        "from": "smoothing",
+        "to": "group-reduce"
+      },
+      {
+        "from": "group-reduce",
+        "to": "speech-t"
+      }
+    ]
+  }
+}

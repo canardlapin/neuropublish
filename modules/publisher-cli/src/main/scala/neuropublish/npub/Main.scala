@@ -60,10 +60,25 @@ object Main extends CommandIOApp("npub", "Neuropublish publisher", version = "0.
               IO.println(s"manifest  ${d.render}") *> IO.println(
                 s"assets    ${m.assets.length} declared, ${m.volumeAssetIds.length} volume"
               ).as(ExitCode.Success)
-            case Left(msg) =>
-              IO.println(s"error  ${dir / "manifest.json"}: $msg").as(ExitCode.Error)
+            case Left(problems) =>
+              IO.println(s"error  ${dir / "manifest.json"}: ${problems.length} problem(s)") *>
+                problems.traverse_(p => IO.println(s"error  ${p.render}")).as(ExitCode.Error)
         }
       }
+    }
+
+  private val inspect =
+    Opts.subcommand("inspect", "Print what a bundle declares and every admission problem") {
+      bundle.map(dir => Inspect.run(dir, out))
+    }
+
+  private val pack =
+    Opts.subcommand("pack", "Hash a staging bundle's local files into a normalized bundle") {
+      (
+        Opts.argument[String]("staging-dir").map(Path(_)),
+        Opts.argument[String]("out.npub").map(Path(_))
+      )
+        .mapN((staging, dest) => Pack.run(staging, dest, out))
     }
 
   private val push =
@@ -138,4 +153,5 @@ object Main extends CommandIOApp("npub", "Neuropublish publisher", version = "0.
     }
 
   def main: Opts[IO[ExitCode]] =
-    validate orElse push orElse login orElse logout orElse whoami orElse credential
+    validate orElse inspect orElse pack orElse push orElse login orElse logout orElse whoami orElse
+      credential

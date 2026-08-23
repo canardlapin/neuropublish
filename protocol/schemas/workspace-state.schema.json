@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://neuropublish.org/schema/0.1/workspace-state.schema.json",
+  "title": "Saved view: org.neuropublish.view/workspace-state@1",
+  "description": "The saved-view wire record (modules/viewer-state WorkspaceState). Presentation state only: the producer's `published` recommendation is kept beside the viewer's `current` values, but on restore the revision's own recommendation wins. The layout is the nested open record org.neuropublish.view/workspace-layout@1.",
+  "type": "object",
+  "required": ["schema", "payload"],
+  "properties": {
+    "schema": {
+      "type": "object",
+      "required": ["id", "version"],
+      "properties": {
+        "id": { "const": "org.neuropublish.view/workspace-state" },
+        "version": { "const": "1" },
+        "digest": { "$ref": "#/$defs/sha256" }
+      },
+      "additionalProperties": false
+    },
+    "payload": {
+      "type": "object",
+      "required": ["layers", "cursor", "layout", "inspector"],
+      "properties": {
+        "layers": {
+          "description": "List order: first is drawn on top; the underlay is excluded.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/layer" }
+        },
+        "cursor": {
+          "description": "Linked world coordinate `[x, y, z]` in mm, or null.",
+          "oneOf": [
+            { "type": "null" },
+            { "type": "array", "minItems": 3, "maxItems": 3, "items": { "type": "number" } }
+          ]
+        },
+        "layout": { "$ref": "#/$defs/layoutRecord" },
+        "inspector": { "type": "string", "enum": ["layers", "analysis", "provenance"] }
+      },
+      "unevaluatedProperties": true
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "window": {
+      "type": "object",
+      "required": ["min", "max"],
+      "properties": { "min": { "type": "number" }, "max": { "type": "number" } },
+      "additionalProperties": false
+    },
+    "threshold": {
+      "type": "object",
+      "required": ["mode", "min"],
+      "properties": {
+        "mode": { "type": "string", "enum": ["two-sided", "positive", "negative", "off"] },
+        "min": { "type": "number", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "display": {
+      "type": "object",
+      "required": ["visible", "opacity", "window", "threshold", "colormap"],
+      "properties": {
+        "visible": { "type": "boolean" },
+        "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "window": { "$ref": "#/$defs/window" },
+        "threshold": { "$ref": "#/$defs/threshold" },
+        "colormap": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,31}$" }
+      },
+      "additionalProperties": false
+    },
+    "layer": {
+      "type": "object",
+      "required": ["id", "published", "current"],
+      "properties": {
+        "id": { "description": "Result field id in the revision.", "type": "string", "minLength": 1 },
+        "published": { "$ref": "#/$defs/display" },
+        "current": { "$ref": "#/$defs/display" },
+        "recommended": {
+          "description": "false when `published` is a data-derived default rather than a producer recommendation.",
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "layoutRecord": {
+      "type": "object",
+      "required": ["schema", "payload"],
+      "properties": {
+        "schema": {
+          "type": "object",
+          "required": ["id", "version"],
+          "properties": {
+            "id": { "const": "org.neuropublish.view/workspace-layout" },
+            "version": { "const": "1" },
+            "digest": { "$ref": "#/$defs/sha256" }
+          },
+          "additionalProperties": false
+        },
+        "payload": {
+          "type": "object",
+          "required": ["preset", "navigatorFraction", "inspectorFraction", "drawerFraction"],
+          "properties": {
+            "preset": { "type": "string", "enum": ["volume", "surface", "hybrid"] },
+            "navigatorFraction": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1 },
+            "inspectorFraction": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1 },
+            "drawerFraction": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1 }
+          },
+          "unevaluatedProperties": true
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
