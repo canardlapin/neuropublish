@@ -26,7 +26,7 @@ np_field(
 \item{domain}{The id of the domain the representations live on.}
 
 \item{selection}{A named list of axis id to axis value (e.g.
-\code{list(level = "group")}).}
+\code{list(level = "group")}); an empty selection is written as \code{{}}.}
 
 \item{representations}{A list of representations, e.g.
 \code{list(np_volume_rep("speech-t"))}.}

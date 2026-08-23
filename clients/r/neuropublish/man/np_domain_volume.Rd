@@ -25,7 +25,9 @@ used), three-dimensional.}
 the protocol currently defines for a \code{volume-grid} domain.}
 }
 \value{
-A plain list that serializes to one entry of \code{domains}.
+A plain list that serializes to one entry of \code{domains}. \code{key$size}
+is the voxel count as a double (it may exceed R's integer range; it is
+written as an integer literal).
 }
 \description{
 Builds the \code{domains[]} record for a regular 3-D grid: the open descriptor

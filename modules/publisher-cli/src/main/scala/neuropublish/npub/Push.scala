@@ -7,7 +7,8 @@ import fs2.io.file.{Files, Path}
 import neuropublish.api.*
 import neuropublish.api.Protocol.given
 import neuropublish.protocol.Sha256
-import neuropublish.protocol.json.Manifest
+import io.circe.Json
+import neuropublish.protocol.json.{Manifest, Problem}
 import org.http4s.{Header, Headers, Method, Request, Uri}
 import org.http4s.headers.{Authorization, `Content-Length`}
 import org.typelevel.ci.CIString
@@ -32,6 +33,25 @@ object Push:
   /** A file in the bundle's `assets/` tree, hashed once. */
   final case class Local(path: Path, digest: Sha256, size: Long)
 
+  /** What a push ends in. Rendered in human or `--json` form by [[run]]. */
+  enum Outcome:
+    case Committed(
+        parent: Option[String],
+        revision: String,
+        digest: String,
+        revisionUrl: String,
+        viewUrl: String
+    )
+    case Unchanged(head: String)
+    case StaleParent(message: String, head: Option[String])
+    case ManifestRejected(problems: List[Problem])
+    case Rejected(code: String, message: String, problems: List[Problem])
+    case Failed(error: Throwable)
+
+    def ok: Boolean = this match
+      case _: Committed | _: Unchanged => true
+      case _ => false
+
   def run(
       dir: Path,
       api: Api,
@@ -40,95 +60,181 @@ object Push:
       parent: Option[String],
       message: Option[String],
       token: String,
-      out: String => IO[Unit] = IO.println
+      out: String => IO[Unit] = IO.println,
+      json: Boolean = false
   ): IO[ExitCode] =
-    val flow =
+    val progress = Report.progress(json, out)
+    execute(dir, api, ws, project, parent, message, token, progress).flatMap { o =>
+      val lines = if json then List(render(o).noSpaces) else human(api.server, o)
+      lines.traverse_(out).as(if o.ok then ExitCode.Success else ExitCode.Error)
+    }
+
+  /** The push itself; `progress` receives the running commentary, never the outcome. */
+  def execute(
+      dir: Path,
+      api: Api,
+      ws: String,
+      project: String,
+      parent: Option[String],
+      message: Option[String],
+      token: String,
+      progress: String => IO[Unit]
+  ): IO[Outcome] =
+    val flow: IO[Outcome] =
       for
-        _ <- insecureWarning(api.server).traverse_(out)
+        _ <- insecureWarning(api.server).traverse_(progress)
         manifestBytes <- Files[IO].readAll(dir / "manifest.json").compile.to(Array)
         parsed <- Manifest.parse(manifestBytes) match
-          case Right(p) => IO.pure(p)
-          case Left(problems) =>
-            problems.traverse_(p => out(s"error       ${p.render}")) *>
-              IO.raiseError(CliError(s"manifest rejected: ${problems.length} problem(s)"))
-        (digest, manifest) = parsed
-        _ <- out(
-          f"validating  manifest.json  ok  core ${manifest.core}  ${manifest.assets.length} assets"
+          case Right(p) => IO.pure(Right(p))
+          case Left(problems) => IO.pure(Left(Outcome.ManifestRejected(problems)))
+        outcome <- parsed match
+          case Left(o) => IO.pure(o)
+          case Right((digest, manifest)) =>
+            transfer(
+              dir,
+              api,
+              ws,
+              project,
+              parent,
+              message,
+              token,
+              progress,
+              manifestBytes,
+              digest,
+              manifest
+            )
+      yield outcome
+    flow.handleError(e => Outcome.Failed(e))
+
+  private def transfer(
+      dir: Path,
+      api: Api,
+      ws: String,
+      project: String,
+      parent: Option[String],
+      message: Option[String],
+      token: String,
+      out: String => IO[Unit],
+      manifestBytes: Array[Byte],
+      digest: Sha256,
+      manifest: Manifest
+  ): IO[Outcome] =
+    for
+      _ <- out(
+        f"validating  manifest.json  ok  core ${manifest.core}  ${manifest.assets.length} assets"
+      )
+      files <- Files[IO].walk(dir / "assets")
+        .filter(p => !p.toString.split('/').exists(_.startsWith(".")))
+        .evalFilter(p => Files[IO].isRegularFile(p, false)).compile.toList
+      hashed <- files.traverse(p => Pack.hashFile(p).map((d, n) => Local(p, d, n)))
+      byDigest = hashed.map(l => l.digest.hex -> l).toMap
+      resolved <- manifest.assets.traverse { a =>
+        IO.fromOption(byDigest.get(a.digest.hex))(CliError(
+          s"asset ${a.id} ${a.digest.render} not found under ${dir / "assets"}"
+        )).flatMap { l =>
+          // a declared size that disagrees with the file is refused before any negotiation
+          if l.size != a.size then
+            IO.raiseError(CliError(
+              s"asset ${a.id}: manifest declares ${a.size} B but ${l.path.fileName} is ${l.size} B"
+            ))
+          else IO.pure(a -> l)
+        }
+      }
+      _ <- out(f"hashing     ${resolved.length} assets  ok")
+      inv = manifest.assets.map(a => AssetInventory(a.digest.render, a.size, a.mediaType))
+      created <- api.orFail(api.secured(
+        Protocol.createUploadSession,
+        token,
+        (
+          ws,
+          project,
+          CreateUploadSession(digest.render, manifestBytes.length.toLong, parent, inv)
         )
-        files <- Files[IO].walk(dir / "assets")
-          .filter(p => !p.toString.split('/').exists(_.startsWith(".")))
-          .evalFilter(p => Files[IO].isRegularFile(p, false)).compile.toList
-        hashed <- files.traverse(p => Pack.hashFile(p).map((d, n) => Local(p, d, n)))
-        byDigest = hashed.map(l => l.digest.hex -> l).toMap
-        resolved <- manifest.assets.traverse { a =>
-          IO.fromOption(byDigest.get(a.digest.hex))(CliError(
-            s"asset ${a.id} ${a.digest.render} not found under ${dir / "assets"}"
-          )).flatMap { l =>
-            // a declared size that disagrees with the file is refused before any negotiation
-            if l.size != a.size then
-              IO.raiseError(CliError(
-                s"asset ${a.id}: manifest declares ${a.size} B but ${l.path.fileName} is ${l.size} B"
-              ))
-            else IO.pure(a -> l)
+      ))
+      _ <- out(
+        s"negotiating upload session ${created.sessionId}  ${created.missing.length} of ${inv.length} objects missing"
+      )
+      _ <- created.missing.parTraverseN(Concurrency) { m =>
+        val local = Sha256.parse(m.digest).toOption.flatMap(d => byDigest.get(d.hex))
+        IO.fromOption(local)(CliError(
+          s"server asked for ${m.digest}, which is not in the bundle"
+        )).flatMap(l =>
+          upload(api, token, m, Files[IO].readAll(l.path), l.size, l.path.fileName.toString, out)
+        )
+      }
+      _ <- upload(
+        api,
+        token,
+        UploadInstruction(digest.render, created.manifestUrl, "PUT", Map.empty),
+        fs2.Stream.emits(manifestBytes),
+        manifestBytes.length.toLong,
+        "manifest.json",
+        out
+      )
+      result <- api.secured(Protocol.commit, token, (created.sessionId, CommitRequest(message)))
+      outcome <- result match
+        case Right(c) =>
+          IO.pure(Outcome.Committed(c.parent, c.revisionId, c.digest, c.revisionUrl, c.viewUrl))
+        case Left(e) if e.code == "stale_parent" =>
+          alreadyPublished(api, token, e.head, digest).map {
+            case true => Outcome.Unchanged(e.head.getOrElse(""))
+            case false => Outcome.StaleParent(e.message, e.head)
           }
-        }
-        _ <- out(f"hashing     ${resolved.length} assets  ok")
-        inv = manifest.assets.map(a => AssetInventory(a.digest.render, a.size, a.mediaType))
-        created <- api.orFail(api.secured(
-          Protocol.createUploadSession,
-          token,
-          (
-            ws,
-            project,
-            CreateUploadSession(digest.render, manifestBytes.length.toLong, parent, inv)
-          )
-        ))
-        _ <- out(
-          s"negotiating upload session ${created.sessionId}  ${created.missing.length} of ${inv.length} objects missing"
+        case Left(e) =>
+          IO.pure(Outcome.Rejected(
+            e.code,
+            e.message,
+            e.problems.getOrElse(Nil).map(p => Problem(p.pointer, p.message))
+          ))
+    yield outcome
+
+  /** The lines `npub push` prints for an outcome. */
+  def human(server: String, o: Outcome): List[String] = o match
+    case Outcome.Committed(parent, revision, digest, revisionUrl, viewUrl) =>
+      List(
+        s"committing  parent ${parent.getOrElse("(none)")} -> $revision  ok",
+        s"digest      $digest",
+        s"revision    $revisionUrl",
+        s"view        $viewUrl"
+      )
+    case Outcome.Unchanged(head) => List(s"unchanged   already published as $head")
+    case Outcome.StaleParent(message, head) =>
+      List(
+        s"rejected    $message; current head is ${head.getOrElse("(none)")}. Re-run with --parent ${head.getOrElse("")}"
+      )
+    case Outcome.ManifestRejected(problems) =>
+      problems.map(p => s"error       ${p.render}") :+
+        s"error       manifest rejected: ${problems.length} problem(s)"
+    case Outcome.Rejected(code, message, problems) =>
+      s"error       $code: $message" :: problems.map(p => s"error       ${p.render}")
+    case Outcome.Failed(e) => List(s"error       ${Api.describe(server)(e)}")
+
+  /** The `--json` document for an outcome. */
+  def render(o: Outcome): Json = o match
+    case Outcome.Committed(parent, revision, digest, revisionUrl, viewUrl) =>
+      Report.success(
+        "unchanged" -> Json.False,
+        "revision" -> Json.fromString(revision),
+        "parent" -> Report.optString(parent),
+        "digest" -> Json.fromString(digest),
+        "revisionUrl" -> Json.fromString(revisionUrl),
+        "viewUrl" -> Json.fromString(viewUrl)
+      )
+    case Outcome.Unchanged(head) =>
+      Report.success("unchanged" -> Json.True, "revision" -> Json.fromString(head))
+    case Outcome.StaleParent(message, head) =>
+      Report.failure("stale_parent", message, "head" -> Report.optString(head))
+    case Outcome.ManifestRejected(problems) =>
+      Report.rejected(
+        problems,
+        "error" -> Json.obj(
+          "type" -> Json.fromString("manifest_rejected"),
+          "message" -> Json.fromString(s"manifest rejected: ${problems.length} problem(s)")
         )
-        _ <- created.missing.parTraverseN(Concurrency) { m =>
-          val local = Sha256.parse(m.digest).toOption.flatMap(d => byDigest.get(d.hex))
-          IO.fromOption(local)(CliError(
-            s"server asked for ${m.digest}, which is not in the bundle"
-          )).flatMap(l =>
-            upload(api, token, m, Files[IO].readAll(l.path), l.size, l.path.fileName.toString, out)
-          )
-        }
-        _ <- upload(
-          api,
-          token,
-          UploadInstruction(digest.render, created.manifestUrl, "PUT", Map.empty),
-          fs2.Stream.emits(manifestBytes),
-          manifestBytes.length.toLong,
-          "manifest.json",
-          out
-        )
-        result <- api.secured(Protocol.commit, token, (created.sessionId, CommitRequest(message)))
-        code <- result match
-          case Right(c) =>
-            out(s"committing  parent ${c.parent.getOrElse("(none)")} -> ${c.revisionId}  ok") *>
-              out(s"digest      ${c.digest}") *>
-              out(s"revision    ${c.revisionUrl}") *>
-              out(s"view        ${c.viewUrl}").as(ExitCode.Success)
-          case Left(e) if e.code == "stale_parent" =>
-            alreadyPublished(api, token, e.head, digest).flatMap {
-              case true =>
-                out(s"unchanged   already published as ${e.head.getOrElse("")}")
-                  .as(ExitCode.Success)
-              case false =>
-                out(
-                  s"rejected    ${e.message}; current head is ${e.head.getOrElse("(none)")}. Re-run with --parent ${e.head.getOrElse("")}"
-                ).as(ExitCode.Error)
-            }
-          case Left(e) =>
-            out(s"error       ${e.code}: ${e.message}") *>
-              e.problems.getOrElse(Nil).traverse_(p =>
-                out(s"error       ${
-                    if p.pointer.isEmpty then p.message else s"${p.pointer}: ${p.message}"
-                  }")
-              ).as(ExitCode.Error)
-      yield code
-    flow.handleErrorWith(e => out(s"error       ${Api.describe(api.server)(e)}").as(ExitCode.Error))
+      )
+    case Outcome.Rejected(code, message, problems) =>
+      Report.failure(code, message, "problems" -> Report.problems(problems))
+    case Outcome.Failed(e) => Report.throwable("")(e)
 
   /** A stale-parent rejection whose head already holds these bytes is an idempotent re-push. */
   private def alreadyPublished(

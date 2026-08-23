@@ -27,6 +27,11 @@ it, and publishes it when a server is available.
 library(neuropublish)
 ```
 
+```{r cli-gate, include = FALSE}
+# The chunks that run the CLI are opt-in: NPUB_TESTS=1 plus a resolvable `npub`.
+np_cli_available <- function() nzchar(Sys.getenv("NPUB_TESTS")) && np_has_npub()
+```
+
 ## The volumes
 
 `np_synthetic_volumes()` evaluates the producer's formulas on its
@@ -181,10 +186,12 @@ written$`x-r-client`
 ```
 
 The remaining steps need `npub` (found through `NPUB_BIN`, the `PATH`, or a
-Neuropublish checkout's `scripts/npub`); the chunks below run only when it is
-available.
+Neuropublish checkout's `scripts/npub`). Running the tool is opt-in, so that
+building this vignette — and `R CMD check` — never depends on a JVM or a
+build: the chunks below run only when `npub` is available *and* `NPUB_TESTS=1`
+is set. See "Running the integration tests" at the end.
 
-```{r pack, eval = np_has_npub()}
+```{r pack, eval = np_cli_available()}
 packed <- np_pack(staged, file.path(work, "bundle.npub"))
 packed$digest
 packed$assets
@@ -195,7 +202,7 @@ attr(problems, "digest")
 
 A manifest that breaks a rule comes back as rows of JSON Pointer and message:
 
-```{r invalid, eval = np_has_npub()}
+```{r invalid, eval = np_cli_available()}
 bad <- np_read_manifest(packed$dir)
 bad$resultFields[[1]]$estimand <- "no-such-estimand"
 np_write_bundle(bad, file.path(work, "bad"))
@@ -210,7 +217,7 @@ server lacks and commits one immutable revision. Batch jobs use a
 project-scoped publisher credential in `NP_TOKEN` instead of a login. This
 chunk runs only when `NPUB_SERVER` is set.
 
-```{r push, eval = nzchar(Sys.getenv("NPUB_SERVER")) && np_has_npub()}
+```{r push, eval = nzchar(Sys.getenv("NPUB_SERVER")) && np_cli_available()}
 server <- Sys.getenv("NPUB_SERVER")
 project <- Sys.getenv("NPUB_PROJECT", "rotman/sherlock")
 r <- np_push(packed$dir, project, server, message = "R vignette")
@@ -284,4 +291,40 @@ Every method ends the same way:
 
 ```{r contract, eval = FALSE}
 np_result(manifest) # manifest$assets entries carry `path`; np_publish() does the rest
+```
+
+## Running the integration tests
+
+The package's own tests fall in two groups. The default group is pure R — the
+builders, the byte profile, the fingerprint against the pinned reference and
+Julia fixtures, and the parsing of the CLI's `--json` documents from fixture
+strings. It needs nothing but the package's dependencies, and it is what
+`R CMD check` runs:
+
+```sh
+R -q -e 'testthat::test_local("clients/r/neuropublish")'
+```
+
+The second group actually runs `npub` — packing, admission, the rotated-affine
+key agreement — and is opt-in through `NPUB_TESTS=1`, because it needs the
+built CLI (and, through `scripts/npub`, sbt and a JVM). From a Neuropublish
+checkout:
+
+```sh
+sbt publisherCli/compile                       # once, so scripts/npub is fast
+NPUB_TESTS=1 R -q -e 'testthat::test_local("clients/r/neuropublish")'
+```
+
+`npub` is located through `NPUB_BIN`, then the `PATH`, then `scripts/npub` of a
+checkout above the working directory; set `NPUB_BIN` to test an installed
+binary. The same `NPUB_TESTS=1` makes this vignette's `npub` chunks run.
+
+The end-to-end test also publishes to a running control plane, so it needs a
+server as well:
+
+```sh
+NP_DATA_DIR=$(mktemp -d) NP_PORT=8090 sbt backend/run &   # wait for /api/v1/health
+NPUB_CONFIG_DIR=$(mktemp -d) scripts/npub login --server http://127.0.0.1:8090
+NPUB_TESTS=1 NPUB_SERVER=http://127.0.0.1:8090 NPUB_PROJECT=rotman/sherlock \
+  R -q -e 'testthat::test_local("clients/r/neuropublish", filter = "e2e")'
 ```

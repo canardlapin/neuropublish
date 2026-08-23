@@ -21,13 +21,13 @@ Imports:
     digest,
     jsonlite,
     methods,
-    neuroim2
+    neuroim2,
+    tools
 Suggests:
     knitr,
     processx,
     rmarkdown,
-    testthat (>= 3.0.0),
-    withr
+    testthat (>= 3.0.0)
 VignetteBuilder: knitr
 Config/testthat/edition: 3
 SystemRequirements: npub (the Neuropublish publisher CLI) for packing,

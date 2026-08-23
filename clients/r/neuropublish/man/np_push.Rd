@@ -22,7 +22,10 @@ np_push(bundle, project, server, message = NULL, parent = NULL, token = NULL)
 }
 \value{
 A list with \code{revision} (id), \code{digest}, \code{revision_url}, \code{view_url},
-\code{parent}, \code{unchanged}, and \code{output} (every line the CLI printed).
+\code{parent} (as the server recorded it), \code{unchanged}, and \code{output} (the
+CLI's progress lines). Any other failure is an error of class
+\code{np_cli_error} whose \code{type} is the server's error code or the CLI's
+failure type.
 }
 \description{
 Uploads the assets the server lacks and commits one immutable revision whose

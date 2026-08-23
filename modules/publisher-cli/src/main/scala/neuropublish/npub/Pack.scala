@@ -23,16 +23,43 @@ import neuropublish.protocol.json.{Manifest, Problem}
 object Pack:
   final case class Packed(manifestDigest: Sha256, assets: List[(String, Sha256, Long)])
 
-  def run(staging: Path, out: Path, force: Boolean, print: String => IO[Unit]): IO[ExitCode] =
-    pack(staging, out, force).flatMap {
-      case Left(problems) =>
-        problems.traverse_(p => print(s"error  ${p.render}")).as(ExitCode.Error)
-      case Right(p) =>
-        print(s"manifest  ${p.manifestDigest.render}") *>
-          print(s"packed    ${p.assets.length} assets into $out") *>
-          p.assets.traverse_((id, d, size) => print(s"  $id  $size B  ${d.render}"))
-            .as(ExitCode.Success)
+  def run(
+      staging: Path,
+      out: Path,
+      force: Boolean,
+      print: String => IO[Unit],
+      json: Boolean = false
+  ): IO[ExitCode] =
+    pack(staging, out, force).attempt.flatMap {
+      case Left(e) =>
+        (if json then print(Report.throwable("")(e).noSpaces)
+         else print(s"error  ${Api.describe("")(e)}")).as(ExitCode.Error)
+      case Right(Left(problems)) =>
+        (if json then print(Report.rejected(problems).noSpaces)
+         else problems.traverse_(p => print(s"error  ${p.render}"))).as(ExitCode.Error)
+      case Right(Right(p)) =>
+        (if json then print(render(p, out).noSpaces)
+         else
+           print(s"manifest  ${p.manifestDigest.render}") *>
+             print(s"packed    ${p.assets.length} assets into $out") *>
+             p.assets.traverse_((id, d, size) => print(s"  $id  $size B  ${d.render}"))
+        )
+          .as(ExitCode.Success)
     }
+
+  /** The `--json` document for a packed bundle. */
+  def render(p: Packed, out: Path): Json =
+    Report.success(
+      "digest" -> Json.fromString(p.manifestDigest.render),
+      "dir" -> Json.fromString(out.toString),
+      "assets" -> Json.arr(p.assets.map((id, d, size) =>
+        Json.obj(
+          "id" -> Json.fromString(id),
+          "size" -> Json.fromLong(size),
+          "digest" -> Json.fromString(d.render)
+        )
+      )*)
+    )
 
   def pack(staging: Path, out: Path, force: Boolean = false): IO[Either[List[Problem], Packed]] =
     val manifestPath = staging / "manifest.json"

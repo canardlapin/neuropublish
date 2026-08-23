@@ -784,6 +784,62 @@ volumes. Not here, by design: the `fmrigds`, `fmrireg`, `rMVPA`, and
 `as_neuropublish()`; the vignette shows what each returns), and the
 R-to-Scala golden fixtures and privacy checks, which land with those methods.
 
+Review fixes (2026-08-23), from a fresh-context review of the R client. Each
+item names what changed and the evidence.
+
+- **Numbers are written at 17 significant digits.** `np_write_bundle()`
+  serialized with jsonlite's default (`digits = NA`, 15 significant digits)
+  while `np_volume_grid_fingerprint()` hashed full-precision doubles, and
+  admission recomputes the volume-grid key from the *parsed* payload
+  (`ManifestChecks.domains`), so a value the writer rounded was a rejected
+  revision. `digits = I(17)` round-trips every double exactly (verified for
+  `cos(1°) = 0.9998476951563913`, which 15 digits does not preserve). Scope
+  correction to the review: through `np_domain_volume()` the bug could not
+  fire, because `neuroim2::NeuroSpace()` stores `signif(trans, 7)`; it fires
+  for an affine hashed at full precision (the exported
+  `np_volume_grid_fingerprint()` plus a hand-built descriptor) and for any
+  full-precision number anywhere else in a manifest. Tests: hashed values ==
+  parsed values for a rotated affine, both hand-built and through a
+  `NeuroSpace`; the same bundle packed and admitted by `npub validate`
+  (`NPUB_TESTS=1`).
+- **`npub` grew a `--json` output mode** (`validate`, `pack`, `push`): one
+  document on stdout, progress on stderr, `{"ok":…}` / `{"problems":[…]}` /
+  `{"error":{"type","message"}}`, human output unchanged as the default. The R
+  client parses that document; every line regex is gone, so a runtime failure
+  ("no such file", "cannot reach") is now an `np_cli_error` condition carrying
+  the CLI's `type` instead of a one-row problem frame, and a message
+  containing `": "` can no longer masquerade as a pointer. `Push.run` was
+  split into an `Outcome` ADT with human and JSON renderers. Evidence:
+  `JsonOutputSuite` (8 tests) in `publisherCli/test`, R fixture-string tests
+  for every document shape, and a fake-`npub` shell script driving the real
+  `np_run()` path.
+- **Empty payloads are objects.** `np_record(payload = list())` and
+  `np_field(selection = list())` serialized as `[]`; they now emit a named
+  empty list, asserted against the JSON text and the written bytes.
+- **`np_login()` streams the device flow.** The `system2()` fallback captured
+  stdout, which buffers until exit — i.e. until after the user needed the URL
+  and code. With `echo` it connects both streams to the console.
+- **Asset file-name collisions are refused.** `np_safe_file_name()` maps
+  `"a/b"` and `"a_b"` to one file; `np_write_bundle()` now names both ids and
+  refuses before writing anything.
+- **`key$size` is numeric, not `as.integer()`** (which returned `NA` past
+  2^31 while the server reads a `Long`), written as an integer literal with no
+  exponent and no `.0`; `shape` must be three positive whole numbers.
+- **Hermetic checks.** CLI-backed tests skip unless `NPUB_TESTS=1` (or the
+  `NOT_CRAN=true` that `devtools::test()` sets) *and* `npub` resolves; the
+  vignette's `npub` chunks follow the same gate, and the vignette documents
+  how to run each group. `tools` is declared in Imports; the tests no longer
+  need `withr`.
+- **`as_neuropublish.list`'s contract is documented** in `?as_neuropublish`
+  (a named list of same-grid `NeuroVol`s, what the names mean), and a list
+  holding anything else fails naming the offending element's class and
+  pointing at writing a method.
+- Verified: `publisherCli/test` 35 tests / 0 failures; `R CMD check --as-cran`
+  on the built tarball with `[ FAIL 0 | WARN 0 | SKIP 7 | PASS 147 ]` and two
+  environmental NOTEs (CRAN incoming feasibility: new submission and a
+  not-yet-public GitHub URL; local HTML Tidy too old); the same suite with
+  `NPUB_TESTS=1` runs the CLI tests, 0 failures.
+
 ### Surface rendition track (2026-08-23)
 
 Protocol: `surfaces[]` (`{id, asset, domain, hemisphere, kind, label}`), surface

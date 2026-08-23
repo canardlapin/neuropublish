@@ -18,10 +18,25 @@
 #' open records ([np_record()]) from the package's own namespace. Nothing in
 #' the result may be a NaN or infinite number. [np_publish()] does the rest.
 #'
-#' The reference implementation for a named list of `neuroim2::NeuroVol`s
-#' (`as_neuropublish.list`) shows the shape: one volume domain from the first
-#' volume's space, one asset per volume, one analysis with one estimand, and
-#' one result field per volume with the measure you name.
+#' @section The `list` method:
+#'
+#' `as_neuropublish.list` is the reference implementation, and it is *not* a
+#' fallback for arbitrary lists: it describes one specific input, a **named
+#' list of `neuroim2::NeuroVol` objects that all live on the same grid** (same
+#' dimensions and same `neuroim2::trans()`). Each name is used as an asset id,
+#' as the id of the result field built from it, and as the key into `measures`
+#' (and `display`); a volume named by `underlay` becomes the anatomical
+#' underlay instead of a field, and every other volume needs an entry in
+#' `measures`. From that it builds one volume domain from the first volume's
+#' space, one asset per volume, one analysis with one estimand, and one result
+#' field per volume with the measure you named for it.
+#'
+#' A list holding anything else is an error naming the class that was found;
+#' that is not a defect to work around but the signal that the object needs its
+#' own method. Give the object a class and write `as_neuropublish.<class>()`
+#' for it: whatever it holds (a fitted model, a searchlight result, a report),
+#' the method's job is to return the `np_result()` described above, and it may
+#' call this method for the volume part of the work.
 #'
 #' @param x The object to describe.
 #' @param ... Passed to methods.
@@ -79,8 +94,15 @@ as_neuropublish.list <- function(x, title, synopsis, measures, sensitivity = "gr
   if (!length(x) || is.null(names(x)) || any(!nzchar(names(x)))) {
     stop("`x` must be a non-empty named list of NeuroVol objects", call. = FALSE)
   }
-  if (!all(vapply(x, methods::is, logical(1), "NeuroVol"))) {
-    stop("every element of `x` must be a neuroim2 NeuroVol", call. = FALSE)
+  bad <- which(!vapply(x, methods::is, logical(1), "NeuroVol"))
+  if (length(bad)) {
+    i <- bad[1]
+    stop(
+      "as_neuropublish() for a plain list describes a named list of neuroim2 NeuroVol objects, ",
+      "but `x$", names(x)[i], "` is a ", paste(class(x[[i]]), collapse = "/"), ". ",
+      "Give the object a class and write an as_neuropublish() method for it (see ?as_neuropublish).",
+      call. = FALSE
+    )
   }
   if (!is.character(measures) || is.null(names(measures))) {
     stop("`measures` must be a named character vector", call. = FALSE)

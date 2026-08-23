@@ -4,13 +4,16 @@ import cats.effect.{ExitCode, IO}
 import cats.syntax.all.*
 import com.monovore.decline.*
 import com.monovore.decline.effect.CommandIOApp
-import fs2.io.file.{Files, Path}
-import neuropublish.protocol.json.Manifest
+import fs2.io.file.Path
 
 object Main extends CommandIOApp("npub", "Neuropublish publisher", version = "0.1.0-dev"):
 
   private val out: String => IO[Unit] = IO.println
   private val bundle = Opts.argument[String]("bundle").map(Path(_))
+
+  /** `--json`: one JSON document on stdout, progress on stderr (see [[Report]]). */
+  private val jsonFlag =
+    Opts.flag("json", "print one JSON document on stdout; progress goes to stderr").orFalse
 
   private val server =
     Opts.option[String]("server", "control-plane base URL", metavar = "url")
@@ -35,12 +38,15 @@ object Main extends CommandIOApp("npub", "Neuropublish publisher", version = "0.
     ).tupled
 
   /** Resolves a token per the documented precedence, printing the `--token` warning. */
-  private def withToken(srv: String, t: (Option[String], Option[String]))(
+  private def withToken(srv: String, t: (Option[String], Option[String]), json: Boolean = false)(
       body: (Api, String) => IO[ExitCode]
   ): IO[ExitCode] =
+    def fail(tpe: String, msg: String, e: Option[Throwable]): IO[ExitCode] =
+      (if json then out(e.fold(Report.failure(tpe, msg))(Report.throwable(srv)).noSpaces)
+       else out(s"error  $msg")).as(ExitCode.Error)
     Credentials.load(Credentials.configDir()).map(_.get(srv)).flatMap { stored =>
       TokenSource.resolve(t._1, t._2, stored) match
-        case Left(msg) => out(s"error  $msg").as(ExitCode.Error)
+        case Left(msg) => fail("token", msg, None)
         case Right(r) =>
           val warn =
             if r.source == TokenSource.Flag then
@@ -49,22 +55,11 @@ object Main extends CommandIOApp("npub", "Neuropublish publisher", version = "0.
               )
             else IO.unit
           warn *> Api.ember(srv).use(api => body(api, r.token))
-    }.handleErrorWith(e => out(s"error  ${Api.describe(srv)(e)}").as(ExitCode.Error))
+    }.handleErrorWith(e => fail("", Api.describe(srv)(e), Some(e)))
 
   private val validate =
     Opts.subcommand("validate", "Admit a bundle's manifest bytes and print its digest") {
-      bundle.map { dir =>
-        Files[IO].readAll(dir / "manifest.json").compile.to(Array).flatMap { bytes =>
-          Manifest.parse(bytes) match
-            case Right((d, m)) =>
-              IO.println(s"manifest  ${d.render}") *> IO.println(
-                s"assets    ${m.assets.length} declared, ${m.volumeAssetIds.length} volume"
-              ).as(ExitCode.Success)
-            case Left(problems) =>
-              IO.println(s"error  ${dir / "manifest.json"}: ${problems.length} problem(s)") *>
-                problems.traverse_(p => IO.println(s"error  ${p.render}")).as(ExitCode.Error)
-        }
-      }
+      (bundle, jsonFlag).mapN((dir, json) => Validate.run(dir, json, out))
     }
 
   private val inspect =
@@ -77,9 +72,10 @@ object Main extends CommandIOApp("npub", "Neuropublish publisher", version = "0.
       (
         Opts.argument[String]("staging-dir").map(Path(_)),
         Opts.argument[String]("out.npub").map(Path(_)),
-        Opts.flag("force", "replace an existing output bundle").orFalse
+        Opts.flag("force", "replace an existing output bundle").orFalse,
+        jsonFlag
       )
-        .mapN((staging, dest, force) => Pack.run(staging, dest, force, out))
+        .mapN((staging, dest, force, json) => Pack.run(staging, dest, force, out, json))
     }
 
   private val push =
@@ -94,10 +90,11 @@ object Main extends CommandIOApp("npub", "Neuropublish publisher", version = "0.
           metavar = "rev"
         ).orNone,
         Opts.option[String]("message", "publication message", metavar = "text").orNone,
-        tokenOpts
-      ).mapN { (dir, srv, wp, parent, message, t) =>
-        withToken(srv, t)((api, token) =>
-          Push.run(dir, api, wp._1, wp._2, parent, message, token, out)
+        tokenOpts,
+        jsonFlag
+      ).mapN { (dir, srv, wp, parent, message, t, json) =>
+        withToken(srv, t, json)((api, token) =>
+          Push.run(dir, api, wp._1, wp._2, parent, message, token, out, json)
         )
       }
     }

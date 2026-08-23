@@ -26,11 +26,20 @@ already carry a \code{digest} are left alone.
 }
 \details{
 The manifest is serialized with
-\code{jsonlite::toJSON(auto_unbox = TRUE, digits = NA, null = "null", pretty = TRUE)}
+\code{jsonlite::toJSON(auto_unbox = TRUE, digits = I(17), null = "null", pretty = TRUE)}
 under the protocol's byte profile: UTF-8 without a byte-order mark, one root
-object, and finite numbers only. A \code{NaN}, \code{NA}, \code{Inf} or \code{-Inf} anywhere in
-the manifest is refused with an error naming its JSON Pointer, because JSON
-cannot represent it and the server would reject the bytes.
+object, and finite numbers only. Seventeen significant digits make every
+double round-trip exactly, so the affine a reader parses is bit for bit the
+affine that \code{\link[=np_volume_grid_fingerprint]{np_volume_grid_fingerprint()}} hashed (the server recomputes the
+fingerprint from the parsed JSON and refuses a disagreement). A \code{NaN}, \code{NA},
+\code{Inf} or \code{-Inf} anywhere in the manifest is refused with an error naming its
+JSON Pointer, because JSON cannot represent it and the server would reject
+the bytes.
+
+Asset files are staged as \verb{assets/<id>.<ext>} with every character outside
+\verb{A-Za-z0-9._-} in the id replaced by \verb{_}; two assets whose ids collapse to
+the same file name (\code{"a/b"} and \code{"a_b"}) are refused rather than silently
+overwriting each other.
 }
 \examples{
 m <- np_manifest("Example", "A manifest with no assets.")

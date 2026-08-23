@@ -11,7 +11,8 @@ np_record(schema_id, version, payload = list(), digest = NULL)
 
 \item{version}{Version string \code{major.minor}.}
 
-\item{payload}{A named list (may be empty).}
+\item{payload}{A named list (may be empty; an empty payload is written as
+\code{{}}).}
 
 \item{digest}{Optional \verb{sha256:} digest of the schema document.}
 }
