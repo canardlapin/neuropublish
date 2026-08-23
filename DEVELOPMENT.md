@@ -47,7 +47,8 @@ expects.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `NP_DATA_DIR` | `data` | Root of every local store (layout below) |
-| `NP_PORT` | `8080` | Listen port; the base URL is `http://127.0.0.1:$NP_PORT` |
+| `NP_PORT` | `8080` | Listen port |
+| `NP_BASE_URL` | `http://127.0.0.1:$NP_PORT` | The public origin the server is reached at: used for share URLs (`{base}/s/{secret}`), the device-flow `verificationUri*`, and rendition URLs. Set it behind a reverse proxy; an `https://` value marks the session cookie `Secure`. |
 | `NP_WORKSPACE` / `NP_PROJECT` | `rotman` / `sherlock` | Bootstrap workspace and project (ADR 0004: one workspace in the alpha) |
 | `NP_OWNER_EMAIL` / `NP_OWNER_PASSWORD` | `owner@example.org` / `owner-dev-password` | Local identity-provider user created as `owner` of the bootstrap workspace on first start; `scripts/e2e.sh` signs in with these |
 | `NP_STATIC_DIR` | unset | Built frontend to serve with SPA fallback |
@@ -55,9 +56,15 @@ expects.
 
 Projects are private: every read needs a signed-in workspace member (session
 cookie `np_session`, 24 h, HttpOnly, SameSite=Lax; or an `npub login` user
-token) or that project's publisher credential. Credential management and the
-audit log need an owner or admin. `/api/v1/share/{secret}` and its rendition
-routes are the only anonymous reads. Sessions and device codes live in the
+token, 30 days, revoked by `npub logout` / `POST auth/logout` or all at once by
+`DELETE auth/tokens`) or that project's publisher credential. Viewers read only:
+saving views and minting share links need owner/admin/member. Credential and
+member management (`POST/GET workspaces/{ws}/members`) and the audit log need an
+owner or admin. A non-member asking about a specific revision, view, link, or
+credential gets the same 404 as for one that does not exist. Share links can
+only be minted for `sensitivity: group-level` revisions and carry a presentation
+subset of the manifest (no provenance, no method payloads, no open records).
+`/api/v1/share/{secret}` and its rendition routes are the only anonymous reads. Sessions and device codes live in the
 server that issued them (device codes in memory).
 
 Data-dir layout — one JSON document per record, secrets stored as SHA-256 only,

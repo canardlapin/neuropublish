@@ -507,7 +507,9 @@ hand-written fixture for provenance content; it does not wait for the R track.
   immutable view version; share links target one immutable view version;
 - expiring, revocable read-only links;
 - short-lived signed object GETs and bucket CORS for unauthenticated
-  link-shared viewers;
+  link-shared viewers — deferred to Stage 2 with the object store itself;
+  link viewers read renditions through the control plane's share routes until
+  then;
 - explore and presentation routes over the same revision and view;
 - audit log for publish/share/revoke.
 
@@ -550,8 +552,24 @@ scoping, push with the stored token) and eight Playwright scenarios:
 Principal rules live in `backend/Auth.scala`; secrets are stored only as
 SHA-256/PBKDF2 hashes (a test walks the data dir for leaks); the deprecated
 static token is `NP_LEGACY_TOKEN` (deliberately not `NP_TOKEN`, which the CLI
-reads). Carried: the Components-artboard visual pass; atlas lookup; surface
-rendition fidelity (Stage 5).
+reads).
+
+Review follow-ups landed after the first slice: user tokens expire after 30
+days and are revoked by `npub logout` (`POST auth/logout` on a bearer) or all at
+once (`DELETE auth/tokens`); viewers cannot save views or mint links; the share
+route returns a *presentation subset* (`SharedProjection`: the addressed
+version only, the manifest reduced to what the page renders — no provenance,
+method payloads, open records, or saver identity) and a link can only be minted
+for a `sensitivity: group-level` revision (policy checked at share creation);
+provenance `interpretation = understood` is an allow-list of schema ids the
+server reads, with a `computeVersion` stamped into the cache; non-members get
+404 on any addressed record; `NP_BASE_URL` names the public origin for share,
+device, and rendition URLs and turns on `Secure` cookies under https; a members
+API (`workspaces/{ws}/members`) lets an owner/admin attach users, and a
+two-workspace test pins the isolation. Deferred, not built: signed object GETs
+and bucket CORS (Stage 2, with the object store); rate limiting on login and
+the device flow (Stage 6 hardening). Carried: the Components-artboard visual
+pass; atlas lookup; surface rendition fidelity (Stage 5).
 
 ## Stage 5 — surface, hybrid workspace, and R clients
 
