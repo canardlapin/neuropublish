@@ -1,0 +1,84 @@
+{
+  "core": "0.1",
+  "title": "Unknown measure remains generic",
+  "synopsis": "Producer presentation is retained without granting scientific capabilities.",
+  "sensitivity": "group-level",
+  "axes": [
+    {
+      "id": "level",
+      "label": "Level",
+      "values": ["group"]
+    }
+  ],
+  "domains": [
+    {
+      "id": "native-grid",
+      "descriptor": {
+        "schema": {
+          "id": "org.fmrigds.domain/native-grid",
+          "version": "1.0"
+        },
+        "payload": {
+          "shape": [1, 1, 1],
+          "space": "producer-defined"
+        }
+      }
+    }
+  ],
+  "assets": [
+    {
+      "id": "tau2",
+      "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000001",
+      "size": 4,
+      "mediaType": "application/x-nifti"
+    }
+  ],
+  "analyses": [
+    {
+      "id": "meta-analysis",
+      "label": "Random-effects meta-analysis",
+      "estimands": [
+        {
+          "id": "heterogeneity",
+          "label": "Between-study heterogeneity",
+          "order": 1
+        }
+      ]
+    }
+  ],
+  "resultFields": [
+    {
+      "id": "tau2",
+      "label": "Between-study heterogeneity (τ²)",
+      "shortLabel": "τ²",
+      "estimand": "heterogeneity",
+      "measure": "org.fmrigds.measure/between-study-heterogeneity",
+      "inferential": true,
+      "signed": true,
+      "selection": {
+        "level": "group"
+      },
+      "domain": "native-grid",
+      "representations": [
+        {
+          "kind": "volume",
+          "asset": "tau2"
+        }
+      ],
+      "order": 1,
+      "publishedDisplay": {
+        "threshold": {
+          "mode": "off",
+          "min": 0.0
+        },
+        "window": {
+          "min": 0.0,
+          "centre": 0.5,
+          "max": 1.0
+        },
+        "colormap": "fmrigds-heterogeneity",
+        "opacity": 0.7
+      }
+    }
+  ]
+}

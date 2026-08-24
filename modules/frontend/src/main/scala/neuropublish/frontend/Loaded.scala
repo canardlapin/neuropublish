@@ -27,6 +27,20 @@ final case class SurfaceDecl(
 /** A field's surface representation: per-vertex values (`asset`) on a declared surface. */
 final case class SurfaceRep(asset: String, surface: String, hemisphere: String)
 
+/** What this viewer did with a producer's display recommendation. Presentation may suggest a
+  * palette, but only palettes the renderer actually implements enter workspace state. Unsupported
+  * presentation grants no semantic capability and is never silently renamed.
+  */
+enum PreferenceApplication:
+  case Applied
+  case UnsupportedWithFallback(member: String, requested: String, fallback: String)
+  case NotProvided
+
+final case class AppliedPublishedDisplay(
+    display: LayerDisplay,
+    application: PreferenceApplication
+)
+
 /** A revision with its renditions decoded: everything the workspace needs, loaded once. Surface
   * geometry and vertex fields are decoded per hemisphere from their own renditions (by `kind`);
   * nothing here derives one representation from another.
@@ -138,12 +152,16 @@ final case class Loaded(
     volumeAssetOf(f).flatMap(summaries.get)
       .orElse(surfaceRepsOf(f).iterator.flatMap(r => summaries.get(r.asset)).nextOption())
 
-  /** A human label for a field: estimand · measure. */
+  /** The producer's field label when present, otherwise estimand · trusted measure label (or the
+    * raw semantic id for an unknown measure).
+    */
   def labelOf(f: ResultField): String =
-    val est = manifest.analyses.flatMap(_.estimands).find(_.id == f.estimand).map(_.label)
-    est.fold(neuropublish.protocol.Measures.label(f.measure))(e =>
-      s"$e · ${neuropublish.protocol.Measures.label(f.measure)}"
-    )
+    f.label.filter(_.trim.nonEmpty).getOrElse {
+      val est = manifest.analyses.flatMap(_.estimands).find(_.id == f.estimand).map(_.label)
+      est.fold(neuropublish.protocol.Measures.label(f.measure))(e =>
+        s"$e · ${neuropublish.protocol.Measures.label(f.measure)}"
+      )
+    }
 
   /** The producer's recommendation, or — when the manifest carries none — a data-derived default
     * (window = data range, no threshold) that the layer card labels "default" rather than
@@ -151,9 +169,14 @@ final case class Loaded(
     * manifest schema admits under `publishedDisplay` is read here; a declared value the viewer
     * silently replaced with its own default would be a recommendation the producer never made.
     */
-  def published(f: ResultField): LayerDisplay =
+  private def applyPublished(f: ResultField): AppliedPublishedDisplay =
     val c = f.publishedDisplay.map(_.hcursor)
     val sm = summaryOf(f)
+    // Semantic defaults come only from the trusted module. An unknown id — even one ending in a
+    // familiar suffix or carrying producer-authored `signed`/`inferential` extras — is sequential
+    // and hidden until the user chooses it.
+    val measure = neuropublish.protocol.Measures.lookup(f.measure)
+    val defaultColormap = if measure.exists(_.signed) then "cold-hot" else "viridis-2"
     val lo = c.flatMap(
       _.downField("window").downField("min").as[Double].toOption
     ).orElse(sm.map(_.min)).getOrElse(-1.0)
@@ -168,30 +191,60 @@ final case class Loaded(
       ).getOrElse("two-sided")
       Threshold(if Threshold.Modes(mode) then mode else "off", m)
     }.getOrElse(Threshold("off", 0.0))
-    val cmap = c.flatMap(
-      _.downField("colormap").as[String].toOption
-    ).filter(Colormap.valid).getOrElse("cold-hot")
+    val requestedColormap = c.flatMap(_.downField("colormap").as[String].toOption)
+    val cmap = requestedColormap.filter(Colormap.supported).getOrElse(defaultColormap)
+    val application = c match
+      case None => PreferenceApplication.NotProvided
+      case Some(_) => requestedColormap match
+          case Some(requested) if Colormap.supported(requested) =>
+            PreferenceApplication.Applied
+          case Some(requested) =>
+            PreferenceApplication.UnsupportedWithFallback(
+              "colormap",
+              requested,
+              defaultColormap
+            )
+          case None =>
+            PreferenceApplication.UnsupportedWithFallback(
+              "colormap",
+              "(missing or invalid)",
+              defaultColormap
+            )
     val op = c.flatMap(_.downField("opacity").as[Double].toOption).filter(o =>
       o.isFinite && o >= 0.0 && o <= 1.0
     ).getOrElse(0.85)
-    // Product rule (product definition, MVP scope): inferential measures are shown by default, descriptive ones are available.
-    val visibleByDefault = f.measure.endsWith("/t-statistic") || f.measure.endsWith("/z-statistic")
-    LayerDisplay(
-      visible = visibleByDefault,
-      opacity = op,
-      window = Window(math.min(lo, hi - 1e-9), hi),
-      threshold = thr,
-      colormap = cmap
+    // Product rule (product definition, MVP scope): the trusted t and z fields are shown by
+    // default. Other trusted measures and unknown measures remain available; the coarse
+    // `inferential` flag does not itself grant presentation behavior.
+    val visibleByDefault = measure.exists(m =>
+      m == neuropublish.protocol.Measures.tStatistic ||
+        m == neuropublish.protocol.Measures.zStatistic
     )
+    AppliedPublishedDisplay(
+      LayerDisplay(
+        visible = visibleByDefault,
+        opacity = op,
+        window = Window(math.min(lo, hi - 1e-9), hi),
+        threshold = thr,
+        colormap = cmap
+      ),
+      application
+    )
+
+  def published(f: ResultField): LayerDisplay = applyPublished(f).display
+
+  def preferenceApplication(f: ResultField): PreferenceApplication =
+    applyPublished(f).application
 
   def initialWorkspace: Workspace =
     Workspace(
       fields.map(f =>
+        val applied = applyPublished(f)
         WorkspaceLayer(
           f.id,
-          published(f),
-          published(f),
-          recommended = f.publishedDisplay.isDefined,
+          applied.display,
+          applied.display,
+          recommended = applied.application != PreferenceApplication.NotProvided,
           representations = representationsOf(f)
         )
       ).toVector,

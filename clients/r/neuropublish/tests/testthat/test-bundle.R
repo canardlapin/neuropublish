@@ -18,6 +18,13 @@ test_that("builders serialize to the schema's records", {
   expect_identical(fv$publishedDisplay$threshold, list(mode = "two-sided", min = 3.1))
   expect_identical(fv$order, 3L)
   expect_null(fv$label)
+  labelled <- np_field("tau2", "speech", "org.fmrigds.measure/between-study-heterogeneity", "d",
+    representations = list(np_volume_rep("tau2")), label = "Between-study heterogeneity (τ²)"
+  )
+  expect_identical(labelled$label, "Between-study heterogeneity (τ²)")
+  expect_error(np_field("bad", "speech", np_measure$effect, "d",
+    representations = list(np_volume_rep("bad")), label = 1
+  ), "label.*single string")
   expect_error(np_threshold("two-sided", -1), "non-negative")
   expect_error(np_window(3, 1), "min < max")
   # core 0.1 renders one linear ramp across [min, max]: an off-midpoint centre
@@ -261,6 +268,7 @@ test_that("as_neuropublish() reference implementation builds a complete result",
       "speech-effect" = np_measure$effect, "speech-t" = np_measure$t_statistic,
       "speech-z" = np_measure$z_statistic
     ),
+    labels = c("speech-effect" = "Speech effect"),
     estimand = "speech", estimand_label = "speech coefficient",
     underlay = "t1", underlay_label = "Synthetic T1", domain_id = "grid-2mm",
     staging = staging
@@ -268,6 +276,8 @@ test_that("as_neuropublish() reference implementation builds a complete result",
   expect_s3_class(r, "neuropublish_result")
   expect_length(r$assets, 4)
   expect_length(r$manifest$resultFields, 3)
+  expect_identical(r$manifest$resultFields[[1]]$label, "Speech effect")
+  expect_null(r$manifest$resultFields[[2]]$label)
   expect_identical(r$manifest$underlays[[1]]$asset, "t1")
   expect_identical(r$manifest$domains[[1]]$key$structuralFingerprint,
     "sha256:aa1d8cdb290b7739ff086b1f380552f59366c8671dc33425716abd5f2bce7687")

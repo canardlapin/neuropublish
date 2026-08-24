@@ -32,6 +32,7 @@ final case class Representation(
 
 final case class ResultField(
     id: String,
+    label: Option[String],
     estimand: String,
     measure: String,
     domain: String,
@@ -150,8 +151,9 @@ object Manifest:
     Decoder.forProduct5("kind", "asset", "surface", "hemisphere", "derivation")(
       Representation.apply
     )
-  given Decoder[ResultField] = Decoder.forProduct8(
+  given Decoder[ResultField] = Decoder.forProduct9(
     "id",
+    "label",
     "estimand",
     "measure",
     "domain",

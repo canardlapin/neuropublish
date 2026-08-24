@@ -38,6 +38,15 @@ const worldReadout = async (page) => {
   const t = await page.locator('[data-readout="world"] .mono').textContent();
   return t.split(",").map((s) => parseFloat(s));
 };
+const colourPixels = (page) => page.locator('.pane[data-pane="volume"] canvas').evaluate((c) => {
+  const d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
+  let n = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    const r = d[i], g = d[i + 1], b = d[i + 2];
+    if (Math.max(r, g, b) - Math.min(r, g, b) > 40) n++;
+  }
+  return n;
+});
 const query = (page) => new URL(page.url()).searchParams;
 // the page coalesces replaceState (250 ms); wait before reading the URL back
 const urlSettled = (page) => page.waitForTimeout(400);
@@ -383,4 +392,49 @@ test("the layer card states per-hemisphere absence and whether a projection rece
   const effect = page.locator('.layer-card[data-layer="speech-effect"]');
   await expect(effect.getByTestId("layer-representations")).not.toContainText("surface");
   await expect(effect.getByTestId("layer-derivation")).toHaveCount(0);
+});
+
+test("unknown measure remains generic while producer presentation is retained honestly", async ({ page }) => {
+  test.skip(process.env.NP_ADVERSARIAL !== "1", "the harness publishes this revision after the reference-suite run");
+  await login(page);
+  const href = await openWorkspace(page);
+  const card = page.locator('.layer-card[data-layer="tau2"]');
+
+  // Lexical presentation is producer-owned, while the raw semantic id remains inspectable.
+  await expect(card.locator(".layer-title")).toHaveText("Between-study heterogeneity (τ²)");
+  await expect(card.locator(".layer-meta .mono"))
+    .toHaveText("org.fmrigds.measure/between-study-heterogeneity");
+
+  // Unknown producer extras survive in the immutable manifest, but grant no viewer capability.
+  const revision = href.match(/\/r\/([^/?#]+)/)?.[1];
+  expect(revision).toBeTruthy();
+  const response = await page.request.get(`/api/v1/revisions/${revision}`);
+  expect(response.ok()).toBe(true);
+  const detail = await response.json();
+  const raw = detail.manifest.resultFields.find((field) => field.id === "tau2");
+  expect(raw).toMatchObject({ inferential: true, signed: true, shortLabel: "τ²" });
+  await expect(card.locator('.pill', { hasText: /inferential|signed/i })).toHaveCount(0);
+  await expect(card.locator('input[type="checkbox"]')).not.toBeChecked();
+  await expect(card.locator("select").first()).toHaveValue("off");
+
+  // Supported recommendations are applied. An unsupported palette is named and falls back to
+  // the sequential generic default instead of being presented as the producer's palette.
+  await expect(card.getByLabel("opacity")).toHaveValue("70");
+  await expect(card.getByLabel("minimum", { exact: true })).toHaveValue("0.00");
+  await expect(card.getByLabel("maximum", { exact: true })).toHaveValue("1.00");
+  await expect(card.locator("select").nth(1)).toHaveValue("viridis-2");
+  const fallback = card.locator(".pill.warn.static");
+  await expect(fallback).toHaveText("published · colormap fallback");
+  await expect(fallback).toHaveAttribute(
+    "title",
+    "published colormap 'fmrigds-heterogeneity' is unsupported by this viewer; using 'viridis-2'",
+  );
+
+  // Generic rendering remains available when the reader elects to show the field.
+  await page.locator('.layer-card[data-layer="speech-t"] input[type="checkbox"]').uncheck();
+  await page.locator('.layer-card[data-layer="speech-z"] input[type="checkbox"]').uncheck();
+  await card.locator('input[type="checkbox"]').check();
+  await settle(page); await settle(page);
+  expect(await colourPixels(page)).toBeGreaterThan(500);
+  await page.screenshot({ path: "test-results/adversarial-unknown-measure.png", fullPage: true });
 });

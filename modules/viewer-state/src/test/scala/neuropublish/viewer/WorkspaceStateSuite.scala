@@ -31,7 +31,7 @@ class WorkspaceStateSuite extends ScalaCheckSuite:
       t <- Gen.choose(0.0, 10.0)
       // a maximum magnitude only exists for `two-sided`, so the generator only offers one there
       hiMag <- Gen.option(Gen.choose(11.0, 40.0))
-      c <- Gen.oneOf("cold-hot", "viridis", "hot")
+      c <- Gen.oneOf(Colormap.Supported.toSeq)
     yield LayerDisplay(
       v,
       o,

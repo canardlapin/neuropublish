@@ -282,7 +282,7 @@ np_field <- function(id, estimand, measure, domain, selection = list(level = "gr
   }
   np_compact(list(
     id = np_check_id(id),
-    label = label,
+    label = if (is.null(label)) NULL else np_check_string(label, "label"),
     estimand = np_check_id(estimand, "estimand"),
     measure = np_check_id(measure, "measure"),
     selection = np_object(selection),

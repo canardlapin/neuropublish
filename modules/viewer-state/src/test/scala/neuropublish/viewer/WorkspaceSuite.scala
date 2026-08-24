@@ -144,6 +144,17 @@ class WorkspaceSuite extends ScalaCheckSuite:
     assertEquals(w, base)
   }
 
+  test("a grammar-valid but unsupported colormap never enters renderer state") {
+    val unknown = "fmrigds-heterogeneity"
+    assert(Colormap.valid(unknown))
+    assert(!Colormap.supported(unknown))
+    assertEquals(Workspace.reduce(base, Action.SetColormap("a", unknown)), base)
+    assertEquals(
+      ViewUrl(s"l=a:1:0.85:-8,8:off:$unknown&p=volume&i=layers", base),
+      base
+    )
+  }
+
   test("surface camera and divider are encoded only when they differ from the defaults") {
     assert(!ViewUrl.encode(base).contains("sc="))
     assert(!ViewUrl.encode(base).contains("sf="))

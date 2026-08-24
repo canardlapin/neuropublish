@@ -6,6 +6,8 @@ import io.circe.{HCursor, Json}
 import io.circe.parser.parse
 import munit.FunSuite
 import scala.jdk.CollectionConverters.*
+import neuropublish.npub.Inspect
+import neuropublish.protocol.Measures
 import neuropublish.protocol.Sha256
 import neuropublish.protocol.json.*
 import neuropublish.rendition.{SurfaceRendition, VertexFieldRendition, VolumeRendition}
@@ -303,6 +305,39 @@ class FixtureSuite extends FunSuite:
         p == "/provenance/activities/4" && r.schema.id == "org.example.lab/denoise"
       case _ => false
     })
+  }
+
+  test("unknown-measure fixture preserves presentation without granting trusted semantics") {
+    val p = fixtures.resolve("valid/adversarial-unknown-measure.json")
+    val bytes = Files.readAllBytes(p)
+    val m = admitted(p)
+    val f = m.resultFields.headOption.getOrElse(fail("fixture has no result field"))
+    assertEquals(f.label, Some("Between-study heterogeneity (τ²)"))
+    assertEquals(f.measure, "org.fmrigds.measure/between-study-heterogeneity")
+    assertEquals(Measures.lookup(f.measure), None)
+
+    val raw = m.raw.hcursor.downField("resultFields").downArray
+    assertEquals(raw.get[String]("shortLabel"), Right("τ²"))
+    assertEquals(raw.get[Boolean]("inferential"), Right(true))
+    assertEquals(raw.get[Boolean]("signed"), Right(true))
+    assertEquals(
+      f.publishedDisplay.flatMap(_.hcursor.get[String]("colormap").toOption),
+      Some("fmrigds-heterogeneity")
+    )
+    assert(m.openRecords.exists {
+      case ("/domains/0/descriptor", _, Interpretation.Unsupported(_)) => true
+      case _ => false
+    })
+
+    // Generic inspection shows both producer-authored presentation and the raw semantic id.
+    val (lines, ok) = Inspect.render(bytes)
+    assert(ok)
+    assert(
+      lines.exists(_.contains(
+        "Between-study heterogeneity (τ²)  org.fmrigds.measure/between-study-heterogeneity (unknown measure)"
+      )),
+      lines.mkString("\n")
+    )
   }
 
   test("every invalid fixture is rejected with exactly the problems its .expect lists") {

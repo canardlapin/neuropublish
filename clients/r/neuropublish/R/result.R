@@ -71,6 +71,9 @@ as_neuropublish.default <- function(x, ...) {
 #' @param measures A named character vector mapping each volume's name to its
 #'   measure id (see [np_measure]); a volume without a measure is an underlay
 #'   when `underlay` names it and an error otherwise.
+#' @param labels Optional named character vector mapping field volume names to
+#'   producer-authored human labels. Unnamed fields keep the protocol's legacy
+#'   estimand and measure fallback in viewers.
 #' @param estimand,estimand_label The single estimand every field reports.
 #' @param analysis_id,analysis_label The single analysis.
 #' @param method An open record describing the method ([np_record()]), or
@@ -90,7 +93,7 @@ as_neuropublish.list <- function(x, title, synopsis, measures, sensitivity = "gr
                                  method = NULL, sample_size = NULL,
                                  underlay = NULL, underlay_label = "Underlay",
                                  domain_id = "volume", space_name = "MNI152NLin2009cAsym",
-                                 display = list(), staging = np_staging_dir(), ...) {
+                                 display = list(), staging = np_staging_dir(), labels = NULL, ...) {
   if (!length(x) || is.null(names(x)) || any(!nzchar(names(x)))) {
     stop("`x` must be a non-empty named list of NeuroVol objects", call. = FALSE)
   }
@@ -111,6 +114,16 @@ as_neuropublish.list <- function(x, title, synopsis, measures, sensitivity = "gr
   missing <- setdiff(fields, names(measures))
   if (length(missing)) {
     stop("no measure for volume(s): ", paste(missing, collapse = ", "), call. = FALSE)
+  }
+  if (!is.null(labels)) {
+    if (!is.character(labels) || is.null(names(labels)) || any(!nzchar(names(labels))) ||
+      anyNA(labels) || anyDuplicated(names(labels))) {
+      stop("`labels` must be a named character vector with unique names", call. = FALSE)
+    }
+    unknown_labels <- setdiff(names(labels), fields)
+    if (length(unknown_labels)) {
+      stop("label(s) name unknown field(s): ", paste(unknown_labels, collapse = ", "), call. = FALSE)
+    }
   }
   space <- neuroim2::space(x[[1]])
   for (nm in names(x)) {
@@ -135,7 +148,8 @@ as_neuropublish.list <- function(x, title, synopsis, measures, sensitivity = "gr
       selection = list(level = "group"),
       representations = list(np_volume_rep(nm)),
       order = i,
-      published_display = display[[nm]]
+      published_display = display[[nm]],
+      label = if (!is.null(labels) && nm %in% names(labels)) unname(labels[[nm]]) else NULL
     ))
   }
   if (!is.null(underlay)) {

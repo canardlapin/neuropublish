@@ -2,7 +2,6 @@ package neuropublish.frontend
 
 import com.raquo.laminar.api.L.*
 import neuropublish.api.*
-import neuropublish.protocol.Measures
 import neuropublish.viewer.{Workspace, WorkspaceState}
 import org.scalajs.dom
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -328,10 +327,7 @@ object Chrome:
   def synopsis(L: Loaded, shared: SharedView, savedState: Workspace): HtmlElement =
     val m = L.manifest
     val visible = savedState.layers.filter(_.current.visible).flatMap(l =>
-      L.field(l.id).map(f =>
-        val est = m.analyses.flatMap(_.estimands).find(_.id == f.estimand).map(_.label)
-        est.fold(Measures.label(f.measure))(e => s"$e · ${Measures.label(f.measure)}")
-      )
+      L.field(l.id).map(L.labelOf)
     )
     div(
       cls := "synopsis-bar",

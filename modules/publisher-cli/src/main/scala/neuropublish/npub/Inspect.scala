@@ -55,10 +55,11 @@ object Inspect:
         b += s"    ${e.id}  ${e.label}"
         m.orderedFields(e.id).foreach { f =>
           val reps = f.representations.map(r => s"${r.kind}:${r.asset}").mkString(", ")
+          val label = f.label.filter(_.trim.nonEmpty).map(l => s"$l  ").getOrElse("")
           val measure = Measures.lookup(f.measure)
             .map(x => s"${x.label} (${x.short})").getOrElse(s"${f.measure} (unknown measure)")
           val display = if f.publishedDisplay.isDefined then "  display recommended" else ""
-          b += s"      ${f.id}  $measure  $reps  domain ${f.domain}$display"
+          b += s"      ${f.id}  $label$measure  $reps  domain ${f.domain}$display"
         }
       }
     }

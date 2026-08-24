@@ -126,7 +126,7 @@ object ViewUrl:
             case x if x.startsWith("neg") =>
               x.drop(3).toDoubleOption.filter(_ >= 0).map(Threshold("negative", _))
             case _ => None
-          cm <- Some(unesc(cmap)).filter(Colormap.valid)
+          cm <- Some(unesc(cmap)).filter(Colormap.supported)
         yield unesc(id) ->
           ((d: LayerDisplay) =>
             d.copy(visible = v, opacity = o, window = w, threshold = t, colormap = cm)

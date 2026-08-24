@@ -57,9 +57,11 @@ object WorkspacePage:
                 button(
                   cls := "tree-row measure",
                   dataAttr("field") := f.id,
+                  dataAttr("measure") := f.measure,
+                  title := s"measure: ${f.measure}",
                   cls.toggle("selected") <-- visible,
                   aria.pressed <-- visible.map(_.toString),
-                  span(Measures.label(f.measure)),
+                  span(f.label.filter(_.trim.nonEmpty).getOrElse(Measures.label(f.measure))),
                   span(cls := "muted short", Measures.short(f.measure)),
                   span(
                     cls := "reps muted",
@@ -192,8 +194,8 @@ object WorkspacePage:
       val cur = layer.map(_.map(_.current))
       val sm = L.summaryOf(f)
       val reps = L.representationsOf(f)
-      val estimandLabel =
-        m.analyses.flatMap(_.estimands).find(_.id == f.estimand).map(_.label).getOrElse(f.estimand)
+      val fieldLabel = L.labelOf(f)
+      val preference = L.preferenceApplication(f)
       div(
         cls := "layer-card",
         dataAttr("layer") := f.id,
@@ -202,7 +204,7 @@ object WorkspacePage:
           cls := "layer-head",
           input(
             typ := "checkbox",
-            aria.label := s"show ${Measures.label(f.measure)}",
+            aria.label := s"show $fieldLabel",
             controlled(
               checked <-- cur.map(_.exists(_.visible)),
               onClick.mapToChecked --> (v => store.dispatch(Workspace.Action.SetVisible(f.id, v)))
@@ -210,8 +212,7 @@ object WorkspacePage:
           ),
           div(
             cls := "layer-title",
-            span(estimandLabel),
-            span(cls := "muted", s" · ${Measures.label(f.measure)}")
+            span(fieldLabel)
           ),
           button(
             cls := "ghost",
@@ -227,22 +228,36 @@ object WorkspacePage:
             "↓",
             onClick --> (_ => store.dispatch(Workspace.Action.MoveDown(f.id)))
           ),
-          child <-- layer.map(l => (l.exists(_.modified), l.exists(_.recommended))).map {
-            (mod, rec) =>
-              if mod then
-                button(
-                  cls := "pill warn reset",
-                  "modified · reset",
-                  onClick --> (_ => store.dispatch(Workspace.Action.ResetLayer(f.id)))
-                )
-              else if rec then span(cls := "pill accent", "published")
-              else
-                span(
-                  cls := "pill",
-                  title := "no display recommendation in the manifest; window from the data range",
-                  "default"
-                )
+          child <-- layer.map(_.exists(_.modified)).map { mod =>
+            if mod then
+              button(
+                cls := "pill warn reset",
+                "modified · reset",
+                onClick --> (_ => store.dispatch(Workspace.Action.ResetLayer(f.id)))
+              )
+            else
+              preference match
+                case PreferenceApplication.Applied => span(cls := "pill accent", "published")
+                case PreferenceApplication.UnsupportedWithFallback(member, requested, fallback) =>
+                  span(
+                    cls := "pill warn static",
+                    title :=
+                      s"published $member '$requested' is unsupported by this viewer; using '$fallback'",
+                    s"published · $member fallback"
+                  )
+                case PreferenceApplication.NotProvided =>
+                  span(
+                    cls := "pill",
+                    title :=
+                      "no display recommendation in the manifest; window from the data range",
+                    "default"
+                  )
           }
+        ),
+        div(
+          cls := "layer-meta muted small",
+          "measure ",
+          span(cls := "mono", f.measure)
         ),
         div(
           cls := "layer-reps muted small",

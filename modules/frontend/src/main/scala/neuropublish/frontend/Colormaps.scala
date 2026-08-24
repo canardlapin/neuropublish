@@ -1,6 +1,7 @@
 package neuropublish.frontend
 
 import intaglio.{ColorRamp, Rgba32}
+import neuropublish.viewer.Colormap
 
 /** Stage 3 colormaps over Intaglio's two-stop `ColorRamp`. Scientific multi-stop
   * sequential/diverging palettes are an upstream item (architecture: "Viewer integration and
@@ -14,13 +15,18 @@ object Colormaps:
     "heat" -> "heat",
     "viridis-2" -> "viridis (2-stop)"
   )
+  require(all.map(_._1).toSet == Colormap.Supported, "viewer palettes and renderer palettes differ")
+
   def ramp(id: String): ColorRamp = id match
     case "gray" => ColorRamp.Grayscale
     case "heat" => ColorRamp.Heat
     case "viridis-2" => ColorRamp(c(0x44, 0x01, 0x54), c(0xfd, 0xe7, 0x25))
-    case _ => ColorRamp(c(0x1f, 0x4e, 0x9c), c(0xff, 0xe0, 0x66))
+    case "cold-hot" => ColorRamp(c(0x1f, 0x4e, 0x9c), c(0xff, 0xe0, 0x66))
+    case other => throw IllegalArgumentException(s"unsupported colormap '$other'")
+
   def css(id: String): String = id match
     case "gray" => "linear-gradient(90deg,#000,#fff)"
     case "heat" => "linear-gradient(90deg,#000,#f00,#ff0)"
     case "viridis-2" => "linear-gradient(90deg,#440154,#fde725)"
-    case _ => "linear-gradient(90deg,#1f4e9c,#ffe066)"
+    case "cold-hot" => "linear-gradient(90deg,#1f4e9c,#ffe066)"
+    case other => throw IllegalArgumentException(s"unsupported colormap '$other'")

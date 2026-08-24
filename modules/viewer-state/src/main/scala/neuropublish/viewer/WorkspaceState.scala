@@ -189,7 +189,7 @@ object WorkspaceState:
       val c = l.current
       val ok = c.opacity >= 0 && c.opacity <= 1 && c.window.min.isFinite && c.window.max.isFinite &&
         c.window.min < c.window.max && c.threshold.min >= 0 && Threshold.Modes(c.threshold.mode) &&
-        Colormap.valid(c.colormap)
+        Colormap.supported(c.colormap)
       if ok then l else l.copy(current = l.published)
     }
     Workspace(

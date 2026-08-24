@@ -32,7 +32,16 @@ object Threshold:
   */
 object Colormap:
   private val Grammar = "^[a-z0-9][a-z0-9-]{0,31}$".r
+  val Supported: Set[String] = Set("cold-hot", "gray", "heat", "viridis-2")
+
+  /** Wire-level grammar. A manifest may recommend a well-formed palette a particular viewer does
+    * not implement; that recommendation must be surfaced with an explicit fallback rather than
+    * silently treated as one of these palettes.
+    */
   def valid(id: String): Boolean = Grammar.matches(id)
+
+  /** Palette ids this viewer can actually render. */
+  def supported(id: String): Boolean = Supported(id)
 
 final case class LayerDisplay(
     visible: Boolean,
@@ -120,7 +129,7 @@ object Workspace:
         update(w, id)(_.copy(threshold = if t.mode == "off" then Threshold("off", 0.0) else t))
       else w
     case Action.SetColormap(id, c) =>
-      if Colormap.valid(c) then update(w, id)(_.copy(colormap = c)) else w
+      if Colormap.supported(c) then update(w, id)(_.copy(colormap = c)) else w
     case Action.MoveUp(id) =>
       val i = w.layers.indexWhere(_.id == id); w.copy(layers = swap(w.layers, i, i - 1))
     case Action.MoveDown(id) =>
@@ -142,5 +151,5 @@ object Workspace:
       w.layers.forall { l =>
         val c = l.current
         c.opacity >= 0 && c.opacity <= 1 && c.window.min < c.window.max &&
-        Threshold.valid(c.threshold) && Colormap.valid(c.colormap)
+        Threshold.valid(c.threshold) && Colormap.supported(c.colormap)
       } && w.layout.isValid && SurfaceCameraState.valid(w.surfaceCamera)

@@ -3,8 +3,9 @@
 # directory, sign in with `npub login` (device flow approved from a second
 # session), mint a project credential and prove it cannot cross projects,
 # `npub push` the reference bundle, reject a stale-parent push, wait for
-# ingestion, drive the browser scenarios in Chromium, and publish a second
-# revision from the Julia producer (ADR 0001).
+# ingestion, drive the browser scenarios in Chromium, publish and inspect an
+# adversarial unknown-measure revision, and publish a final revision from the
+# Julia producer (ADR 0001).
 #
 #   scripts/e2e.sh                  local mode: local-fs stores, inline ingestion
 #   NP_E2E_MODE=full scripts/e2e.sh PostgreSQL + MinIO containers (Docker), presigned
@@ -134,7 +135,49 @@ grep "^digest " "$DATA/push.log" | grep -q "$(shasum -a 256 modules/conformance/
 echo "== browser"
 (cd modules/frontend && NP_BASE_URL="http://127.0.0.1:$PORT" npx playwright test -c playwright.e2e.config.mjs)
 
-echo "== julia producer publishes a second revision with no Neuropublish code (ADR 0001 gate)"
+echo "== adversarial unknown measure remains generic while its presentation survives"
+HEAD=$(curl -fs -H "Authorization: Bearer $SECRET" "http://127.0.0.1:$PORT/api/v1/workspaces/rotman/projects/sherlock" \
+  | grep -oE '"head":"[^"]+"' | cut -d'"' -f4)
+[ -n "$HEAD" ] || { echo "project has no head after the first push"; exit 1; }
+cp -R modules/conformance/fixtures/reference "$DATA/adversarial-bundle"
+python3 - "$DATA/adversarial-bundle/manifest.json" <<'PY'
+import json, sys
+
+p = sys.argv[1]
+with open(p, encoding="utf-8") as source:
+    manifest = json.load(source)
+manifest["resultFields"].append({
+    "id": "tau2",
+    "label": "Between-study heterogeneity (τ²)",
+    "shortLabel": "τ²",
+    "estimand": "speech",
+    "measure": "org.fmrigds.measure/between-study-heterogeneity",
+    "inferential": True,
+    "signed": True,
+    "selection": {"level": "group"},
+    "domain": "mni-2mm",
+    "representations": [{"kind": "volume", "asset": "speech-effect"}],
+    "order": 5,
+    "publishedDisplay": {
+        "threshold": {"mode": "off", "min": 0.0},
+        "window": {"min": 0.0, "centre": 0.5, "max": 1.0},
+        "colormap": "fmrigds-heterogeneity",
+        "opacity": 0.7,
+    },
+})
+with open(p, "w", encoding="utf-8") as target:
+    json.dump(manifest, target, ensure_ascii=False, indent=2)
+    target.write("\n")
+PY
+$CLI push "$DATA/adversarial-bundle" \
+  --server "http://127.0.0.1:$PORT" --project rotman/sherlock --parent "$HEAD" \
+  --message "adversarial unknown measure" | tee "$DATA/adversarial-push.log"
+grep -q "^revision " "$DATA/adversarial-push.log"
+(cd modules/frontend && NP_ADVERSARIAL=1 NP_BASE_URL="http://127.0.0.1:$PORT" \
+  npx playwright test -c playwright.e2e.config.mjs tests/e2e-stage5.spec.mjs \
+  --grep "unknown measure remains generic")
+
+echo "== julia producer publishes a foreign revision with no Neuropublish code (ADR 0001 gate)"
 command -v julia >/dev/null || { echo "julia is required on PATH for the neutrality proof"; exit 1; }
 HEAD=$(curl -fs -H "Authorization: Bearer $SECRET" "http://127.0.0.1:$PORT/api/v1/workspaces/rotman/projects/sherlock" \
   | grep -oE '"head":"[^"]+"' | cut -d'"' -f4)

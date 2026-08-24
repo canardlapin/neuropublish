@@ -51,6 +51,7 @@ class LoadedSurfaceSuite extends FunSuite:
   private def resultField(id: String, reps: List[Representation]) =
     ResultField(
       id,
+      None,
       "est",
       "org.neuropublish.measure/t-statistic",
       "dom",
