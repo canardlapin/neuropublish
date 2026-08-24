@@ -37,6 +37,7 @@ final class Routes(
     links: ShareLinks,
     audit: Audit,
     authz: Authz,
+    authRateLimiter: AuthRateLimiter,
     data: Path,
     baseUrl: String
 ):
@@ -229,14 +230,18 @@ final class Routes(
   // ------------------------------------------------------------------ identity
 
   private val login = Stage4.login.serverLogic[IO] { req =>
-    identity.authenticate(req.email, req.password).flatMap {
-      case None => IO.pure(Left(ApiError("unauthorized", "invalid email or password")))
-      case Some(u) =>
-        for
-          (secret, exp) <- sessions.create(u.id)
-          m <- me(u)
-          _ <- auditUser(u, "login", None)
-        yield Right((sessionCookie(secret, exp), m))
+    authRateLimiter.admit(req.email).flatMap {
+      case false =>
+        IO.pure(Left(ApiError("rate_limited", "too many sign-in attempts; try again later")))
+      case true => identity.authenticate(req.email, req.password).flatMap {
+          case None => IO.pure(Left(ApiError("unauthorized", "invalid email or password")))
+          case Some(u) =>
+            for
+              (secret, exp) <- sessions.create(u.id)
+              m <- me(u)
+              _ <- auditUser(u, "login", None)
+            yield Right((sessionCookie(secret, exp), m))
+        }
     }
   }
   private val logout = Stage4.logout.serverSecurityLogic[Principal, IO](resolve).serverLogic(p =>

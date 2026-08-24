@@ -1,0 +1,9 @@
+.git
+.github
+.mote
+**/node_modules
+**/target
+modules/frontend/dist
+modules/frontend/test-results
+docs/design/artboards/neuropublish-workspace-ui.html
+data

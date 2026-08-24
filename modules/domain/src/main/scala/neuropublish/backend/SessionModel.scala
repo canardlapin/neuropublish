@@ -21,6 +21,9 @@ trait Sessions:
   def resolve(secret: String): IO[Option[String]]
   def revoke(secret: String): IO[Unit]
 
+  /** Revoke every browser session of one user; returns how many. */
+  def revokeAll(userId: String): IO[Int]
+
 object Sessions:
   val Lifetime: FiniteDuration = 24.hours
 

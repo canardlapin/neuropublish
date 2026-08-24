@@ -36,6 +36,26 @@ class PersistenceSuite extends CatsEffectSuite:
       r <- pg.revisions.commit(key, parent, d, msg, now.toString, m, Some(pg.queue))
     yield r
 
+  db.test("operator password rotation works in PostgreSQL and its principals are revocable") { pg =>
+    for
+      user <- pg.identity.ensureLocalUser("owner@example.org", "owner", "old-password")
+      (session, _) <- pg.sessions.create(user.id)
+      token <- pg.tokens.mint(user.id, "npub")
+      changed <- pg.identity.changeLocalPassword("OWNER@example.org", "new-password")
+      old <- pg.identity.authenticate("owner@example.org", "old-password")
+      fresh <- pg.identity.authenticate("owner@example.org", "new-password")
+      sessions <- pg.sessions.revokeAll(user.id)
+      tokens <- pg.tokens.revokeAll(user.id)
+      sessionAfter <- pg.sessions.resolve(session)
+      tokenAfter <- pg.tokens.resolve(token)
+    yield
+      assertEquals(changed.map(_.id), Some(user.id))
+      assertEquals(old, None)
+      assertEquals(fresh.map(_.id), Some(user.id))
+      assertEquals((sessions, tokens), (1, 1))
+      assertEquals((sessionAfter, tokenAfter), (None, None))
+  }
+
   db.test("composite FK rejects a revision whose workspace differs from its project's") { pg =>
     for
       _ <- pg.revisions.createProject(a)

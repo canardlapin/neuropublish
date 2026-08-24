@@ -205,6 +205,7 @@ object Stage4:
     variant(StatusCode.NotFound, "not_found"),
     variant(StatusCode.Conflict, "stale_parent"),
     variant(StatusCode.Gone, "revoked"),
+    variant(StatusCode.TooManyRequests, "rate_limited"),
     oneOfDefaultVariant(statusCode(StatusCode.BadRequest).and(jsonBody[ApiError]))
   )
 

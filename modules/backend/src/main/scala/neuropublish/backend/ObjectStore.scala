@@ -207,9 +207,10 @@ object ObjectStore:
       }
 
   /** S3 configuration from the environment: `NP_S3_BUCKET` selects S3 mode; `NP_S3_ENDPOINT` (MinIO
-    * or any S3-compatible service; unset = AWS), `NP_S3_REGION` (default us-east-1),
-    * `NP_S3_ACCESS_KEY` / `NP_S3_SECRET_KEY` (unset = the SDK default credential chain),
-    * `NP_S3_PATH_STYLE=true` for endpoints without virtual-host buckets (MinIO).
+    * or any S3-compatible service; unset = AWS), `NP_S3_PUBLIC_ENDPOINT` when presigned URLs need a
+    * browser-reachable origin distinct from the service-network endpoint, `NP_S3_REGION` (default
+    * us-east-1), `NP_S3_ACCESS_KEY` / `NP_S3_SECRET_KEY` (unset = the SDK default credential
+    * chain), `NP_S3_PATH_STYLE=true` for endpoints without virtual-host buckets (MinIO).
     */
   final case class S3Config(
       bucket: String,
@@ -217,12 +218,16 @@ object ObjectStore:
       region: String,
       accessKey: Option[String],
       secretKey: Option[String],
-      pathStyle: Boolean
+      pathStyle: Boolean,
+      publicEndpoint: Option[String] = None
   ):
     /** Provider-echoed `x-amz-checksum-sha256` is evidence only on AWS itself; an S3-compatible
       * endpoint may store the header without checking it, so commit hashes the bytes instead.
       */
     def trustProviderChecksum: Boolean = endpoint.isEmpty
+
+    /** The endpoint embedded in presigned URLs. The data client continues to use [[endpoint]]. */
+    def presigningEndpoint: Option[String] = publicEndpoint.orElse(endpoint)
   object S3Config:
     def fromEnv(env: Map[String, String]): Option[S3Config] =
       env.get("NP_S3_BUCKET").map(_.trim).filter(_.nonEmpty).map(bucket =>
@@ -232,7 +237,8 @@ object ObjectStore:
           env.getOrElse("NP_S3_REGION", "us-east-1"),
           env.get("NP_S3_ACCESS_KEY").filter(_.nonEmpty),
           env.get("NP_S3_SECRET_KEY").filter(_.nonEmpty),
-          env.get("NP_S3_PATH_STYLE").exists(v => v == "true" || v == "1")
+          env.get("NP_S3_PATH_STYLE").exists(v => v == "true" || v == "1"),
+          env.get("NP_S3_PUBLIC_ENDPOINT").map(_.trim).filter(_.nonEmpty)
         )
       )
 
@@ -449,6 +455,6 @@ object ObjectStore:
       val presigner = Resource.fromAutoCloseable(IO {
         val b = S3Presigner.builder().region(Region.of(c.region)).credentialsProvider(creds)
           .serviceConfiguration(serviceConf)
-        c.endpoint.fold(b)(e => b.endpointOverride(java.net.URI.create(e))).build()
+        c.presigningEndpoint.fold(b)(e => b.endpointOverride(java.net.URI.create(e))).build()
       })
       (client, presigner).mapN(new S3(_, _, c.bucket, c.trustProviderChecksum))

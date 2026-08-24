@@ -1,6 +1,29 @@
 import org.scalajs.linker.interface.{ModuleKind, ModuleSplitStyle}
 import org.typelevel.sbt.gha.{JavaSpec, PermissionValue, Permissions, WorkflowJob}
 
+lazy val stageRuntime = taskKey[File](
+  "Stage one JVM application's complete runtime classpath in a relocatable directory"
+)
+
+lazy val runtimeStageSettings = Seq(
+  stageRuntime := {
+    val output = target.value / "alpha-runtime"
+    val entries = (Runtime / fullClasspath).value.map(_.data)
+    IO.delete(output)
+    IO.createDirectory(output)
+    val staged = entries.zipWithIndex.map { case (source, index) =>
+      val cleanName = source.getName.replaceAll("[^A-Za-z0-9._-]", "_")
+      val destination = output / "cp" / f"$index%03d-$cleanName"
+      if (source.isDirectory) IO.copyDirectory(source, destination)
+      else IO.copyFile(source, destination)
+      s"cp/${destination.getName}"
+    }
+    IO.write(output / "classpath", staged.mkString(java.io.File.pathSeparator))
+    streams.value.log.info(s"staged ${entries.size} runtime entries in $output")
+    output
+  }
+)
+
 // ---------------------------------------------------------------------------
 // Neuropublish — scientific results publication and review for neuroimaging.
 // Module map: docs/architecture.md ("Scala 3 repository structure").
@@ -128,6 +151,11 @@ lazy val jsSettings = Seq(
   scalaJSLinkerConfig ~= (_.withModuleKind(ModuleKind.ESModule)),
   scalaJSUseTestModuleInitializer := true
 )
+
+// Root aggregation otherwise launches every module's test task at once. On constrained machines
+// that starves Julia, Scala.js, Testcontainers, and presigned-S3 tests long enough for signed URLs
+// to expire. Suites are already internally sequential; serialize the aggregated module tasks too.
+Global / concurrentRestrictions += Tags.limit(Tags.Test, 1)
 
 // Settings shared by every cross JVM/JS module (crossProject itself is a macro
 // that must be assigned directly to a val, so it is repeated per module).
@@ -297,7 +325,7 @@ lazy val persistence = project
 lazy val backend = project
   .in(file("modules/backend"))
   .dependsOn(apiContract.jvm, rendition.jvm, domain, persistence % "compile->compile;test->test")
-  .settings(commonSettings)
+  .settings(commonSettings, runtimeStageSettings)
   .settings(
     name := "neuropublish-backend",
     libraryDependencies ++= Seq(
@@ -325,7 +353,7 @@ lazy val backend = project
 lazy val ingestion = project
   .in(file("modules/ingestion"))
   .dependsOn(backend, rendition.jvm)
-  .settings(commonSettings)
+  .settings(commonSettings, runtimeStageSettings)
   .settings(
     name := "neuropublish-ingestion",
     libraryDependencies ++= Seq(

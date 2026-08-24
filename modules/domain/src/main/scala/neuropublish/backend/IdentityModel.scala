@@ -55,6 +55,11 @@ trait Identity:
   /** Create the user with a local password if no identity (issuer, subject) exists; returns it. */
   def ensureLocalUser(email: String, name: String, password: String): IO[UserRecord]
 
+  /** Replace one existing local identity's password; external identities and unknown emails are
+    * absent. The operator boundary revokes that user's sessions and tokens after this succeeds.
+    */
+  def changeLocalPassword(email: String, password: String): IO[Option[UserRecord]]
+
 object Identity:
   val LocalIssuer = "local"
 

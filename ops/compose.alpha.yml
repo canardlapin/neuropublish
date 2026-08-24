@@ -1,0 +1,103 @@
+name: neuropublish-alpha
+
+x-app-environment: &app-environment
+  NP_BASE_URL: ${NP_BASE_URL:?set NP_BASE_URL to the public HTTPS origin}
+  NP_DATABASE_URL: jdbc:postgresql://postgres:5432/neuropublish
+  NP_DATABASE_USER: neuropublish
+  NP_DATABASE_PASSWORD: ${NP_POSTGRES_PASSWORD:?set NP_POSTGRES_PASSWORD}
+  NP_S3_BUCKET: neuropublish
+  # The service endpoint stays on the Compose network; presigned URLs use the host endpoint that a
+  # local browser can reach. A hosted alpha normally uses one approved HTTPS endpoint for both.
+  NP_S3_ENDPOINT: http://minio:9000
+  NP_S3_PUBLIC_ENDPOINT: http://127.0.0.1:${NP_MINIO_PORT:-9000}
+  NP_S3_REGION: us-east-1
+  NP_S3_ACCESS_KEY: ${NP_MINIO_ROOT_USER:?set NP_MINIO_ROOT_USER}
+  NP_S3_SECRET_KEY: ${NP_MINIO_ROOT_PASSWORD:?set NP_MINIO_ROOT_PASSWORD}
+  NP_S3_PATH_STYLE: "true"
+  NP_INGESTION: worker
+  NP_WORKSPACE: ${NP_WORKSPACE:-rotman}
+  NP_PROJECT: ${NP_PROJECT:-sherlock}
+  NP_OWNER_EMAIL: ${NP_OWNER_EMAIL:?set NP_OWNER_EMAIL}
+  NP_OWNER_PASSWORD: ${NP_OWNER_PASSWORD:?set NP_OWNER_PASSWORD}
+  NP_AUTH_ATTEMPTS: "10"
+  NP_AUTH_WINDOW_SECONDS: "60"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: neuropublish
+      POSTGRES_USER: neuropublish
+      POSTGRES_PASSWORD: ${NP_POSTGRES_PASSWORD:?set NP_POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U neuropublish -d neuropublish"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: ${NP_MINIO_ROOT_USER:?set NP_MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${NP_MINIO_ROOT_PASSWORD:?set NP_MINIO_ROOT_PASSWORD}
+      # This pinned MinIO release rejects PutBucketCors even though newer AIStor releases support
+      # it. The global API setting is the supported fail-closed equivalent for this single bucket.
+      MINIO_API_CORS_ALLOW_ORIGIN: ${NP_BASE_URL:?set NP_BASE_URL to the public HTTPS origin}
+    ports:
+      - "127.0.0.1:${NP_MINIO_PORT:-9000}:9000"
+    volumes:
+      - minio-data:/data
+    restart: unless-stopped
+
+  minio-config:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        until mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}";
+        do sleep 2; done;
+        mc mb --ignore-existing local/neuropublish;
+        mc version enable local/neuropublish
+    environment:
+      MINIO_ROOT_USER: ${NP_MINIO_ROOT_USER:?set NP_MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${NP_MINIO_ROOT_PASSWORD:?set NP_MINIO_ROOT_PASSWORD}
+    depends_on:
+      minio:
+        condition: service_started
+
+  backend:
+    build:
+      context: ..
+      dockerfile: ops/Dockerfile
+    image: neuropublish-alpha:local
+    command: ["backend"]
+    environment:
+      <<: *app-environment
+    ports:
+      - "127.0.0.1:${NP_ALPHA_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-config:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  worker:
+    image: neuropublish-alpha:local
+    command: ["worker"]
+    environment:
+      <<: *app-environment
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  minio-data:

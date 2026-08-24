@@ -5,7 +5,6 @@ import io.circe.generic.semiauto.*
 import sttp.tapir.*
 import sttp.tapir.generic.auto.*
 import sttp.tapir.json.circe.*
-import sttp.tapir.model.UsernamePassword
 import sttp.model.StatusCode
 
 // Wire DTOs for the control plane. Kept separate from domain types (architecture:
@@ -138,6 +137,7 @@ object Protocol:
       "parent is not the project head; `head` carries it"
     ),
     variant(StatusCode.PayloadTooLarge, "payload_too_large", "declared inventory exceeds limits"),
+    variant(StatusCode.TooManyRequests, "rate_limited", "too many requests"),
     oneOfDefaultVariant(statusCode(
       StatusCode.BadRequest
     ).and(jsonBody[ApiError].description("invalid request or manifest")))

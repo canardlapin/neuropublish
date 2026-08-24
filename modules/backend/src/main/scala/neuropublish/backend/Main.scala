@@ -13,14 +13,15 @@ import org.http4s.server.staticcontent.*
 
 /** Configuration by environment:
   *
-  *   - NP_DATA_DIR (default ./data); NP_PORT (default 8080); NP_STATIC_DIR (built frontend;
-  *     optional)
+  *   - NP_DATA_DIR (default ./data); NP_HOST (default 127.0.0.1); NP_PORT (default 8080);
+  *     NP_STATIC_DIR (built frontend; optional)
   *   - NP_DATABASE_URL (+ NP_DATABASE_USER / NP_DATABASE_PASSWORD): when set, every record store is
   *     PostgreSQL (Flyway migrations run at start); unset, the local-fs JSON stores under
   *     NP_DATA_DIR.
-  *   - NP_S3_BUCKET (+ NP_S3_ENDPOINT, NP_S3_REGION, NP_S3_ACCESS_KEY, NP_S3_SECRET_KEY,
-  *     NP_S3_PATH_STYLE): S3-compatible object store with presigned transfers; unset, objects and
-  *     renditions under NP_DATA_DIR, proxied by the control plane ([[ObjectStore.S3Config]])
+  *   - NP_S3_BUCKET (+ NP_S3_ENDPOINT, NP_S3_PUBLIC_ENDPOINT, NP_S3_REGION, NP_S3_ACCESS_KEY,
+  *     NP_S3_SECRET_KEY, NP_S3_PATH_STYLE): S3-compatible object store with presigned transfers;
+  *     unset, objects and renditions under NP_DATA_DIR, proxied by the control plane
+  *     ([[ObjectStore.S3Config]])
   *   - NP_INGESTION=inline|worker (default inline): derive renditions in the commit, or enqueue for
   *     `neuropublish.ingestion.Main` ([[IngestionMode]])
   *   - NP_BASE_URL (default http://127.0.0.1:$NP_PORT): the public origin — share URLs, device
@@ -35,7 +36,8 @@ import org.http4s.server.staticcontent.*
   *
   * Subcommands: none → serve; `reindex` → rebuild the PostgreSQL read model from the stored
   * manifests and exit (requires NP_DATABASE_URL); `gc --older-than 24h [--dry-run]` → delayed
-  * orphan cleanup ([[Gc]]).
+  * orphan cleanup ([[Gc]]); `reset-password --email EMAIL` → replace an existing local-provider
+  * password from `NP_NEW_PASSWORD` and revoke that user's browser sessions and device tokens.
   */
 object Main extends IOApp:
   def run(args: List[String]): IO[ExitCode] =
@@ -45,11 +47,51 @@ object Main extends IOApp:
     args match
       case "reindex" :: Nil => reindex(data, db, env)
       case "gc" :: rest => gc(data, db, env, rest)
+      case "reset-password" :: "--email" :: email :: Nil => resetPassword(data, db, email, env)
       case Nil => serve(env, data, db).as(ExitCode.Success)
       case other =>
-        IO.println(s"unknown arguments: ${other.mkString(" ")}; usage: [reindex | gc]").as(
+        IO.println(
+          s"unknown arguments: ${other.mkString(" ")}; usage: [reindex | gc | reset-password --email EMAIL]"
+        ).as(
           ExitCode(2)
         )
+
+  private def resetPassword(
+      data: Path,
+      db: Option[DbConfig],
+      email: String,
+      env: Map[String, String]
+  ): IO[ExitCode] =
+    env.get("NP_NEW_PASSWORD").filter(_.length >= 12) match
+      case None =>
+        IO.println("reset-password needs NP_NEW_PASSWORD with at least 12 characters")
+          .as(ExitCode(2))
+      case Some(password) =>
+        val stores = db.fold(Resource.eval(Server.Stores.localFs(data)))(Server.Stores.postgres)
+        stores.use { s =>
+          s.identity.changeLocalPassword(email, password).flatMap {
+            case None => IO.println(s"no local identity for $email").as(ExitCode(2))
+            case Some(user) =>
+              for
+                sessions <- s.sessions.revokeAll(user.id)
+                tokens <- s.tokens.revokeAll(user.id)
+                memberships <- s.members.membershipsOf(user.id)
+                _ <- memberships.traverse_(m =>
+                  s.audit.record(
+                    "operator",
+                    "password.reset",
+                    m.workspace,
+                    None,
+                    Some(user.id),
+                    Some(s"sessions=$sessions tokens=$tokens")
+                  )
+                )
+                _ <- IO.println(
+                  s"password reset for $email; revoked $sessions browser sessions and $tokens user tokens"
+                )
+              yield ExitCode.Success
+          }
+        }
 
   private def reindex(data: Path, db: Option[DbConfig], env: Map[String, String]): IO[ExitCode] =
     db match
@@ -111,6 +153,7 @@ object Main extends IOApp:
     val legacy = env.get("NP_LEGACY_TOKEN").filter(_.nonEmpty)
     val key =
       ProjectKey(env.getOrElse("NP_WORKSPACE", "rotman"), env.getOrElse("NP_PROJECT", "sherlock"))
+    val bind = Host.fromString(env.getOrElse("NP_HOST", "127.0.0.1")).getOrElse(host"127.0.0.1")
     val port = Port.fromString(env.getOrElse("NP_PORT", "8080")).getOrElse(port"8080")
     val base = env.get("NP_BASE_URL").map(_.trim.stripSuffix("/")).filter(_.nonEmpty)
       .getOrElse(s"http://127.0.0.1:$port")
@@ -122,8 +165,10 @@ object Main extends IOApp:
       Server.build(s, data, key, base, ownerEmail, ownerPassword, legacy, Nil, Some(st)).flatMap {
         api =>
           val app = static.fold(api)(dir => api <+> Server.spa(dir))
-          EmberServerBuilder.default[IO].withHost(host"127.0.0.1").withPort(port)
-            .withHttpApp(CORS.policy.withAllowOriginAll.withAllowCredentials(false)(app.orNotFound))
+          val cors = CORS.policy.withAllowOriginAll.withAllowCredentials(false)(app.orNotFound)
+          val secured = SecurityHeaders(cors, base.startsWith("https://"))
+          EmberServerBuilder.default[IO].withHost(bind).withPort(port)
+            .withHttpApp(secured)
             .build
             .evalTap(srv =>
               IO.println(
@@ -330,6 +375,7 @@ object Server:
         stores.credentials,
         legacyToken
       )
+      authRateLimiter <- AuthRateLimiter.create(AuthRateLimiter.Config.fromEnv(sys.env))
     yield Routes(
       pub,
       revisions,
@@ -344,6 +390,7 @@ object Server:
       stores.links,
       stores.audit,
       authz,
+      authRateLimiter,
       data,
       baseUrl
     ).routes

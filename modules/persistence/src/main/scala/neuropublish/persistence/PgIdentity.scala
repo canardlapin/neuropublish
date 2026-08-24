@@ -58,6 +58,21 @@ final class PgIdentity(xa: Transactor[IO]) extends Identity:
       u <- tx.transact(xa)
     yield u
 
+  def changeLocalPassword(email: String, password: String): IO[Option[UserRecord]] =
+    for
+      hash <- Secrets.hashPassword(password)
+      subject = email.toLowerCase
+      changed <- (for
+        id <- sql"""SELECT user_id FROM identities
+                    WHERE issuer = ${Identity.LocalIssuer} AND subject = $subject"""
+          .query[String].option
+        _ <- id.traverse_(userId =>
+          sql"UPDATE users SET password_hash = ${hash.asJson} WHERE id = $userId".update.run.void
+        )
+      yield id).transact(xa)
+      user <- changed.traverse(lookup)
+    yield user.flatten
+
 object PgIdentity:
   final case class Row(
       id: String,

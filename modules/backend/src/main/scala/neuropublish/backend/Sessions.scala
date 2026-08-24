@@ -34,6 +34,16 @@ final class LocalSessions(dir: Path) extends Sessions:
   def revoke(secret: String): IO[Unit] =
     Files[IO].deleteIfExists(file(Secrets.sha256Hex(secret))).void
 
+  def revokeAll(userId: String): IO[Int] =
+    Files[IO].exists(dir).flatMap {
+      case false => IO.pure(0)
+      case true =>
+        Files[IO].list(dir).filter(_.fileName.toString.endsWith(".json")).evalFilter(p =>
+          JsonFiles.read[SessionRecord](p).attempt.map(_.toOption.flatten.exists(_.userId ==
+            userId))
+        ).evalMap(p => Files[IO].deleteIfExists(p)).compile.count.map(_.toInt)
+    }
+
 /** Local-fs [[UserTokens]]: `<data>/tokens/<sha256(token)>.json`. */
 final class LocalUserTokens(dir: Path) extends UserTokens:
   private def file(hash: String) = dir / s"$hash.json"

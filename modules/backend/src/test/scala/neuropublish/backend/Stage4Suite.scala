@@ -141,6 +141,18 @@ abstract class Stage4Spec(factory: ServerFactory) extends CatsEffectSuite:
       yield assertEquals(after.status, Status.Unauthorized)
   }
 
+  server.test("the local identity provider throttles repeated guesses for one account") { app =>
+    for
+      first <- (1 to 10).toList.traverse(_ =>
+        post(app, "/api/v1/auth/login", LoginRequest(owner, "wrong"), anon)
+      )
+      _ = first.foreach(r => assertEquals(r.status, Status.Unauthorized))
+      limited <- post(app, "/api/v1/auth/login", LoginRequest(owner, "still-wrong"), anon)
+      _ = assertEquals(limited.status, Status.TooManyRequests)
+      body <- decode[ApiError](limited)
+    yield assertEquals(body.code, "rate_limited")
+  }
+
   private def serverWithStores = ResourceFunFixture(
     factory.build(key, "http://test", owner, password, legacyToken = None)
   )

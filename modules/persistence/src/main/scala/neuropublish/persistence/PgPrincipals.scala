@@ -44,6 +44,9 @@ final class PgSessions(xa: Transactor[IO]) extends Sessions:
     sql"DELETE FROM sessions WHERE secret_hash = ${Secrets.sha256Hex(secret)}".update.run.void
       .transact(xa)
 
+  def revokeAll(userId: String): IO[Int] =
+    sql"DELETE FROM sessions WHERE user_id = $userId".update.run.transact(xa)
+
 /** `user_tokens`: device-flow bearers, hashed; expired rows are deleted when met. */
 final class PgUserTokens(xa: Transactor[IO]) extends UserTokens:
   def mint(userId: String, client: String): IO[String] =

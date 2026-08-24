@@ -12,10 +12,15 @@
 #   NP_PORT=8090                    backend port (default 8090; must be free)
 #   NP_KEEP_DATA=1                  keep the temp data dir and logs on exit
 set -euo pipefail
+export LC_ALL=C LANG=C
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PORT="${NP_PORT:-8090}"
 DATA="$(mktemp -d "${TMPDIR:-/tmp}/np-e2e.XXXXXX")"
 export NP_OWNER_EMAIL="owner@example.org" NP_OWNER_PASSWORD="owner-dev-password"
+# The suite deliberately signs the same owner into fresh browser contexts in parallel. Production
+# throttling has focused unit/integration coverage; keep it from turning browser setup into a
+# cross-test shared counter while retaining an explicit override for limiter-specific rehearsals.
+export NP_AUTH_ATTEMPTS="${NP_E2E_AUTH_ATTEMPTS:-100}"
 export NPUB_CONFIG_DIR="$DATA/npub-config"
 unset NP_TOKEN
 cd "$ROOT"

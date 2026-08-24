@@ -52,6 +52,18 @@ object LocalIdentity:
         }
       }
 
+    def changeLocalPassword(email: String, password: String): IO[Option[UserRecord]] =
+      mutex.lock.surround {
+        lookupIdentity(Identity.LocalIssuer, email).flatMap {
+          case None => IO.none
+          case Some(u) =>
+            Secrets.hashPassword(password).flatMap { hash =>
+              val changed = u.copy(password = Some(hash))
+              JsonFiles.write(userFile(u.id), changed).as(Some(changed))
+            }
+        }
+      }
+
 /** `workspace_members` on the local fs: one file per workspace under `<data>/members/<ws>.json`. */
 final class LocalMembers(dir: Path, mutex: Mutex[IO]) extends Members:
   private final case class MembersFile(members: List[MemberRecord])
