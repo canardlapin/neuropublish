@@ -1,0 +1,891 @@
+{
+  "core" : "0.1",
+  "title" : "fmrigds random-effects golden",
+  "synopsis" : "Six-input, two-contrast producer-owned mapping fixture.",
+  "sensitivity" : "group-level",
+  "warnings" : [
+    {
+      "id" : "synthetic-sample-labels",
+      "message" : "Sample labels were generated and do not carry anatomical identity."
+    }
+  ],
+  "axes" : [
+    {
+      "id" : "level",
+      "label" : "Level",
+      "values" : [
+        "group"
+      ]
+    }
+  ],
+  "domains" : [
+    {
+      "id" : "domain-volume-288c87f0a36d",
+      "key" : {
+        "descriptor" : {
+          "id" : "org.neuropublish.domain/volume-grid",
+          "version" : "1.0",
+          "digest" : "sha256:69c25b8868349828e41cd6d610ac619af118fb7b807b7306f706b727ed23dfb7"
+        },
+        "size" : 4,
+        "structuralFingerprint" : "sha256:8577765e7a5d47c75783526226078712abaeaba3689caa8ab7333f2d4bbd71c9"
+      },
+      "descriptor" : {
+        "schema" : {
+          "id" : "org.neuropublish.domain/volume-grid",
+          "version" : "1.0",
+          "digest" : "sha256:69c25b8868349828e41cd6d610ac619af118fb7b807b7306f706b727ed23dfb7"
+        },
+        "payload" : {
+          "space" : "test-grid",
+          "coordinateConvention" : "RAS+",
+          "spatialUnit" : "mm",
+          "ordinalLayout" : "x-fastest",
+          "shape" : [
+            2,
+            2,
+            1
+          ],
+          "affine" : [
+            [
+              -1,
+              0,
+              0,
+              0.5
+            ],
+            [
+              0,
+              1,
+              0,
+              -0.5
+            ],
+            [
+              0,
+              0,
+              1,
+              -0
+            ],
+            [
+              0,
+              0,
+              0,
+              1
+            ]
+          ]
+        }
+      }
+    }
+  ],
+  "assets" : [
+    {
+      "id" : "asset-field-beta_g-faces-7c8d94630ab1-1815fb9924b3",
+      "mediaType" : "application/x-nifti",
+      "digest" : "sha256:2825b953c9b0f7f47bb7ce80b46ef8830e893cff91a0ea58d432c4b6040913d5",
+      "size" : 368
+    },
+    {
+      "id" : "asset-field-beta_g-places-621e367ed39f-ff00ee494f72",
+      "mediaType" : "application/x-nifti",
+      "digest" : "sha256:32c99d53ec5e4a3d5a583c29234ab2ebc88deeeb6d2ef8815b8d0f6496be540e",
+      "size" : 368
+    },
+    {
+      "id" : "asset-field-se_g-faces-85fc2b2701bb-f15a5d62ce84",
+      "mediaType" : "application/x-nifti",
+      "digest" : "sha256:cdca838b5f2f26d53581e58c50e3128aedbf86d0479431052533cbdab35e05d7",
+      "size" : 368
+    },
+    {
+      "id" : "asset-field-se_g-places-d24507bbb8be-8cfe2cabb29b",
+      "mediaType" : "application/x-nifti",
+      "digest" : "sha256:f54e865702ec6a77b7d453de627878d7663df1dade7f7e113b4b6a78ca2cb15f",
+      "size" : 368
+    },
+    {
+      "id" : "asset-field-z_g-faces-198c645a4ddd-94fc5ab8a24f",
+      "mediaType" : "application/x-nifti",
+      "digest" : "sha256:587678ed931b6cc70c9130a3291171dd1142217cb69bf62800ab37f90c31f4e7",
+      "size" : 368
+    },
+    {
+      "id" : "asset-field-z_g-places-16e063cbb045-2c22f7a53d49",
+      "mediaType" : "application/x-nifti",
+      "digest" : "sha256:4c9905647a9c04d118519b1bd93a13cc8abadbf83dd19616701554fca200011c",
+      "size" : 368
+    },
+    {
+      "id" : "asset-field-tau2-faces-d52b435d5b2b-ae1f2bb7e1cd",
+      "mediaType" : "application/x-nifti",
+      "digest" : "sha256:a530a3f60099bbecc8a95d7244b30db209941a787af0b29a699fcb691bd6fb67",
+      "size" : 368
+    },
+    {
+      "id" : "asset-field-tau2-places-8bf72b5521b2-2e9b4b51e6f9",
+      "mediaType" : "application/x-nifti",
+      "digest" : "sha256:52ee1edc91c5d073936e68df17a7b57cf08d60ae4e75fb5d57a1b6d71f91302b",
+      "size" : 368
+    },
+    {
+      "id" : "asset-field-n_eff-faces-9ab724cafed4-3e253b3bfa49",
+      "mediaType" : "application/x-nifti",
+      "digest" : "sha256:8e9650892a0def4bda0b3ea3a44c05f5b7f555d27ee46fb130099edb71e954a6",
+      "size" : 368
+    },
+    {
+      "id" : "asset-field-n_eff-places-b2bd6224c6fd-e0a32695df37",
+      "mediaType" : "application/x-nifti",
+      "digest" : "sha256:97965066650de8bb5cddf46887214cba405024692c879d24b585fc0cce3971bf",
+      "size" : 368
+    }
+  ],
+  "analyses" : [
+    {
+      "id" : "analysis-meta-re-4cc3672617de",
+      "label" : "fmrigds meta:re",
+      "method" : {
+        "schema" : {
+          "id" : "org.bbuchsbaum.fmrigds/reduction",
+          "version" : "1.0"
+        },
+        "payload" : {
+          "schemaVersion" : "1.0.0",
+          "status" : "portable",
+          "reducerId" : "meta:re",
+          "planNodeId" : "node-0001-0cfb8c1163df",
+          "formula" : null,
+          "options" : [
+          ],
+          "weight" : {
+            "mode" : "1/var",
+            "status" : "verified"
+          },
+          "modelContract" : {
+            "uses_X" : false,
+            "estimands" : "intercept",
+            "weight_mode" : "inverse_variance",
+            "missingness" : "samplewise",
+            "synthetic_variance" : "forbid",
+            "deletion" : "tau2_fixed_full"
+          },
+          "reducerVersion" : "0.1.0.9000",
+          "design" : {
+            "status" : "not-applicable",
+            "columns" : [
+            ]
+          },
+          "nInputSubjects" : 6,
+          "inputContrasts" : [
+            "faces",
+            "places"
+          ],
+          "outputContrasts" : [
+            "faces",
+            "places"
+          ],
+          "terms" : [
+          ],
+          "outputAssays" : [
+            "beta",
+            "var",
+            "beta_g",
+            "var_g",
+            "se_g",
+            "z_g",
+            "p_g",
+            "tau2",
+            "Q",
+            "I2",
+            "n_eff",
+            "z",
+            "p"
+          ],
+          "planDigest" : {
+            "status" : "verified",
+            "algorithm" : "sha256",
+            "value" : "aafb7e8d1bad0419b1f6e177b68c8e2295f9cc47bfdd03fe8c1ef591525ad45c",
+            "schemaVersion" : "1.0"
+          },
+          "software" : {
+            "package" : "fmrigds",
+            "version" : "0.1.0.9000",
+            "RVersion" : "4.5.1"
+          }
+        }
+      },
+      "sampleSize" : 6,
+      "estimands" : [
+        {
+          "id" : "estimand-faces-effect-0e626889451c",
+          "label" : "faces",
+          "order" : 1
+        },
+        {
+          "id" : "estimand-places-effect-dfb3fb7fdb84",
+          "label" : "places",
+          "order" : 2
+        }
+      ]
+    }
+  ],
+  "resultFields" : [
+    {
+      "id" : "field-beta_g-faces-7c8d94630ab1",
+      "label" : "faces — Effect",
+      "estimand" : "estimand-faces-effect-0e626889451c",
+      "measure" : "org.neuropublish.measure/effect",
+      "selection" : {
+        "level" : "group"
+      },
+      "domain" : "domain-volume-288c87f0a36d",
+      "representations" : [
+        {
+          "kind" : "volume",
+          "asset" : "asset-field-beta_g-faces-7c8d94630ab1-1815fb9924b3"
+        }
+      ],
+      "order" : 1
+    },
+    {
+      "id" : "field-beta_g-places-621e367ed39f",
+      "label" : "places — Effect",
+      "estimand" : "estimand-places-effect-dfb3fb7fdb84",
+      "measure" : "org.neuropublish.measure/effect",
+      "selection" : {
+        "level" : "group"
+      },
+      "domain" : "domain-volume-288c87f0a36d",
+      "representations" : [
+        {
+          "kind" : "volume",
+          "asset" : "asset-field-beta_g-places-621e367ed39f-ff00ee494f72"
+        }
+      ],
+      "order" : 1
+    },
+    {
+      "id" : "field-se_g-faces-85fc2b2701bb",
+      "label" : "faces — Standard error",
+      "estimand" : "estimand-faces-effect-0e626889451c",
+      "measure" : "org.neuropublish.measure/standard-error",
+      "selection" : {
+        "level" : "group"
+      },
+      "domain" : "domain-volume-288c87f0a36d",
+      "representations" : [
+        {
+          "kind" : "volume",
+          "asset" : "asset-field-se_g-faces-85fc2b2701bb-f15a5d62ce84"
+        }
+      ],
+      "order" : 2
+    },
+    {
+      "id" : "field-se_g-places-d24507bbb8be",
+      "label" : "places — Standard error",
+      "estimand" : "estimand-places-effect-dfb3fb7fdb84",
+      "measure" : "org.neuropublish.measure/standard-error",
+      "selection" : {
+        "level" : "group"
+      },
+      "domain" : "domain-volume-288c87f0a36d",
+      "representations" : [
+        {
+          "kind" : "volume",
+          "asset" : "asset-field-se_g-places-d24507bbb8be-8cfe2cabb29b"
+        }
+      ],
+      "order" : 2
+    },
+    {
+      "id" : "field-z_g-faces-198c645a4ddd",
+      "label" : "faces — z statistic",
+      "estimand" : "estimand-faces-effect-0e626889451c",
+      "measure" : "org.neuropublish.measure/z-statistic",
+      "selection" : {
+        "level" : "group"
+      },
+      "domain" : "domain-volume-288c87f0a36d",
+      "representations" : [
+        {
+          "kind" : "volume",
+          "asset" : "asset-field-z_g-faces-198c645a4ddd-94fc5ab8a24f"
+        }
+      ],
+      "order" : 3
+    },
+    {
+      "id" : "field-z_g-places-16e063cbb045",
+      "label" : "places — z statistic",
+      "estimand" : "estimand-places-effect-dfb3fb7fdb84",
+      "measure" : "org.neuropublish.measure/z-statistic",
+      "selection" : {
+        "level" : "group"
+      },
+      "domain" : "domain-volume-288c87f0a36d",
+      "representations" : [
+        {
+          "kind" : "volume",
+          "asset" : "asset-field-z_g-places-16e063cbb045-2c22f7a53d49"
+        }
+      ],
+      "order" : 3
+    },
+    {
+      "id" : "field-tau2-faces-d52b435d5b2b",
+      "label" : "Between-study heterogeneity (τ²)",
+      "estimand" : "estimand-faces-effect-0e626889451c",
+      "measure" : "org.bbuchsbaum.fmrigds.measure/between-study-heterogeneity-variance",
+      "selection" : {
+        "level" : "group"
+      },
+      "domain" : "domain-volume-288c87f0a36d",
+      "representations" : [
+        {
+          "kind" : "volume",
+          "asset" : "asset-field-tau2-faces-d52b435d5b2b-ae1f2bb7e1cd"
+        }
+      ],
+      "order" : 4
+    },
+    {
+      "id" : "field-tau2-places-8bf72b5521b2",
+      "label" : "Between-study heterogeneity (τ²)",
+      "estimand" : "estimand-places-effect-dfb3fb7fdb84",
+      "measure" : "org.bbuchsbaum.fmrigds.measure/between-study-heterogeneity-variance",
+      "selection" : {
+        "level" : "group"
+      },
+      "domain" : "domain-volume-288c87f0a36d",
+      "representations" : [
+        {
+          "kind" : "volume",
+          "asset" : "asset-field-tau2-places-8bf72b5521b2-2e9b4b51e6f9"
+        }
+      ],
+      "order" : 4
+    },
+    {
+      "id" : "field-n_eff-faces-9ab724cafed4",
+      "label" : "faces — Effective sample size",
+      "estimand" : "estimand-faces-effect-0e626889451c",
+      "measure" : "org.bbuchsbaum.fmrigds.measure/effective-sample-size",
+      "selection" : {
+        "level" : "group"
+      },
+      "domain" : "domain-volume-288c87f0a36d",
+      "representations" : [
+        {
+          "kind" : "volume",
+          "asset" : "asset-field-n_eff-faces-9ab724cafed4-3e253b3bfa49"
+        }
+      ],
+      "order" : 5
+    },
+    {
+      "id" : "field-n_eff-places-b2bd6224c6fd",
+      "label" : "places — Effective sample size",
+      "estimand" : "estimand-places-effect-dfb3fb7fdb84",
+      "measure" : "org.bbuchsbaum.fmrigds.measure/effective-sample-size",
+      "selection" : {
+        "level" : "group"
+      },
+      "domain" : "domain-volume-288c87f0a36d",
+      "representations" : [
+        {
+          "kind" : "volume",
+          "asset" : "asset-field-n_eff-places-b2bd6224c6fd-e0a32695df37"
+        }
+      ],
+      "order" : 5
+    }
+  ],
+  "underlays" : [
+  ],
+  "provenance" : {
+    "entities" : [
+      {
+        "id" : "source-0001-e80ea4e4733dd64e",
+        "label" : "fmrigds file",
+        "hosted" : false,
+        "schema" : {
+          "id" : "org.bbuchsbaum.fmrigds/source-entity",
+          "version" : "1.0"
+        },
+        "payload" : {
+          "schemaVersion" : "1.0.0",
+          "kind" : "file",
+          "roles" : [
+            {
+              "role" : "beta",
+              "ordinal" : 1,
+              "pair" : 1
+            }
+          ],
+          "byteSize" : 416,
+          "digest" : {
+            "algorithm" : "sha256",
+            "value" : "88fd1ddff01bd3e17652534b710416cb0d5c259c4b83c7832aa73b6a0721153c"
+          },
+          "identityStatus" : "verified",
+          "reason" : null
+        }
+      },
+      {
+        "id" : "source-0002-6f162dd58221892d",
+        "label" : "fmrigds file",
+        "hosted" : false,
+        "schema" : {
+          "id" : "org.bbuchsbaum.fmrigds/source-entity",
+          "version" : "1.0"
+        },
+        "payload" : {
+          "schemaVersion" : "1.0.0",
+          "kind" : "file",
+          "roles" : [
+            {
+              "role" : "beta",
+              "ordinal" : 2,
+              "pair" : 2
+            }
+          ],
+          "byteSize" : 416,
+          "digest" : {
+            "algorithm" : "sha256",
+            "value" : "ed8377b4ed4a036da83f8d1de60eb6cfb4aaadf6c566d300622dd3601298fea3"
+          },
+          "identityStatus" : "verified",
+          "reason" : null
+        }
+      },
+      {
+        "id" : "source-0003-a5dfb896a334a671",
+        "label" : "fmrigds file",
+        "hosted" : false,
+        "schema" : {
+          "id" : "org.bbuchsbaum.fmrigds/source-entity",
+          "version" : "1.0"
+        },
+        "payload" : {
+          "schemaVersion" : "1.0.0",
+          "kind" : "file",
+          "roles" : [
+            {
+              "role" : "beta",
+              "ordinal" : 3,
+              "pair" : 3
+            }
+          ],
+          "byteSize" : 416,
+          "digest" : {
+            "algorithm" : "sha256",
+            "value" : "f99acfb9ef462e9c2ffb67feef1713a55be7c2731bcb462c17512a427914198f"
+          },
+          "identityStatus" : "verified",
+          "reason" : null
+        }
+      },
+      {
+        "id" : "source-0004-64a4a001a63fb671",
+        "label" : "fmrigds file",
+        "hosted" : false,
+        "schema" : {
+          "id" : "org.bbuchsbaum.fmrigds/source-entity",
+          "version" : "1.0"
+        },
+        "payload" : {
+          "schemaVersion" : "1.0.0",
+          "kind" : "file",
+          "roles" : [
+            {
+              "role" : "beta",
+              "ordinal" : 4,
+              "pair" : 4
+            }
+          ],
+          "byteSize" : 416,
+          "digest" : {
+            "algorithm" : "sha256",
+            "value" : "cc9df20b3c60adbdd47814ee98e02c91669fa4c2bc44c64e2f773dbf9666b1fc"
+          },
+          "identityStatus" : "verified",
+          "reason" : null
+        }
+      },
+      {
+        "id" : "source-0005-5abb1cd81f813730",
+        "label" : "fmrigds file",
+        "hosted" : false,
+        "schema" : {
+          "id" : "org.bbuchsbaum.fmrigds/source-entity",
+          "version" : "1.0"
+        },
+        "payload" : {
+          "schemaVersion" : "1.0.0",
+          "kind" : "file",
+          "roles" : [
+            {
+              "role" : "beta",
+              "ordinal" : 5,
+              "pair" : 5
+            }
+          ],
+          "byteSize" : 416,
+          "digest" : {
+            "algorithm" : "sha256",
+            "value" : "963ae3c84894c1fdf6876bf85f825b1ec4765e59f2637c669944af8bf1adde67"
+          },
+          "identityStatus" : "verified",
+          "reason" : null
+        }
+      },
+      {
+        "id" : "source-0006-1c0630ebffba8d39",
+        "label" : "fmrigds file",
+        "hosted" : false,
+        "schema" : {
+          "id" : "org.bbuchsbaum.fmrigds/source-entity",
+          "version" : "1.0"
+        },
+        "payload" : {
+          "schemaVersion" : "1.0.0",
+          "kind" : "file",
+          "roles" : [
+            {
+              "role" : "beta",
+              "ordinal" : 6,
+              "pair" : 6
+            }
+          ],
+          "byteSize" : 416,
+          "digest" : {
+            "algorithm" : "sha256",
+            "value" : "fd5ebec2d8ad3b7f938ec0f7227ee6caf2fcaa7f240edd3ed6d52a71df7bcb3d"
+          },
+          "identityStatus" : "verified",
+          "reason" : null
+        }
+      },
+      {
+        "id" : "source-0007-0a44a3be49fdbd4b",
+        "label" : "fmrigds file",
+        "hosted" : false,
+        "schema" : {
+          "id" : "org.bbuchsbaum.fmrigds/source-entity",
+          "version" : "1.0"
+        },
+        "payload" : {
+          "schemaVersion" : "1.0.0",
+          "kind" : "file",
+          "roles" : [
+            {
+              "role" : "standard-error",
+              "ordinal" : 7,
+              "pair" : 1
+            }
+          ],
+          "byteSize" : 416,
+          "digest" : {
+            "algorithm" : "sha256",
+            "value" : "d79990c206fafb6a8ad3aef5df2c719d46294169e85303886c813ce7af6a6854"
+          },
+          "identityStatus" : "verified",
+          "reason" : null
+        }
+      },
+      {
+        "id" : "source-0008-69679c17e0891c10",
+        "label" : "fmrigds file",
+        "hosted" : false,
+        "schema" : {
+          "id" : "org.bbuchsbaum.fmrigds/source-entity",
+          "version" : "1.0"
+        },
+        "payload" : {
+          "schemaVersion" : "1.0.0",
+          "kind" : "file",
+          "roles" : [
+            {
+              "role" : "standard-error",
+              "ordinal" : 8,
+              "pair" : 2
+            }
+          ],
+          "byteSize" : 416,
+          "digest" : {
+            "algorithm" : "sha256",
+            "value" : "0d9c33d3597f7449aa4e7a41f8072f09814d28ebab59ee53e3c2233fb26c4b92"
+          },
+          "identityStatus" : "verified",
+          "reason" : null
+        }
+      },
+      {
+        "id" : "source-0009-69d5b59ab14e98ee",
+        "label" : "fmrigds file",
+        "hosted" : false,
+        "schema" : {
+          "id" : "org.bbuchsbaum.fmrigds/source-entity",
+          "version" : "1.0"
+        },
+        "payload" : {
+          "schemaVersion" : "1.0.0",
+          "kind" : "file",
+          "roles" : [
+            {
+              "role" : "standard-error",
+              "ordinal" : 9,
+              "pair" : 3
+            }
+          ],
+          "byteSize" : 416,
+          "digest" : {
+            "algorithm" : "sha256",
+            "value" : "95396c68527c3d72ad1560fabc06db487cebee70f5c5b3f853f505bf4a4265c7"
+          },
+          "identityStatus" : "verified",
+          "reason" : null
+        }
+      },
+      {
+        "id" : "source-0010-3bc72b76de9df6e1",
+        "label" : "fmrigds file",
+        "hosted" : false,
+        "schema" : {
+          "id" : "org.bbuchsbaum.fmrigds/source-entity",
+          "version" : "1.0"
+        },
+        "payload" : {
+          "schemaVersion" : "1.0.0",
+          "kind" : "file",
+          "roles" : [
+            {
+              "role" : "standard-error",
+              "ordinal" : 10,
+              "pair" : 4
+            }
+          ],
+          "byteSize" : 416,
+          "digest" : {
+            "algorithm" : "sha256",
+            "value" : "5e292911fd96f914231a8e651b21988e7ac17b9aca5e03bbdfa85a10da6896b2"
+          },
+          "identityStatus" : "verified",
+          "reason" : null
+        }
+      },
+      {
+        "id" : "source-0011-8c99800911e5a80e",
+        "label" : "fmrigds file",
+        "hosted" : false,
+        "schema" : {
+          "id" : "org.bbuchsbaum.fmrigds/source-entity",
+          "version" : "1.0"
+        },
+        "payload" : {
+          "schemaVersion" : "1.0.0",
+          "kind" : "file",
+          "roles" : [
+            {
+              "role" : "standard-error",
+              "ordinal" : 11,
+              "pair" : 5
+            }
+          ],
+          "byteSize" : 416,
+          "digest" : {
+            "algorithm" : "sha256",
+            "value" : "3b869ebc67d2cbbd812888343618027018ea187af8d2e31f280178d1dfa6bb1a"
+          },
+          "identityStatus" : "verified",
+          "reason" : null
+        }
+      },
+      {
+        "id" : "source-0012-9c8c91dea52252fa",
+        "label" : "fmrigds file",
+        "hosted" : false,
+        "schema" : {
+          "id" : "org.bbuchsbaum.fmrigds/source-entity",
+          "version" : "1.0"
+        },
+        "payload" : {
+          "schemaVersion" : "1.0.0",
+          "kind" : "file",
+          "roles" : [
+            {
+              "role" : "standard-error",
+              "ordinal" : 12,
+              "pair" : 6
+            }
+          ],
+          "byteSize" : 416,
+          "digest" : {
+            "algorithm" : "sha256",
+            "value" : "0b11d2b009c1176a5437b571e620ecfa74dd0586fc17bfebb4ebf7b7be5fa3d4"
+          },
+          "identityStatus" : "verified",
+          "reason" : null
+        }
+      }
+    ],
+    "activities" : [
+      {
+        "id" : "node-0001-0cfb8c1163df",
+        "label" : "reduce",
+        "schema" : {
+          "id" : "org.bbuchsbaum.fmrigds/activity",
+          "version" : "1.0"
+        },
+        "payload" : {
+          "semanticId" : "org.bbuchsbaum.fmrigds.operation/reduce",
+          "params" : {
+            "design" : {
+              "columns" : [
+              ],
+              "status" : "not-applicable"
+            },
+            "method" : "meta:re",
+            "modelContract" : {
+              "deletion" : "tau2_fixed_full",
+              "estimands" : "intercept",
+              "missingness" : "samplewise",
+              "synthetic_variance" : "forbid",
+              "uses_X" : false,
+              "weight_mode" : "inverse_variance"
+            },
+            "nInputSubjects" : 6,
+            "options" : [
+            ],
+            "weight" : {
+              "mode" : "1/var",
+              "status" : "verified"
+            }
+          },
+          "timestamp" : "2026-08-24T18:30:29.630290Z",
+          "software" : {
+            "RVersion" : "4.5.1",
+            "package" : "fmrigds",
+            "version" : "0.1.0.9000"
+          },
+          "digest" : {
+            "algorithm" : "sha256",
+            "value" : "63ea339c6388b6bb63ce040483af54c0fd7d791a28e6bb9885dc8ca4373f94e0",
+            "schemaVersion" : "1.0"
+          }
+        }
+      }
+    ],
+    "edges" : [
+      {
+        "from" : "source-0001-e80ea4e4733dd64e",
+        "to" : "node-0001-0cfb8c1163df",
+        "role" : "used"
+      },
+      {
+        "from" : "source-0002-6f162dd58221892d",
+        "to" : "node-0001-0cfb8c1163df",
+        "role" : "used"
+      },
+      {
+        "from" : "source-0003-a5dfb896a334a671",
+        "to" : "node-0001-0cfb8c1163df",
+        "role" : "used"
+      },
+      {
+        "from" : "source-0004-64a4a001a63fb671",
+        "to" : "node-0001-0cfb8c1163df",
+        "role" : "used"
+      },
+      {
+        "from" : "source-0005-5abb1cd81f813730",
+        "to" : "node-0001-0cfb8c1163df",
+        "role" : "used"
+      },
+      {
+        "from" : "source-0006-1c0630ebffba8d39",
+        "to" : "node-0001-0cfb8c1163df",
+        "role" : "used"
+      },
+      {
+        "from" : "source-0007-0a44a3be49fdbd4b",
+        "to" : "node-0001-0cfb8c1163df",
+        "role" : "used"
+      },
+      {
+        "from" : "source-0008-69679c17e0891c10",
+        "to" : "node-0001-0cfb8c1163df",
+        "role" : "used"
+      },
+      {
+        "from" : "source-0009-69d5b59ab14e98ee",
+        "to" : "node-0001-0cfb8c1163df",
+        "role" : "used"
+      },
+      {
+        "from" : "source-0010-3bc72b76de9df6e1",
+        "to" : "node-0001-0cfb8c1163df",
+        "role" : "used"
+      },
+      {
+        "from" : "source-0011-8c99800911e5a80e",
+        "to" : "node-0001-0cfb8c1163df",
+        "role" : "used"
+      },
+      {
+        "from" : "source-0012-9c8c91dea52252fa",
+        "to" : "node-0001-0cfb8c1163df",
+        "role" : "used"
+      },
+      {
+        "from" : "node-0001-0cfb8c1163df",
+        "to" : "field-beta_g-faces-7c8d94630ab1",
+        "role" : "generated"
+      },
+      {
+        "from" : "node-0001-0cfb8c1163df",
+        "to" : "field-beta_g-places-621e367ed39f",
+        "role" : "generated"
+      },
+      {
+        "from" : "node-0001-0cfb8c1163df",
+        "to" : "field-se_g-faces-85fc2b2701bb",
+        "role" : "generated"
+      },
+      {
+        "from" : "node-0001-0cfb8c1163df",
+        "to" : "field-se_g-places-d24507bbb8be",
+        "role" : "generated"
+      },
+      {
+        "from" : "node-0001-0cfb8c1163df",
+        "to" : "field-z_g-faces-198c645a4ddd",
+        "role" : "generated"
+      },
+      {
+        "from" : "node-0001-0cfb8c1163df",
+        "to" : "field-z_g-places-16e063cbb045",
+        "role" : "generated"
+      },
+      {
+        "from" : "node-0001-0cfb8c1163df",
+        "to" : "field-tau2-faces-d52b435d5b2b",
+        "role" : "generated"
+      },
+      {
+        "from" : "node-0001-0cfb8c1163df",
+        "to" : "field-tau2-places-8bf72b5521b2",
+        "role" : "generated"
+      },
+      {
+        "from" : "node-0001-0cfb8c1163df",
+        "to" : "field-n_eff-faces-9ab724cafed4",
+        "role" : "generated"
+      },
+      {
+        "from" : "node-0001-0cfb8c1163df",
+        "to" : "field-n_eff-places-b2bd6224c6fd",
+        "role" : "generated"
+      }
+    ]
+  }
+}
