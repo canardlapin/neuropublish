@@ -2,10 +2,16 @@ package neuropublish.viewer.laminar
 
 import org.scalajs.dom
 import scala.scalajs.js
+import intaglio.Rgba32
 import scalafim.image.WorldPoint
 import scalafim.surface.VertexId
 import scalafim.surface.view.*
-import scalafim.surface.view.three.{ThreeCanvasSize, ThreeJsRuntime, ThreeSurfaceBackend}
+import scalafim.surface.view.three.{
+  ThreeCanvasSize,
+  ThreeJsRuntime,
+  ThreeJsRuntimeOptions,
+  ThreeSurfaceBackend
+}
 
 /** Hosts a ScalaFIM surface viewer on a Three.js runtime: owns the `ThreeJsRuntime` and
   * `ThreeSurfaceBackend`, a `SurfaceViewerModel` with its reducer state, and renders the compiled
@@ -23,7 +29,8 @@ final class SurfaceHost(
     three: js.Dynamic,
     initialModel: Option[SurfaceViewerModel],
     val probe: LifecycleProbe,
-    linkRadius: SurfaceLinkRadius = SurfaceHost.DefaultLinkRadius
+    linkRadius: SurfaceLinkRadius = SurfaceHost.DefaultLinkRadius,
+    clearColor: Rgba32 = SurfaceHost.DefaultClearColor
 ) extends RendererHost[SurfaceHost.Live]:
   import SurfaceHost.*
 
@@ -34,7 +41,11 @@ final class SurfaceHost(
 
   def create(canvas: dom.html.Canvas): Live =
     val rt = ThreeJsRuntime
-      .create(three, canvas.asInstanceOf[js.Dynamic])
+      .create(
+        three,
+        canvas.asInstanceOf[js.Dynamic],
+        ThreeJsRuntimeOptions(clearColor)
+      )
       .fold(e => throw IllegalStateException(e.toString), identity)
     val backend = ThreeSurfaceBackend
       .create(rt)
@@ -231,6 +242,12 @@ final class SurfaceHost(
 object SurfaceHost:
   /** The product's linking tolerance: "no vertex within 3 mm". */
   val DefaultLinkRadius: SurfaceLinkRadius = SurfaceLinkRadius.unsafe(3.0)
+
+  /** Match the scientific workspace canvas instead of embedding an opaque white WebGL rectangle.
+    * The Three adapter remains the only code that interprets this validated colour as renderer
+    * state.
+    */
+  val DefaultClearColor: Rgba32 = Rgba32.unsafe(5, 6, 10)
 
   final case class Pick(surface: SurfaceId, vertex: Int, world: WorldPoint)
 

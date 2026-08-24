@@ -43,5 +43,5 @@ object Versions {
   // sbt-scalajs-crossproject plugin versions must match project/plugins.sbt
   // here (1.22.0 / 1.3.2 at this revision) or Scala.js IR linking fails
   // opaquely. Re-check both when bumping the pin.
-  val scalafimRevision = "2a64eba2e21ce6510d6bf9cf4eaeb3a71e6bba6e"
+  val scalafimRevision = "d89076763f23f45723fe0a76b132dd59ddfb9d00"
 }

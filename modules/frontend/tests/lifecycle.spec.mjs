@@ -47,6 +47,14 @@ test("surface panes: a mounted sentinel survives 24 mount/unmount cycles with no
   // the pane hosts a real two-hemisphere model: it compiled and drew at least one frame
   expect((await report(page)).surface.frames).toBeGreaterThanOrEqual(1);
   expect((await report(page)).surface.errors).toEqual([]);
+  const clear = await page.locator("#sentinel canvas").evaluate((canvas) => {
+    const gl = canvas.getContext("webgl2") || canvas.getContext("webgl");
+    return Array.from(gl.getParameter(gl.COLOR_CLEAR_VALUE));
+  });
+  expect(clear[0]).toBeCloseTo(5 / 255, 6);
+  expect(clear[1]).toBeCloseTo(6 / 255, 6);
+  expect(clear[2]).toBeCloseTo(10 / 255, 6);
+  expect(clear[3]).toBeCloseTo(1, 6);
   const before = (await report(page)).listeners;
 
   for (let i = 0; i < CYCLES; i++) {
