@@ -1,6 +1,6 @@
 # Neuropublish implementation plan
 
-Date: 2026-08-22 (revised after plan review, same day)
+Date: 2026-08-22 (revised 2026-08-24 after the private-alpha and native-domain spikes)
 
 ## Planning rule
 
@@ -38,6 +38,13 @@ The hand-written fixture bundle also carries a heterogeneous first-level
 cohort (AR(1) and AR(2) receipts) and one unknown semantic record, so the
 provenance and unknown-record interfaces can be built without waiting on R
 package changes.
+
+Its metadata and scientific relationships are realistic, but its small volume
+and icosphere geometry are synthetic conformance assets. They are suitable for
+protocol, interaction, and browser oracles; they are not the final visual-
+acceptance corpus. A curated public anatomical underlay and cortical surface
+pair with recorded license and provenance is still required before closing the
+reference-asset portion of the UI pass.
 
 ## Decisions closed by this revision
 
@@ -246,28 +253,38 @@ with a static, locally configured bearer token.
 | documentation | `DEVELOPMENT.md`, `docs/architecture.md`, this file |
 | rendition decision | **confirmed**: typed-binary derivative (JSON header + float32) decoded into ScalaFIM objects on JS exactly for float32 sources (the fixtures); float64 and wide-integer sources lose precision in the rendition, documented in the profile, and the canonical asset remains the record. In-browser NIfTI decoding not attempted (image4s-nifti JS is Node-only) |
 
-Upstream findings recorded for dogfooding (fix in the owning library, then bump the pin). Filed 2026-08-22 as motes in the owning stores; the first three are implemented on branches (ScalaFIM `neuropublish/lifecycle-dispose-on-97c7ff1` = `2a64eba`, Intaglio `neuropublish/threshold-modes` = `cdf1562`) and pinned here pending merge to their mains: scalafim `bd-01M0NS3CM5…` (controller dispose), `bd-01M0NS3EFB…` (Three context loss), `bd-01M0NS3ERV…` (reorder/colorizer actions), `bd-01M0NS3F26…` (scroll cancel), `bd-01M0NS3FBV…` (atlas keys / locus4s), `bd-01M0NS3FNR…` (Three pin); image4s `bd-01M0NS3FZ8…` (NiftiFileSystem); workspace root, tagged `intaglio`: `bd-01M0NS3G6H…` (threshold modes), `bd-01M0NS3G95…` (multi-stop colormaps).
+Upstream findings are recorded as motes in the owning stores. Neuropublish's
+working pin, ScalaFIM `2a64eba`, contains the controller-disposal and forced-
+context-loss fixes used by the admitted browser lifecycle gate. The native
+image4s/locus4s atlas line at ScalaFIM `a3c2320` now closes the old exact-domain
+prerequisites, but cannot replace that pin directly: its image API has migrated
+from `NeuroVol`/`NeuroSpace`, and its canvas controller exposes only `close()`.
+The exact compatibility evidence and migration gate are in
+[`docs/plans/stage5b-dependency-spike.md`](plans/stage5b-dependency-spike.md).
 
-- `CanvasViewerController.close()` only flips a flag; it does not release the viewer/raster caches or `ImageBitmap` handles. Add a real `dispose()`.
+- `CanvasViewerController.close()` on the tested native line only flips a flag;
+  it does not release the viewer/raster caches or `ImageBitmap` handles. The
+  previously proven `dispose()` contract must be merged forward before the pin
+  moves.
 - `ThreeJsRuntime.dispose()` calls `renderer.dispose()` but never forces
   context loss, so disposed canvases keep counting against the browser's live
   WebGL budget until garbage collection; 24 mount/unmount cycles evicted older
   contexts until the host forced loss via `WEBGL_lose_context` itself. Upstream
   should do this in `dispose()`.
-- `scalafim-atlas` derives its volume domain key from a runtime `hashCode` and
-  has not completed its locus4s migration; both gate ADR 0005's Scala
-  realization adapters, not its protocol.
+- `scalafim-atlas` at `a3c2320` has completed the direct locus4s and image4s
+  migration: persistent domain identity no longer depends on runtime
+  `hashCode`. This closes the owning-library design prerequisite, not the
+  Neuropublish consumer migration or admission work.
 - `CanvasScrollCoordinator` cannot cancel a pending scheduled flush; a host that unmounts mid-burst has no way to stop it.
 - `image4s-nifti` abstracts its filesystem behind a `private[nifti]` trait, so a browser backend must be added inside image4s if ever wanted.
-- ScalaFIM's atlas path still depends on its local parcellation facade. The
-  direct locus4s `PartialSurjection` migration is tracked by
-  `bd-01KZ6BCHPJEFGJYEVWQZKMBT8V`; the image4s categorical-image bridge is
-  `bd-01KZ6B8RCZ1P8DJG42W2SRCGNR`.
-- The current ScalaFIM atlas adapter derives a `VolumeDomain` key from runtime
-  `hashCode`. Persistent image4s-backed volume identity is tracked by
-  `bd-01KZ6BDWJDSZ34YD0QY573N1V0`. The downstream atlas/publication adapter is
-  `bd-01M0NDTJ145M5NH0V7VD5R9ED9` and waits on those migrations; the neutral
-  Neuropublish descriptor and conformance work does not.
+- The locus4s `PartialSurjection`, image4s categorical bridge, persistent grid
+  identity, and ScalaFIM atlas/publication adapter motes are closed upstream.
+  Neuropublish now owns the remaining rendition/API migration and parcel
+  admission adapters.
+- `ThreeJsRuntime.clearFrame` hard-codes an opaque white clear colour. The
+  dark scientific workspace therefore cannot theme the surface canvas without
+  an owning-library API. Keep this as a viewer prerequisite rather than a
+  downstream WebGL workaround.
 - ScalaFIM links Scala.js as CommonJS; consumers linking ESModule work fine, but ScalaFIM's own browser pages import Three.js from a hardcoded sibling path. Neuropublish pins `three` 0.185.1 in its own `package.json`.
 - Intaglio is at Scala 3.4.2 and sbt 1.10.5 (workspace outlier); compiles fine as a TASTy dependency.
 
@@ -1080,9 +1097,12 @@ shows it.
 ## Stage 5b — post-MVP finite-indexed and parcel track
 
 This track depends on the Stage 2 domain envelope but does not block the
-volume-only MVP. Its neutral protocol work may proceed while the ScalaFIM
-realization adapters wait for the locus4s and image4s migrations recorded in
-the upstream findings.
+volume-only MVP. The locus4s/image4s/ScalaFIM exact-domain prerequisite is now
+present at the immutable baseline tested in the dependency spike. Neutral
+protocol work may proceed while a dedicated Neuropublish consumer migration
+adopts the native image API and restores the proven resource-lifecycle
+contract; Scala realization adapters wait for that migration, not for a new
+domain abstraction.
 
 ### Protocol and admission
 
@@ -1110,8 +1130,8 @@ the upstream findings.
 - server-derived spatial pullbacks that retain the parcel field as the
   scientific authority and record source field, realization, converter,
   parameters, and output digest;
-- ScalaFIM atlas adapters built only after their tracked locus4s and image4s
-  identity migrations land;
+- ScalaFIM atlas adapters built only after Neuropublish adopts the native image
+  API and the admitted lifecycle contract is merged forward;
 - no inferred atlas from parcel count and no overlapping/probabilistic
   composite rendering policy in this stage.
 
@@ -1201,7 +1221,7 @@ repository once those stores and paths exist.
 | `neuropublish-v0-1-protocol` | Neutral core protocol | Versioned schemas, typed validation, byte digest, route scheme |
 | `neuropublish-v0-1-parcel-domains` | Stage 5b finite-indexed and parcel-domain track | Ordered identity, coverage-aware hard assignments, mismatch fixtures, linked parcel-space proof |
 | `neuropublish-v0-1-foreign-producer` | Foreign-producer conformance | Julia bundle publishes without Scala SDK |
-| `neuropublish-v0-1-viewer-prereqs` | Reusable Scala viewer prerequisites | Thresholds, colormaps, lifecycle. Thresholds and lifecycle are done upstream and consumed at the current pin; what remains is multi-stop diverging palettes with a movable neutral stop, which is what `publishedDisplay.window.centre` waits on (`docs/architecture.md`, upstream gap 3) |
+| `neuropublish-v0-1-viewer-prereqs` | Reusable Scala viewer prerequisites | Thresholds and lifecycle are consumed at the current pin; remaining work is multi-stop diverging palettes with a movable neutral stop, a typed surface clear colour, and merging lifecycle contracts forward onto the native image line |
 | `neuropublish-v0-1-publication-spine` | Thin spine, ingestion, upload, and immutable revision commit | Push → commit → derived renditions → two overlays visible; resumable direct upload, linear history, reindex |
 | `neuropublish-v0-1-volume` | Volume scientific workspace | Underlay plus two overlays with truthful controls |
 | `neuropublish-v0-1-identity-sharing` | Identity, saved views, and sharing | Device login and revocable read-only view |
@@ -1224,13 +1244,13 @@ repository once those stores and paths exist.
 | First map appears too late | Identity or sharing work precedes a visible overlay | Stage 1 thin spine is the first gate; static token until Stage 4. |
 | Product duplicates ScalaFIM | Viewer-specific state or color logic appears in frontend | Move reusable behavior upstream and require JVM/JS conformance. |
 | Pre-release dependency graph blocks deployment | Local siblings compile but clean consumer fails | Exact pins, explicit overrides, provider release plan, external consumer gate. |
-| Scala atlas adapters inherit unstable domain identity | An adapter still uses ScalaFIM's local parcellation facade or a runtime `hashCode` key | Let the neutral protocol and conformance fixtures proceed; block only Scala realization adapters on `bd-01KZ6BCHPJEFGJYEVWQZKMBT8V` and `bd-01KZ6BDWJDSZ34YD0QY573N1V0`, then verify through `bd-01M0NDTJ145M5NH0V7VD5R9ED9`. |
+| Native ScalaFIM migration breaks the admitted consumer | `NeuroVol`/`NeuroSpace` no longer compile or the volume controller offers only `close()` | Keep the current admitted pin; migrate the rendition API and merge the owning-library lifecycle contracts forward as one JVM/JS/browser-gated change. |
 | Docking destabilizes canvases | Reparenting loses state or WebGL contexts | Presets first; lifecycle harness before any docking engine. |
 | Login is harder than Here.Now | Tokens copied manually for normal pushes | One-time device flow, project credentials only for automation, direct URL output. |
 | Dedup leaks private asset existence | API reports another tenant's digest | Hide cross-tenant existence and separate public catalog assets. |
 | Provenance presents modal settings as shared | Mixed receipts collapse to one value | Fingerprint groups and compatibility assessment; no inferred consensus. |
 | R package release cadence gates the product | Stage 4 waits on an `fmrireg` CRAN release | R track is parallel; hand-written fixture covers every provenance interface. |
-| ScalaFIM atlas migration gates parcel space | `scalafim-atlas` still on its local parcellation facade; `VolumeDomain` key uses `hashCode` | ADR 0005 protocol work proceeds independently; only the Scala realization adapters (Stage 5b) wait on the locus4s migration and the persistent-key fix. |
+| Surface canvas cannot follow the product theme | `ThreeJsRuntime.clearFrame` keeps an opaque white clear colour | Add a typed clear-colour/background option in ScalaFIM and consume it through the thin Laminar host; do not reach into Three.js from the product. |
 | Public sharing leaks sensitive metadata | Subject IDs or local paths enter manifest | Local and server admission policy; conservative default sensitivity. |
 | Browser memory grows without bound | Revision switching retains arrays/GPU resources | Hash-keyed bounded cache, explicit resource ownership, disposal tests. |
 
@@ -1254,19 +1274,25 @@ These choices have a decision deadline rather than an implicit default:
 7. **PostgreSQL row-level security:** decide by follow-up ADR before a second
    workspace is admitted (ADR 0004).
 
-## Immediate next actions (2026-08-24)
+## Action outcomes (2026-08-24)
 
-1. Admit the bounded-threshold/display-window slice and the completed Stage 5
-   artboards through the full local gate.
-2. Repair generated hosted CI, including deterministic workflow generation and
-   dependency-submission permissions, then reconcile completed Mote items with
-   repository evidence.
-3. Implement the artboard's visual hierarchy against realistic reference
-   volume and cortical assets, with wide and narrow browser evidence.
-4. Build and rehearse the smallest secure private-alpha deployment: one JVM
-   service, one ingestion worker, PostgreSQL, an S3-compatible object store,
-   backups, rate limits, CSP, and an operator runbook.
-5. Run the Stage 5b dependency spike against the native
-   image4s/locus4s/ScalaFIM atlas baseline. Keep the neutral protocol track
-   independent; only begin Scala parcel-realization adapters after exact-domain
-   and lifecycle gates pass.
+1. [x] The bounded threshold/display-window slice and editable Stage 5
+   artboards passed JVM/JS, R, PostgreSQL/S3, Julia, and Playwright gates.
+2. [x] Generated CI is deterministic, the dependency-submission job has its
+   required repository feature/permissions, and the hosted workflow has passed.
+   Every pushed release candidate, including the private-alpha change set,
+   remains gated on its own hosted run; local evidence is not a substitute.
+3. [ ] The artboard hierarchy now has wide and narrow browser evidence, but
+   the conformance geometry is deliberately synthetic. Close this only after a
+   curated, licensed anatomical volume and cortical surface pair replaces or
+   supplements it; do not label the current screenshots anatomically realistic.
+4. [x] The smallest private-alpha topology is packaged and locally rehearsed:
+   one control plane, one worker, PostgreSQL, MinIO/S3 presigned transfers,
+   login throttling, CSP/security headers, password rotation, a complete
+   database-plus-object backup, isolated restore, reindex, and restored volume
+   and surface fetches. No external hosting provider has been selected or
+   mutated.
+5. [x] The Stage 5b spike compiled against the native atlas baseline far enough
+   to prove exact-domain ownership and identify the two real consumer breaks.
+   Direct pin bump: no-go. Neutral parcel protocol: go. See the spike record
+   for the migration gate.

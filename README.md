@@ -41,13 +41,17 @@ This is not yet a hosted alpha. The owning-package R adapters (`fmrigds`,
 `fmrireg`, `neuromosaic`, and `rMVPA`), production deployment, and Stage 5b
 parcel-space realizations remain tracked work. See
 [DEVELOPMENT.md](DEVELOPMENT.md) for building, testing, and running the current
-system locally.
+system locally. The production-shaped private-alpha topology and recovery drill
+are documented in the [operator runbook](docs/operator-runbook.md); the native
+parcel dependency result is recorded in the
+[Stage 5b dependency spike](docs/plans/stage5b-dependency-spike.md).
 
 ## Planning documents
 
 - [Product definition](docs/product-definition.md)
 - [Technical architecture](docs/architecture.md)
 - [Implementation plan](docs/implementation-plan.md)
+- [Private-alpha operator runbook](docs/operator-runbook.md)
 - [ADR 0001: language-neutral publication protocol](docs/decisions/0001-language-neutral-publication-protocol.md)
 - [ADR 0002: preset workspaces before arbitrary docking](docs/decisions/0002-preset-workspaces-before-arbitrary-docking.md)
 - [ADR 0003: Typelevel backend stack and Laminar frontend](docs/decisions/0003-typelevel-backend-and-laminar-frontend.md)
