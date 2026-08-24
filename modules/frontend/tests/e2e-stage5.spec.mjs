@@ -76,6 +76,35 @@ test("Volume → Surface → Hybrid keeps the result identity: same layer ids, o
   await page.screenshot({ path: "test-results/stage5-hybrid.png", fullPage: true });
 });
 
+test("wide workspace is a bounded scientific instrument with internal navigation and inspector scroll", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await login(page);
+  await openWorkspace(page);
+  await page.getByTestId("preset-hybrid").click(); await settle(page);
+
+  const geometry = await page.evaluate(() => {
+    const page = document.querySelector(".workspace-page");
+    const centre = document.querySelector(".centre");
+    const inspector = document.querySelector(".inspector");
+    const navigator = document.querySelector(".navigator");
+    return {
+      viewport: window.innerHeight,
+      document: document.documentElement.scrollHeight,
+      page: page.getBoundingClientRect().height,
+      centre: centre.getBoundingClientRect().height,
+      inspectorClient: inspector.clientHeight,
+      inspectorScroll: inspector.scrollHeight,
+      navigatorClient: navigator.clientHeight,
+    };
+  });
+  expect(geometry.page).toBeCloseTo(geometry.viewport, 0);
+  expect(geometry.document).toBeLessThanOrEqual(geometry.viewport + 1);
+  expect(geometry.centre).toBeGreaterThan(480);
+  expect(geometry.inspectorScroll).toBeGreaterThan(geometry.inspectorClient);
+  expect(geometry.navigatorClient).toBeCloseTo(geometry.centre, 0);
+  await page.screenshot({ path: "test-results/stage5-artboard-wide.png" });
+});
+
 test("linked cursor: a surface pick moves the volume cursor to the vertex; a volume pick reports the link distance", async ({ page }) => {
   await login(page);
   await openWorkspace(page);

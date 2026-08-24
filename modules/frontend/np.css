@@ -10,6 +10,7 @@
   --np-font: 'IBM Plex Sans', 'Helvetica Neue', Arial, sans-serif; --np-mono: 'IBM Plex Mono', 'SF Mono', Menlo, monospace;
 }
 * { box-sizing: border-box; }
+html, body, #app, #np-app { min-height: 100%; }
 body { margin: 0; background: var(--np-bg-0); color: var(--np-text); font: 14px/1.5 var(--np-font); }
 a { color: var(--np-accent-3); } a:hover { color: #c4bbff; }
 :focus-visible { outline: 2px solid var(--np-accent-2); outline-offset: 2px; }
@@ -48,10 +49,19 @@ input[type=checkbox] { height: 16px; width: 16px; accent-color: var(--np-accent)
 .ramp { height: 10px; border-radius: 3px; margin-top: var(--np-s1); }
 .summary .hist { display: flex; align-items: flex-end; gap: 1px; height: 36px; margin-top: var(--np-s2); } .summary .bar { flex: 1; background: #3a4160; border-radius: 1px; }
 .status-bar { border-top: 1px solid var(--np-border); padding: var(--np-s3) var(--np-s6); background: var(--np-bg-1); min-height: 48px; display: flex; align-items: center; } .readout { display: flex; gap: var(--np-s6); flex-wrap: wrap; } .readout-layer { display: inline-flex; gap: var(--np-s2); align-items: baseline; }
+.workspace-page > .callout.warn { flex: none; margin: 0; border-width: 1px 0 0; border-radius: 0; padding: var(--np-s2) var(--np-s6); }
 .facts-panel { display: flex; flex-direction: column; gap: var(--np-s3); } .fact { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: var(--np-s2); font-size: 13px; } .fact .k { text-transform: none; letter-spacing: 0; font-size: 13px; }
 .prov-node { border: 1px solid var(--np-border); border-radius: var(--np-r2); padding: var(--np-s2) var(--np-s3); background: var(--np-bg-1); display: flex; flex-direction: column; gap: 2px; } .prov-node.unknown { border-style: dashed; } .prov-node > div:first-child { display: flex; justify-content: space-between; gap: var(--np-s2); }
 @media (max-width: 1100px) { .workspace { grid-template-columns: 220px minmax(0, 1fr); } .inspector { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--np-border); } }
 @media (max-width: 700px) { .workspace { grid-template-columns: minmax(0, 1fr); } .navigator { border-right: 0; border-bottom: 1px solid var(--np-border); } }
+/* A wide scientific workspace is an instrument viewport: navigation and inspector scroll inside
+   it while the canvases retain the remaining height. At narrower widths the inspector moves below
+   the viewer and the document deliberately resumes normal page scrolling. */
+@media (min-width: 1101px) and (min-height: 700px) {
+  .workspace-page { height: 100dvh; min-height: 0; overflow: hidden; }
+  .workspace { overflow: hidden; }
+  .centre { min-height: 0; }
+}
 /* Stage 4: session, dialogs, forms, read-only presentation, provenance read model (same tokens; no new colours) */
 .account { display: flex; align-items: center; gap: var(--np-s2); } .account-user { display: inline-flex; align-items: center; gap: var(--np-s2); color: var(--np-text-2); } .small-btn { height: 28px; padding: 0 8px; }
 .btn.ghost { background: transparent; }
