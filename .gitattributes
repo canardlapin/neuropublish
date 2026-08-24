@@ -1,0 +1,3 @@
+# Digest-pinned third-party anatomical assets are opaque bytes. Do not normalize
+# their line endings or report source-authored whitespace as a local patch fault.
+modules/conformance/fixtures/anatomical/assets/* -text -diff

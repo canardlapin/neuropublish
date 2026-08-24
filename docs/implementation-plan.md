@@ -1295,10 +1295,13 @@ These choices have a decision deadline rather than an implicit default:
    required repository feature/permissions, and the hosted workflow has passed.
    Every pushed release candidate, including the private-alpha change set,
    remains gated on its own hosted run; local evidence is not a substitute.
-3. [ ] The artboard hierarchy now has wide and narrow browser evidence, but
-   the conformance geometry is deliberately synthetic. Close this only after a
-   curated, licensed anatomical volume and cortical surface pair replaces or
-   supplements it; do not label the current screenshots anatomically realistic.
+3. [x] The artboard hierarchy has wide and narrow browser evidence, and a
+   curated, licensed anatomical volume and cortical surface pair now supplements
+   the deliberately synthetic protocol fixture. `AnatomicalCorpusSuite` pins
+   source commits, licenses, sizes, and digests, then exercises the production
+   NIfTI/GIFTI rendition paths. The differently spaced samples are explicitly
+   not co-registered and the existing protocol screenshots remain synthetic,
+   not anatomically realistic.
 4. [x] The smallest private-alpha topology is packaged and locally rehearsed:
    one control plane, one worker, PostgreSQL, MinIO/S3 presigned transfers,
    login throttling, CSP/security headers, password rotation, a complete

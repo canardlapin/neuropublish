@@ -1,0 +1,53 @@
+{
+  "schema": "org.neuropublish.acceptance/anatomical-corpus@1",
+  "curatedAt": "2026-08-24",
+  "policy": {
+    "intendedUse": "viewer visual acceptance only",
+    "coRegistered": false,
+    "scientificAnalysis": false
+  },
+  "files": [
+    {
+      "relativePath": "assets/tpl-MNI152NLin2009cAsym_res-02_desc-brain_T1w.nii.gz",
+      "role": "anatomical-volume",
+      "space": "MNI152NLin2009cAsym",
+      "sourceUrl": "https://templateflow.s3.amazonaws.com/tpl-MNI152NLin2009cAsym/tpl-MNI152NLin2009cAsym_res-02_desc-brain_T1w.nii.gz",
+      "repositoryUrl": "https://github.com/templateflow/tpl-MNI152NLin2009cAsym",
+      "repositoryPath": "tpl-MNI152NLin2009cAsym_res-02_desc-brain_T1w.nii.gz",
+      "sourceCommit": "15d7c02160f79f5218d2545b4febebeecc11531d",
+      "sha256": "sha256:7b168153a9508f5f116ac37d33835fa44dd168ba7a9ae31a3b33e6f63bd23292",
+      "size": 451810,
+      "modified": false,
+      "license": "MNI-template-permissive",
+      "licenseUrl": "https://raw.githubusercontent.com/templateflow/tpl-MNI152NLin2009cAsym/15d7c02160f79f5218d2545b4febebeecc11531d/LICENSE"
+    },
+    {
+      "relativePath": "assets/tpl-dhcpAsym_cohort-42_hemi-L_den-32k_pial.surf.gii",
+      "role": "left-pial-surface",
+      "space": "dhcpAsym:cohort-42",
+      "sourceUrl": "https://templateflow.s3.amazonaws.com/tpl-dhcpAsym/cohort-42/tpl-dhcpAsym_cohort-42_hemi-L_den-32k_pial.surf.gii",
+      "repositoryUrl": "https://github.com/templateflow/tpl-dhcpAsym",
+      "repositoryPath": "cohort-42/tpl-dhcpAsym_cohort-42_hemi-L_den-32k_pial.surf.gii",
+      "sourceCommit": "7b1cc96f98c3daccba7e718211bda5d737948277",
+      "sha256": "sha256:914d9581e534fb9f57eeaa891a4adec9239a1bbed585d76191da43e426b3328c",
+      "size": 719569,
+      "modified": false,
+      "license": "CC-BY-4.0",
+      "licenseUrl": "https://raw.githubusercontent.com/templateflow/tpl-dhcpAsym/7b1cc96f98c3daccba7e718211bda5d737948277/LICENSE"
+    },
+    {
+      "relativePath": "assets/tpl-dhcpAsym_cohort-42_hemi-R_den-32k_pial.surf.gii",
+      "role": "right-pial-surface",
+      "space": "dhcpAsym:cohort-42",
+      "sourceUrl": "https://templateflow.s3.amazonaws.com/tpl-dhcpAsym/cohort-42/tpl-dhcpAsym_cohort-42_hemi-R_den-32k_pial.surf.gii",
+      "repositoryUrl": "https://github.com/templateflow/tpl-dhcpAsym",
+      "repositoryPath": "cohort-42/tpl-dhcpAsym_cohort-42_hemi-R_den-32k_pial.surf.gii",
+      "sourceCommit": "7b1cc96f98c3daccba7e718211bda5d737948277",
+      "sha256": "sha256:60a032699222380f0d386943279f3d5a61f8ce8d73c029dbb711dab8f26afbe8",
+      "size": 709066,
+      "modified": false,
+      "license": "CC-BY-4.0",
+      "licenseUrl": "https://raw.githubusercontent.com/templateflow/tpl-dhcpAsym/7b1cc96f98c3daccba7e718211bda5d737948277/LICENSE"
+    }
+  ]
+}
