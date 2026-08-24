@@ -29,12 +29,18 @@ class WorkspaceStateSuite extends ScalaCheckSuite:
       hi <- Gen.choose(0.5, 20.0)
       m <- Gen.oneOf(Threshold.Modes.toList)
       t <- Gen.choose(0.0, 10.0)
+      // a maximum magnitude only exists for `two-sided`, so the generator only offers one there
+      hiMag <- Gen.option(Gen.choose(11.0, 40.0))
       c <- Gen.oneOf("cold-hot", "viridis", "hot")
     yield LayerDisplay(
       v,
       o,
       Window(lo, hi),
-      if m == "off" then Threshold("off", 0.0) else Threshold(m, t),
+      m match
+        case "off" => Threshold("off", 0.0)
+        case "two-sided" => Threshold(m, t, hiMag)
+        case _ => Threshold(m, t)
+      ,
       c
     )
 
@@ -48,7 +54,6 @@ class WorkspaceStateSuite extends ScalaCheckSuite:
       preset <- Gen.oneOf(LayoutPreset.values.toList)
       nav <- Gen.choose(0.1, 0.4)
       ins <- Gen.choose(0.1, 0.4)
-      drawer <- Gen.choose(0.1, 0.8)
       split <- Gen.choose(0.1, 0.9)
       tab <- Gen.oneOf("layers", "analysis", "provenance")
       vp <- Gen.oneOf(SurfaceCameraState.Viewpoints)
@@ -56,7 +61,7 @@ class WorkspaceStateSuite extends ScalaCheckSuite:
     yield Workspace(
       order.zip(displays).map((id, d) => WorkspaceLayer(id, pub, d, true, repsOf(id))),
       cursor,
-      WorkspaceLayout(preset, nav, ins, drawer, split),
+      WorkspaceLayout(preset, nav, ins, split),
       tab,
       SurfaceCameraState(vp, pr)
     )

@@ -28,7 +28,10 @@ np_window(min, max, centre = NULL)
 
 \item{max}{Window maximum.}
 
-\item{centre}{Optional window centre.}
+\item{centre}{Optional window centre: the value the colour scale is centred
+on. Core 0.1 renders one linear ramp across \verb{[min, max]}, so the only
+centre it can honour is the midpoint; the server rejects any other, and
+this checks it here rather than at push.}
 }
 \value{
 A plain list.

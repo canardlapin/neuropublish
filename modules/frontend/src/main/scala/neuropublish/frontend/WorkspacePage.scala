@@ -101,6 +101,41 @@ object WorkspacePage:
         )
       )
 
+    /** The maximum magnitude: empty means none. It is offered only where the renderer can honour it
+      * — `two-sided` with a positive minimum (see `Threshold`) — and elsewhere says why rather than
+      * accepting a number that would be dropped on the way to the canvas.
+      */
+    def maxMagnitude(f: ResultField, cur: Signal[Option[LayerDisplay]]) =
+      val invalid = Var(false)
+      val boundable = cur.map(_.map(_.threshold).exists(Threshold.boundable))
+      label(
+        cls := "field",
+        span("maximum |value|"),
+        input(
+          typ := "number",
+          stepAttr := "0.1",
+          placeholder := "none",
+          disabled <-- boundable.map(!_),
+          title <-- boundable.map(b =>
+            if b then "hide values whose magnitude exceeds this"
+            else "a maximum magnitude needs a two-sided mode with a positive minimum"
+          ),
+          aria.invalid <-- invalid.signal.map(_.toString),
+          cls.toggle("invalid") <-- invalid.signal,
+          value <-- cur.map(_.flatMap(_.threshold.max).map(fmt).getOrElse("")),
+          onChange.mapToValue --> { v =>
+            val t = layerOf(f.id).map(_.current.threshold).getOrElse(Threshold("off", 0.0))
+            if v.trim.isEmpty then
+              invalid.set(false)
+              store.dispatch(Workspace.Action.SetThreshold(f.id, t.copy(max = None)))
+            else
+              invalid.set(!v.toDoubleOption.exists(x =>
+                store.tryDispatch(Workspace.Action.SetThreshold(f.id, t.copy(max = Some(x))))
+              ))
+          }
+        )
+      )
+
     /** Where the field is drawn, and — the product rule — where it is not. A one-hemisphere field
       * says so ("left surface only; no right-hemisphere representation"); a representation on a
       * surface the pane could not place says that too. Absence is stated, never projected.
@@ -259,11 +294,12 @@ object WorkspacePage:
             "minimum |value|",
             cur.map(_.map(_.threshold.min).getOrElse(0.0)),
             v =>
-              store.tryDispatch(Workspace.Action.SetThreshold(
-                f.id,
-                Threshold(layerOf(f.id).map(_.current.threshold.mode).getOrElse("two-sided"), v)
-              ))
-          )
+              // carried from the current threshold, so raising the minimum keeps the maximum
+              // rather than quietly discarding it
+              val t = layerOf(f.id).map(_.current.threshold).getOrElse(Threshold("two-sided", 0.0))
+              store.tryDispatch(Workspace.Action.SetThreshold(f.id, t.copy(min = v)))
+          ),
+          maxMagnitude(f, cur)
         ),
         div(
           cls := "group",
@@ -276,6 +312,19 @@ object WorkspacePage:
                 f.id,
                 Window(v, layerOf(f.id).map(_.current.window.max).getOrElse(v + 1))
               ))
+          ),
+          div(
+            cls := "field",
+            span("centre"),
+            span(
+              cls := "mono",
+              dataAttr("testid") := "window-centre",
+              title :=
+                "derived: this version renders one linear ramp, so the colour scale is centred on the window midpoint",
+              child.text <-- cur.map(c =>
+                fmt(c.map(d => (d.window.min + d.window.max) / 2.0).getOrElse(0.0))
+              )
+            )
           ),
           num(
             "maximum",

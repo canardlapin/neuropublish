@@ -1,0 +1,48 @@
+{
+  "artboards": [
+    {
+      "file": "Main.dc.html",
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "Hybrid workspace — 1440"
+    },
+    {
+      "file": "Decisions.dc.html",
+      "x": 1560,
+      "y": 0,
+      "w": 1240,
+      "h": 1400,
+      "title": "Open questions, answered"
+    },
+    {
+      "file": "Components.dc.html",
+      "x": 0,
+      "y": 1560,
+      "w": 1240,
+      "h": 2320,
+      "title": "UI system — components and states"
+    },
+    {
+      "file": "Narrow.dc.html",
+      "x": 1360,
+      "y": 1560,
+      "w": 880,
+      "h": 1060,
+      "title": "Narrow — panes stacked under 900"
+    }
+  ],
+  "annotations": [
+    {
+      "id": "pass-scope",
+      "x": 0,
+      "y": -240,
+      "w": 640,
+      "text": "Stage 3-5 visual pass, carried three stages and now closed.\n\nValues are lifted from modules/frontend/np.css; the three mesh and slice fills are marked in the source as renderer stand-ins, since the real canvas paints those from data.\n\nContent is the reference bundle: Sherlock speech-feature group model, n = 26, estimands speech coefficient / articulatory rate / speech > silence, measures effect / standard error / t / z, 642-vertex lh-pial-surface and rh-pial-surface, one AR(2)/AR(1) warning. Bracketed values are placeholders; single-hemisphere and multi-surface cards are marked synthetic.\n\nChips mark the four answers that CHANGE what ships today: the link-readout split, the compact glyph wording, the conditional colour bar, and clipping the histogram's zero bin. Everything else documents the app as built.\n\nStatic artboards, not a prototype."
+    }
+  ],
+  "launch": {
+    "view": "canvas"
+  }
+}

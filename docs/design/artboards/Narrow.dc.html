@@ -1,0 +1,225 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <style>
+    :root {
+      --np-bg-0: #0d0f14; --np-bg-1: #141720; --np-bg-2: #1b1f2a; --np-border: #232838; --np-border-strong: #2a3040;
+      --np-text: #e6e8ee; --np-text-2: #c9cedb; --np-muted: #8b93a7; --np-faint: #6f7790;
+      --np-accent: #6d5ef0; --np-accent-2: #8b7cf6; --np-accent-3: #a89cff; --np-accent-border: #4a3fa8;
+      --np-warn: #e5a33b; --np-warn-border: #6a4a17; --np-cursor: #7fd1ff;
+      --np-s1: 4px; --np-s2: 8px; --np-s3: 12px; --np-s4: 16px; --np-s5: 20px; --np-s6: 24px;
+      --np-r1: 6px; --np-r2: 10px; --np-h-input: 30px; --np-h-button: 36px;
+      --np-font: 'IBM Plex Sans', 'Helvetica Neue', Arial, sans-serif; --np-mono: 'IBM Plex Mono', 'SF Mono', Menlo, monospace;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--np-bg-0); color: var(--np-text); font: 14px/1.5 var(--np-font); }
+    a { color: var(--np-accent-3); text-decoration: none; } a:hover { color: #c4bbff; }
+    .mono { font-family: var(--np-mono); } .muted { color: var(--np-muted); } .small { font-size: 12px; }
+    .k { color: var(--np-muted); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; font-weight: 500; }
+    .pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 999px; font-size: 11px; border: 1px solid var(--np-border-strong); color: var(--np-text-2); }
+    .pill.accent { border-color: var(--np-accent-border); color: #b6acff; }
+    .pill.warn { border-color: var(--np-warn-border); color: var(--np-warn); }
+    button { display: inline-flex; align-items: center; gap: 8px; height: var(--np-h-button); padding: 0 12px; border-radius: var(--np-r1); border: 1px solid var(--np-border-strong); background: var(--np-bg-2); color: var(--np-text); font: 500 13px var(--np-font); }
+    button.ghost { background: transparent; }
+    .small-btn { height: 28px; padding: 0 8px; }
+    input { height: var(--np-h-input); padding: 0 8px; border-radius: var(--np-r1); border: 1px solid var(--np-border-strong); background: #0f1219; color: var(--np-text); font: 12px var(--np-mono); }
+    .account { display: flex; align-items: center; gap: var(--np-s2); }
+    .crumb { color: var(--np-text); }
+    .layer-reps { margin-top: -4px; }
+    .group { display: flex; flex-direction: column; gap: var(--np-s1); padding-top: var(--np-s1); border-top: 1px solid var(--np-border); }
+    select { height: 26px; padding: 0 8px; border-radius: var(--np-r1); border: 1px solid var(--np-border-strong); background: #0f1219; color: var(--np-text); font: 12px var(--np-mono); }
+    input[type=checkbox] { height: 16px; width: 16px; accent-color: var(--np-accent); }
+    input[type=range] { padding: 0; accent-color: var(--np-accent); height: var(--np-s5); }
+    .topbar { min-height: 56px; display: flex; align-items: center; gap: var(--np-s3); padding: var(--np-s2) var(--np-s4); border-bottom: 1px solid var(--np-border); background: #10131b; flex-wrap: wrap; row-gap: var(--np-s1); }
+    .spacer { flex: 1; }
+    .segmented { display: inline-flex; border: 1px solid var(--np-border-strong); border-radius: var(--np-r1); overflow: hidden; margin-left: 0; }
+    .seg { height: 28px; padding: 0 10px; display: inline-flex; align-items: center; background: transparent; color: var(--np-muted); font-size: 12px; }
+    .seg + .seg { border-left: 1px solid var(--np-border-strong); }
+    .seg.active { background: var(--np-bg-2); color: var(--np-text); }
+    .workspace { display: grid; grid-template-columns: 220px minmax(0, 1fr); }
+    .navigator { border-right: 1px solid var(--np-border); padding: var(--np-s5) var(--np-s3); }
+    .navigator h2, .inspector h2 { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--np-muted); margin: 0 var(--np-s2) var(--np-s3); }
+    .tree-row { display: flex; align-items: center; justify-content: space-between; gap: var(--np-s2); padding: var(--np-s2); border-radius: var(--np-r1); min-height: 36px; color: var(--np-text-2); }
+    .tree-row.analysis { font-weight: 500; color: var(--np-text); }
+    .tree-row.estimand { padding-left: var(--np-s4); }
+    .tree-row.measure { padding-left: var(--np-s6); }
+    .tree-row.measure.selected { background: #1f2335; color: var(--np-text); }
+    .reps { font: 10px var(--np-mono); letter-spacing: .04em; text-transform: uppercase; color: var(--np-muted); }
+    .inspector { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--np-border); padding: var(--np-s5) var(--np-s4); }
+    .tabs { display: flex; gap: var(--np-s4); margin-bottom: var(--np-s3); }
+    .tab { color: var(--np-muted); padding: 0 0 6px; border-bottom: 2px solid transparent; font-size: 13px; font-weight: 500; }
+    .tab.active { color: var(--np-text); border-bottom-color: var(--np-accent-2); }
+    .layer-card { background: var(--np-bg-1); border: 1px solid var(--np-border); border-radius: var(--np-r2); padding: var(--np-s3) var(--np-s4); display: flex; flex-direction: column; gap: var(--np-s2); }
+    .layer-head { display: flex; align-items: center; gap: var(--np-s2); } .layer-title { flex: 1; }
+    .field { display: grid; grid-template-columns: 120px minmax(0, 1fr); align-items: center; gap: var(--np-s2); font-size: 13px; color: var(--np-text-2); }
+    .ramp { height: 10px; border-radius: 3px; margin-top: var(--np-s1); }
+    .pane { min-width: 0; min-height: 280px; position: relative; display: flex; flex-direction: column; }
+    .canvas-host { background: #05060a; position: relative; }
+    .surface-toolbar { display: flex; gap: var(--np-s4); align-items: center; padding: var(--np-s2) var(--np-s3); background: var(--np-bg-1); border-bottom: 1px solid var(--np-border); }
+    .field.inline { display: inline-flex; grid-template-columns: none; gap: var(--np-s2); align-items: center; }
+    .field.inline > span { font-size: 12px; color: var(--np-muted); }
+    .pane-badge { position: absolute; left: var(--np-s3); bottom: var(--np-s3); padding: 4px 8px; border-radius: var(--np-r1); background: rgba(20, 23, 32, .85); border: 1px solid var(--np-border-strong); color: var(--np-text-2); font-family: var(--np-mono); font-size: 12px; }
+    .splitter.stacked { background: var(--np-border); height: 8px; position: relative; }
+    .splitter.stacked::after { content: ""; position: absolute; top: 2px; left: 50%; width: 36px; height: 4px; margin-left: -18px; border-radius: 2px; background: var(--np-border-strong); }
+    .status-bar { border-top: 1px solid var(--np-border); padding: var(--np-s3) var(--np-s4); background: var(--np-bg-1); min-height: 48px; display: flex; align-items: center; flex-wrap: wrap; gap: var(--np-s3); }
+    .readout { display: flex; gap: var(--np-s4); flex-wrap: wrap; }
+    .readout-layer { display: inline-flex; gap: var(--np-s2); align-items: baseline; }
+    .readout-layer[data-pane="surface"] .k::before { content: "▲ "; color: var(--np-faint); }
+    .readout-layer[data-readout="link"] .mono { color: var(--np-cursor); }
+    .slice-label { position: absolute; left: 10px; top: 8px; font: 10px var(--np-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--np-muted); }
+  </style>
+</helmet>
+
+<div style="width: 880px; height: 1060px; display: flex; flex-direction: column; background: var(--np-bg-0); overflow: hidden;">
+
+  <div class="topbar">
+    <a class="crumb muted">rotman</a>
+    <span class="muted">/</span>
+    <a class="crumb">sherlock-speech</a>
+    <span class="crumb mono muted">[REVISION]</span>
+    <div class="spacer"></div>
+    <span class="account">
+      <span class="muted small">Bradley Buchsbaum</span>
+      <button class="ghost small-btn">Sign out</button>
+    </span>
+    <div style="flex-basis: 100%; height: 0;"></div>
+    <div class="segmented">
+      <span class="seg">Volume</span><span class="seg">Surface</span><span class="seg active">Hybrid</span>
+    </div>
+    <div class="spacer"></div>
+    <button class="ghost small-btn">Views</button>
+    <button class="ghost small-btn">Save view</button>
+    <button class="ghost small-btn">Share</button>
+    <button class="ghost small-btn">Reset view</button>
+  </div>
+
+  <div class="workspace" style="flex: 1; min-height: 0;">
+
+    <div class="navigator">
+      <h2>Results</h2>
+      <div class="tree-row analysis"><span>Group model</span><span class="muted small">n = 26</span></div>
+      <div class="tree-row estimand"><span>speech coefficient</span></div>
+      <div class="tree-row measure"><span>effect</span><span class="reps muted">vol</span></div>
+      <div class="tree-row measure selected"><span>t statistic</span><span class="reps muted">vol surf L surf R</span></div>
+      <div class="tree-row measure"><span>z statistic</span><span class="reps muted">vol surf L surf R</span></div>
+    </div>
+
+    <!-- centre: panes stacked, divider horizontal -->
+    <div style="display: grid; grid-template-rows: minmax(0, 1fr) 8px minmax(0, 1fr); min-height: 0;">
+
+      <div class="pane canvas-host">
+        <span class="slice-label">axial · z = 8</span>
+        <svg width="100%" height="100%" viewBox="0 0 640 300" preserveAspectRatio="xMidYMid meet">
+          <defs>
+            <radialGradient id="bn" cx="50%" cy="50%">
+              <stop offset="0%" stop-color="#ffe066" stop-opacity=".95"/>
+              <stop offset="55%" stop-color="#ff8a2b" stop-opacity=".8"/>
+              <stop offset="100%" stop-color="#c0392b" stop-opacity="0"/>
+            </radialGradient>
+          </defs>
+          <ellipse cx="320" cy="150" rx="108" ry="130" fill="#20242f"/>
+          <ellipse cx="320" cy="150" rx="99" ry="120" fill="#2b3040"/>
+          <path d="M320 30 L320 270" stroke="#20242f" stroke-width="3"/>
+          <ellipse cx="281" cy="120" rx="38" ry="29" fill="url(#bn)"/>
+          <line x1="281" y1="24" x2="281" y2="276" stroke="#7fd1ff" stroke-width="1" opacity=".85"/>
+          <line x1="30" y1="120" x2="610" y2="120" stroke="#7fd1ff" stroke-width="1" opacity=".85"/>
+        </svg>
+      </div>
+
+      <div class="splitter stacked"></div>
+
+      <div class="pane">
+        <div class="surface-toolbar">
+          <label class="field inline"><span>view from</span><select><option>lateral</option></select></label>
+          <label class="field inline"><span>projection</span><select><option>perspective</option></select></label>
+        </div>
+        <div class="canvas-host" style="flex: 1; position: relative; display: grid; grid-template-columns: 1fr 1fr;">
+          <div style="position: relative; border-right: 1px solid #10131b;">
+            <span class="slice-label">left</span>
+            <svg width="100%" height="100%" viewBox="0 0 320 250" preserveAspectRatio="xMidYMid meet">
+              <defs>
+                <radialGradient id="pl" cx="50%" cy="50%">
+                  <stop offset="0%" stop-color="#ffe066" stop-opacity=".95"/>
+                  <stop offset="60%" stop-color="#ff8a2b" stop-opacity=".75"/>
+                  <stop offset="100%" stop-color="#c0392b" stop-opacity="0"/>
+                </radialGradient>
+              </defs>
+              <path d="M46 134 q5 -62 70 -80 q66 -18 108 24 q29 33 14 76 q-13 39 -66 45 q-66 7 -107 -16 q-20 -13 -19 -49 z"
+                    fill="#2b3040" stroke="#353b4d" stroke-width="1.4"/>
+              <path d="M72 108 q39 -16 78 -4 M92 152 q43 13 85 -4" stroke="#232838" stroke-width="2.4" fill="none" stroke-linecap="round"/>
+              <ellipse cx="114" cy="126" rx="33" ry="25" fill="url(#pl)"/>
+              <circle cx="114" cy="126" r="4" fill="#7fd1ff"/>
+            </svg>
+          </div>
+          <div style="position: relative;">
+            <span class="slice-label">right</span>
+            <svg width="100%" height="100%" viewBox="0 0 320 250" preserveAspectRatio="xMidYMid meet">
+              <path d="M274 134 q-5 -62 -70 -80 q-66 -18 -108 24 q-29 33 -14 76 q13 39 66 45 q66 7 107 -16 q20 -13 19 -49 z"
+                    fill="#2b3040" stroke="#353b4d" stroke-width="1.4"/>
+              <path d="M248 108 q-39 -16 -78 -4 M228 152 q-43 13 -85 -4" stroke="#232838" stroke-width="2.4" fill="none" stroke-linecap="round"/>
+              <ellipse cx="196" cy="130" rx="19" ry="14" fill="url(#pl)" opacity=".5"/>
+            </svg>
+          </div>
+        </div>
+        <span class="pane-badge">linked to vertex 417, 0.8 mm</span>
+      </div>
+
+    </div>
+
+    <div class="inspector">
+      <div class="tabs">
+        <span class="tab active">Layers</span><span class="tab">Analysis</span><span class="tab">Provenance</span>
+      </div>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--np-s3);">
+        <div class="layer-card">
+          <div class="layer-head">
+            <input type="checkbox" checked><span class="layer-title">t statistic</span>
+            <button class="ghost small-btn">↑</button><button class="ghost small-btn">↓</button>
+            <span class="pill accent">published</span>
+          </div>
+          <div class="layer-reps muted small">drawn in: volume · left and right surface</div>
+          <label class="field"><span>opacity</span><input type="range" value="85"></label>
+          <div class="group">
+            <div class="k">Visible values</div>
+            <label class="field"><span>mode</span><select><option>two-sided</option></select></label>
+            <label class="field"><span>minimum |value|</span><input value="3.1"></label>
+          </div>
+        </div>
+        <div class="layer-card">
+          <div class="layer-head">
+            <input type="checkbox" checked><span class="layer-title">effect</span>
+            <button class="ghost small-btn">↑</button><button class="ghost small-btn">↓</button>
+            <span class="pill">default</span>
+          </div>
+          <div class="layer-reps muted small">drawn in: volume only — no surface representation</div>
+          <label class="field"><span>opacity</span><input type="range" value="70"></label>
+          <div class="group">
+            <div class="k">Colour scale</div>
+            <label class="field"><span>colormap</span><select><option>cold-hot</option></select></label>
+            <div class="ramp" style="background: linear-gradient(90deg, #1f4e9c, #3b9bff, #9fdcff 40%, var(--np-border) 40%, var(--np-border) 60%, #ffe066 60%, #ff8a2b, #c0392b);"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="status-bar">
+    <div class="readout">
+      <span class="readout-layer" data-readout="world"><span class="k">RAS+</span><span class="mono">−6, −18, 8 mm</span></span>
+      <span class="readout-layer" data-pane="volume"><span class="k">t</span><span class="mono">4.82</span></span>
+      <span class="readout-layer" data-pane="surface"><span class="k">t · L vertex</span><span class="mono">4.51</span></span>
+      <span class="readout-layer" data-readout="link"><span class="k">surface</span><span class="mono">linked to vertex 417, 0.8 mm</span></span>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

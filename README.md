@@ -27,15 +27,21 @@ scientific meaning.
 
 ## Status
 
-Stages 0–4 of the [implementation plan](docs/implementation-plan.md) are done:
-the language-neutral protocol (`protocol/`), the Stage 2 publication spine
-(upload sessions, immutable revisions, PostgreSQL read model, S3-compatible
-object store, ingestion worker), the `npub` publisher CLI, the volume
-workspace, identity, saved views, and share links. The first product slice is
-proven end to end: a Julia program with no Neuropublish code publishes a bundle
-the server admits, and the result is explored in the browser and opened through
-a read-only link. See [DEVELOPMENT.md](DEVELOPMENT.md) for building, testing,
-and running it locally.
+Stages 0–5 of the [implementation plan](docs/implementation-plan.md) are built
+and verified locally: the language-neutral protocol (`protocol/`), publication
+spine (upload sessions, immutable revisions, PostgreSQL read model,
+S3-compatible object store, and ingestion worker), the `npub` publisher CLI,
+volume and surface workspaces, the Hybrid preset, identity, saved views, share
+links, and the neutral R client in `clients/r/neuropublish`. A Julia program
+with no Neuropublish code publishes the conformance bundle the server admits;
+the result can then be explored in the browser and opened through a read-only
+link.
+
+This is not yet a hosted alpha. The owning-package R adapters (`fmrigds`,
+`fmrireg`, `neuromosaic`, and `rMVPA`), production deployment, and Stage 5b
+parcel-space realizations remain tracked work. See
+[DEVELOPMENT.md](DEVELOPMENT.md) for building, testing, and running the current
+system locally.
 
 ## Planning documents
 

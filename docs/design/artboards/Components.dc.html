@@ -1,0 +1,423 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <style>
+    :root {
+      --np-bg-0: #0d0f14; --np-bg-1: #141720; --np-bg-2: #1b1f2a; --np-border: #232838; --np-border-strong: #2a3040;
+      --np-text: #e6e8ee; --np-text-2: #c9cedb; --np-muted: #8b93a7; --np-faint: #6f7790;
+      --np-accent: #6d5ef0; --np-accent-2: #8b7cf6; --np-accent-3: #a89cff; --np-accent-border: #4a3fa8;
+      --np-warn: #e5a33b; --np-warn-border: #6a4a17; --np-ok: #4fb98a; --np-ok-border: #1f5a42; --np-cursor: #7fd1ff;
+      --np-s1: 4px; --np-s2: 8px; --np-s3: 12px; --np-s4: 16px; --np-s5: 20px; --np-s6: 24px; --np-s7: 36px;
+      --np-r1: 6px; --np-r2: 10px; --np-h-input: 30px; --np-h-button: 36px;
+      --np-font: 'IBM Plex Sans', 'Helvetica Neue', Arial, sans-serif; --np-mono: 'IBM Plex Mono', 'SF Mono', Menlo, monospace;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--np-bg-0); color: var(--np-text); font: 14px/1.5 var(--np-font); }
+    a { color: var(--np-accent-3); text-decoration: none; } a:hover { color: #c4bbff; }
+    .mono { font-family: var(--np-mono); } .muted { color: var(--np-muted); } .small { font-size: 12px; }
+    .k { color: var(--np-muted); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; font-weight: 500; }
+    .sec { border: 1px solid var(--np-border); border-radius: var(--np-r2); background: var(--np-bg-1); padding: var(--np-s4); display: flex; flex-direction: column; gap: var(--np-s3); }
+    .sec > .k { border-bottom: 1px solid var(--np-border); padding-bottom: var(--np-s2); }
+    .row { display: flex; align-items: center; gap: var(--np-s3); flex-wrap: wrap; }
+    .lab { font: 10px var(--np-mono); color: var(--np-muted); letter-spacing: .04em; }
+    .stack { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+    .pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 999px; font-size: 11px; border: 1px solid var(--np-border-strong); color: var(--np-text-2); background: transparent; }
+    .pill.accent { border-color: var(--np-accent-border); color: #b6acff; }
+    .pill.warn { border-color: var(--np-warn-border); color: var(--np-warn); }
+    .pill.ok { border-color: var(--np-ok-border); color: var(--np-ok); }
+    button { display: inline-flex; align-items: center; gap: 8px; height: var(--np-h-button); padding: 0 12px; border-radius: var(--np-r1); border: 1px solid var(--np-border-strong); background: var(--np-bg-2); color: var(--np-text); font: 500 13px var(--np-font); }
+    button.primary { background: var(--np-accent); border-color: var(--np-accent); color: #fff; }
+    button.ghost { background: transparent; }
+    button.danger { color: var(--np-warn); border-color: var(--np-warn-border); }
+    button.hover { background: #232838; }
+    button.focus { outline: 2px solid var(--np-accent-2); outline-offset: 2px; }
+    button.dis { opacity: .45; }
+    .small-btn { height: 28px; padding: 0 8px; }
+    input, select { height: var(--np-h-input); padding: 0 8px; border-radius: var(--np-r1); border: 1px solid var(--np-border-strong); background: #0f1219; color: var(--np-text); font: 12px var(--np-mono); }
+    input.invalid { border-color: var(--np-warn); }
+    input.focus { outline: 2px solid var(--np-accent-2); outline-offset: 2px; }
+    input[type=range] { padding: 0; accent-color: var(--np-accent); height: var(--np-s5); width: 160px; }
+    input[type=checkbox] { height: 16px; width: 16px; accent-color: var(--np-accent); }
+    .tabs { display: flex; gap: var(--np-s4); }
+    .tab { color: var(--np-muted); padding: 0 0 6px; border-bottom: 2px solid transparent; font-size: 13px; font-weight: 500; }
+    .tab.active { color: var(--np-text); border-bottom-color: var(--np-accent-2); }
+    .segmented { display: inline-flex; border: 1px solid var(--np-border-strong); border-radius: var(--np-r1); overflow: hidden; }
+    .seg { height: 28px; padding: 0 10px; display: inline-flex; align-items: center; background: transparent; color: var(--np-muted); font-size: 12px; }
+    .seg + .seg { border-left: 1px solid var(--np-border-strong); }
+    .seg.active { background: var(--np-bg-2); color: var(--np-text); }
+    .tree-row { display: flex; align-items: center; justify-content: space-between; gap: var(--np-s2); padding: var(--np-s2); border-radius: var(--np-r1); min-height: 36px; color: var(--np-text-2); width: 260px; }
+    .tree-row.analysis { font-weight: 500; color: var(--np-text); }
+    .tree-row.estimand { padding-left: var(--np-s4); }
+    .tree-row.measure { padding-left: var(--np-s6); }
+    .tree-row.hover { background: var(--np-bg-2); }
+    .tree-row.selected { background: #1f2335; color: var(--np-text); }
+    .reps { font: 10px var(--np-mono); letter-spacing: .04em; text-transform: uppercase; color: var(--np-muted); }
+    .layer-card { background: var(--np-bg-1); border: 1px solid var(--np-border); border-radius: var(--np-r2); padding: var(--np-s3) var(--np-s4); display: flex; flex-direction: column; gap: var(--np-s2); width: 328px; }
+    .layer-reps { margin-top: -4px; }
+    .summary .hist { display: flex; align-items: flex-end; gap: 1px; height: 36px; margin-top: var(--np-s2); }
+    .summary .bar { flex: 1; background: #3a4160; border-radius: 1px; }
+    .layer-card.hidden { opacity: .6; }
+    .layer-head { display: flex; align-items: center; gap: var(--np-s2); } .layer-title { flex: 1; }
+    .field { display: grid; grid-template-columns: 120px minmax(0, 1fr); align-items: center; gap: var(--np-s2); font-size: 13px; color: var(--np-text-2); }
+    .group { display: flex; flex-direction: column; gap: var(--np-s1); padding-top: var(--np-s1); border-top: 1px solid var(--np-border); }
+    .ramp { height: 10px; border-radius: 3px; }
+    .hist { display: flex; align-items: flex-end; gap: 1px; height: 36px; width: 200px; }
+    .bar { flex: 1; background: #3a4160; border-radius: 1px; }
+    .pane-badge { display: inline-block; padding: 4px 8px; border-radius: var(--np-r1); background: rgba(20, 23, 32, .85); border: 1px solid var(--np-border-strong); color: var(--np-text-2); font-family: var(--np-mono); font-size: 12px; }
+    .pane-empty { padding: var(--np-s3) var(--np-s4); border: 1px dashed var(--np-border-strong); border-radius: var(--np-r2); background: rgba(20, 23, 32, .9); color: var(--np-text-2); font-size: 13px; display: flex; flex-direction: column; gap: var(--np-s1); width: 360px; }
+    /* np.css has no .pane-empty.error rule yet, though the app emits the class — drawn plain until it does. */
+    .splitter { background: var(--np-border); width: 8px; height: 72px; position: relative; }
+    .splitter::after { content: ""; position: absolute; top: 50%; left: 2px; width: 4px; height: 36px; margin-top: -18px; border-radius: 2px; background: var(--np-border-strong); }
+    .splitter.focus { background: var(--np-accent-border); }
+    .splitter.focus::after { background: var(--np-accent-2); }
+    .splitter.stacked { background: var(--np-border); height: 8px; width: 140px; position: relative; }
+    .splitter.stacked::after { content: ""; position: absolute; top: 2px; left: 50%; width: 36px; height: 4px; margin-left: -18px; border-radius: 2px; background: var(--np-border-strong); }
+    .readout-layer { display: inline-flex; gap: var(--np-s2); align-items: baseline; }
+    .readout-layer[data-pane="surface"] .k::before { content: "▲ "; color: var(--np-faint); }
+    .readout-layer[data-readout="link"] .mono { color: var(--np-cursor); }
+    .prov-node { border: 1px solid var(--np-border); border-radius: var(--np-r2); padding: var(--np-s2) var(--np-s3); background: var(--np-bg-1); display: flex; flex-direction: column; gap: 2px; width: 240px; }
+    .prov-node.unknown { border-style: dashed; }
+    .prov-node.asset { border-style: dotted; }
+    .prov-node.selected { border-color: var(--np-accent-border); }
+    .callout { border: 1px solid var(--np-border); border-radius: var(--np-r2); padding: var(--np-s3) var(--np-s4); font-size: 13px; width: 360px; }
+    .callout.warn { border-color: var(--np-warn-border); color: var(--np-text-2); }
+    .callout.ok { border-color: var(--np-ok-border); color: var(--np-text-2); }
+    .sw { width: 100%; height: 40px; border-radius: var(--np-r1); border: 1px solid var(--np-border); }
+    .swatch { display: flex; flex-direction: column; gap: 4px; width: 104px; }
+  </style>
+</helmet>
+
+<div style="width: 1240px; padding: 32px; background: var(--np-bg-0); display: flex; flex-direction: column; gap: 20px;">
+
+  <div>
+    <div style="font-size: 22px; font-weight: 600;">Neuropublish UI system</div>
+    <div class="muted" style="max-width: 720px; text-wrap: pretty;">
+      Every value here is the one in <span class="mono small">modules/frontend/np.css</span>. This sheet is the
+      reference for the states the app already renders — it adds no colours and no new components.
+    </div>
+  </div>
+
+  <!-- type + colour -->
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+    <div class="sec">
+      <span class="k">Type</span>
+      <div style="font-size: 22px; font-weight: 600;">Page title · 22/600</div>
+      <div style="font-size: 15px; font-weight: 600;">Panel heading · 15/600</div>
+      <div style="font-size: 14px;">Body · 14/1.5 IBM Plex Sans</div>
+      <div style="font-size: 13px; color: var(--np-text-2);">Field label · 13 · text-2</div>
+      <div class="small muted">Secondary · 12 · muted</div>
+      <div class="k">Section key · 11 · .06em · uppercase</div>
+      <div class="mono small">Mono · 12 · IBM Plex Mono · 4.82 · −18 mm</div>
+    </div>
+
+    <div class="sec">
+      <span class="k">Surfaces and text</span>
+      <div class="row" style="gap: var(--np-s2);">
+        <div class="swatch"><div class="sw" style="background: #0d0f14;"></div><span class="lab">bg-0 #0d0f14</span></div>
+        <div class="swatch"><div class="sw" style="background: #141720;"></div><span class="lab">bg-1 #141720</span></div>
+        <div class="swatch"><div class="sw" style="background: #1b1f2a;"></div><span class="lab">bg-2 #1b1f2a</span></div>
+        <div class="swatch"><div class="sw" style="background: #232838;"></div><span class="lab">border #232838</span></div>
+        <div class="swatch"><div class="sw" style="background: #2a3040;"></div><span class="lab">strong #2a3040</span></div>
+      </div>
+      <div class="row" style="gap: var(--np-s2);">
+        <div class="swatch"><div class="sw" style="background: #6d5ef0;"></div><span class="lab">accent #6d5ef0</span></div>
+        <div class="swatch"><div class="sw" style="background: #8b7cf6;"></div><span class="lab">accent-2</span></div>
+        <div class="swatch"><div class="sw" style="background: #e5a33b;"></div><span class="lab">warn #e5a33b</span></div>
+        <div class="swatch"><div class="sw" style="background: #4fb98a;"></div><span class="lab">ok #4fb98a</span></div>
+        <div class="swatch"><div class="sw" style="background: #7fd1ff;"></div><span class="lab">cursor #7fd1ff</span></div>
+      </div>
+      <div class="small muted">
+        The cursor blue is reserved: crosshair, linked-vertex marker, and the link distance in the status bar. Nothing else uses it.
+      </div>
+    </div>
+  </div>
+
+  <!-- controls -->
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+    <div class="sec">
+      <span class="k">Buttons · 36 px, 28 px compact</span>
+      <div class="row">
+        <div class="stack"><button>Default</button><span class="lab">rest</span></div>
+        <div class="stack"><button class="hover">Default</button><span class="lab">hover</span></div>
+        <div class="stack"><button class="focus">Default</button><span class="lab">focus</span></div>
+        <div class="stack"><button class="dis">Default</button><span class="lab">disabled</span></div>
+      </div>
+      <div class="row">
+        <div class="stack"><button class="primary">Publish view</button><span class="lab">primary</span></div>
+        <div class="stack"><button class="ghost">Ghost</button><span class="lab">ghost</span></div>
+        <div class="stack"><button class="danger">Revoke link</button><span class="lab">danger</span></div>
+        <div class="stack"><button class="ghost small-btn">Share</button><span class="lab">.small-btn 28</span></div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <span class="k">Inputs · 30 px, mono</span>
+      <div class="row">
+        <div class="stack"><input value="2.3" style="width: 90px;"><span class="lab">rest</span></div>
+        <div class="stack"><input class="focus" value="2.3" style="width: 90px;"><span class="lab">focus</span></div>
+        <div class="stack"><input class="invalid" value="abc" style="width: 90px;"><span class="lab">invalid</span></div>
+        <div class="stack"><select><option>cold-hot</option></select><span class="lab">select</span></div>
+      </div>
+      <div class="row">
+        <div class="stack"><input type="range" value="85"><span class="lab">range</span></div>
+        <div class="stack"><input type="checkbox" checked><span class="lab">checkbox</span></div>
+        <div class="stack"><input value="H7K2-QW9F" style="width: 150px; font-size: 18px; letter-spacing: .12em; height: 36px;"><span class="lab">device code</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- pills, tabs, segmented, tree -->
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+    <div class="sec">
+      <span class="k">Status pills and navigation</span>
+      <div class="row">
+        <span class="pill">published</span>
+        <span class="pill accent">read-only view</span>
+        <span class="pill warn">modified · reset</span>
+        <span class="pill ok">ingestion ready</span>
+        <span class="pill mono">[REVISION]</span>
+      </div>
+      <div class="row" style="gap: var(--np-s6);">
+        <div class="tabs"><span class="tab active">Layers</span><span class="tab">Analysis</span><span class="tab">Provenance</span></div>
+        <div class="segmented"><span class="seg">Volume</span><span class="seg">Surface</span><span class="seg active">Hybrid</span></div>
+      </div>
+      <div class="small muted">
+        The preset control appears on the presentation route too: it changes only what this viewer sees.
+      </div>
+    </div>
+
+    <div class="sec">
+      <span class="k">Result tree · representation glyphs</span>
+      <div class="tree-row analysis"><span>Group model · speech features</span><span class="muted small">n = 26</span></div>
+      <div class="tree-row estimand"><span>speech coefficient</span></div>
+      <div class="tree-row measure"><span>effect</span><span><span class="muted small">β</span><span class="reps muted">vol</span></span></div>
+      <div class="tree-row measure hover"><span>standard error</span><span><span class="muted small">se</span><span class="reps muted">vol</span></span></div>
+      <div class="tree-row measure selected"><span>t statistic</span><span><span class="muted small">t</span><span class="reps muted">vol surf L surf R</span></span></div>
+      <div class="tree-row measure"><span>z statistic</span><span><span class="muted small">z</span><span class="reps muted">vol surf L surf R</span></span></div>
+      <div class="small muted">
+        Glyphs state which representations exist, not which are drawn. <span class="mono">surf L</span> alone is an
+        honest half — the card says what that means in words.
+      </div>
+    </div>
+  </div>
+
+  <!-- layer cards -->
+  <div class="sec">
+    <span class="k">Layer card · states</span>
+    <div class="row" style="align-items: flex-start; gap: 20px;">
+
+      <div class="layer-card">
+        <div class="layer-head">
+          <input type="checkbox" checked>
+          <span class="layer-title">t statistic</span>
+          <button class="ghost small-btn">↑</button>
+          <button class="ghost small-btn">↓</button>
+          <span class="pill accent">published</span>
+        </div>
+        <div class="layer-reps muted small">drawn in: volume · left and right surface</div>
+        <label class="field"><span>opacity</span><input type="range" value="85"></label>
+        <div class="group">
+          <div class="k">Visible values</div>
+          <label class="field"><span>mode</span><select><option>two-sided</option></select></label>
+          <label class="field"><span>minimum |value|</span><input value="3.1"></label>
+        </div>
+        <div class="group">
+          <div class="k">Colour scale</div>
+          <label class="field"><span>minimum</span><input value="-8.0"></label>
+          <label class="field"><span>maximum</span><input value="8.0"></label>
+          <label class="field"><span>colormap</span><select><option>cold-hot</option></select></label>
+          <div class="ramp" style="background: linear-gradient(90deg, #1f4e9c, #3b9bff, #9fdcff 39%, var(--np-border) 39%, var(--np-border) 61%, #ffe066 61%, #ff8a2b, #c0392b);"></div>
+        </div>
+        <div class="group summary">
+          <div class="hist">
+            <div class="bar" style="height: 14%"></div><div class="bar" style="height: 13%"></div>
+            <div class="bar" style="height: 35%"></div><div class="bar" style="height: 24%"></div>
+            <div class="bar" style="height: 27%"></div><div class="bar" style="height: 61%"></div>
+            <div class="bar" style="height: 37%"></div><div class="bar" style="height: 37%"></div>
+            <div class="bar" style="height: 82%"></div><div class="bar" style="height: 44%"></div>
+            <div class="bar" style="height: 90%"></div><div class="bar" style="height: 48%"></div>
+            <div class="bar" style="height: 50%"></div><div class="bar" style="height: 100%"></div>
+            <div class="bar" style="height: 52%"></div><div class="bar" style="height: 50%"></div>
+            <div class="bar" style="height: 100%; background: #4a5068;"></div>
+            <div class="bar" style="height: 52%"></div><div class="bar" style="height: 100%"></div>
+            <div class="bar" style="height: 50%"></div><div class="bar" style="height: 48%"></div>
+            <div class="bar" style="height: 90%"></div><div class="bar" style="height: 44%"></div>
+            <div class="bar" style="height: 42%"></div><div class="bar" style="height: 77%"></div>
+            <div class="bar" style="height: 37%"></div><div class="bar" style="height: 61%"></div>
+            <div class="bar" style="height: 27%"></div><div class="bar" style="height: 24%"></div>
+            <div class="bar" style="height: 35%"></div><div class="bar" style="height: 13%"></div>
+            <div class="bar" style="height: 14%"></div>
+          </div>
+          <div class="muted mono small">min −5.75 · max 5.25 · median 0.00 · missing 0 · zero 11031</div>
+        </div>
+      </div>
+
+      <div class="layer-card">
+        <div class="layer-head">
+          <input type="checkbox" checked>
+          <span class="layer-title">z statistic</span>
+          <button class="ghost small-btn">↑</button>
+          <button class="ghost small-btn">↓</button>
+          <button class="pill warn reset">modified · reset</button>
+        </div>
+        <div class="layer-reps muted small">
+          drawn in: left surface only — no right-hemisphere representation
+        </div>
+        <div class="lab">synthetic state — in this bundle z carries both hemispheres</div>
+        <div class="group">
+          <label class="field"><span>Colour scale</span><select><option>cold-hot</option></select></label>
+          <div class="ramp" style="background: linear-gradient(90deg, #1f4e9c, #3b9bff, #9fdcff 38%, #232838 38%, #232838 62%, #ffe066 62%, #ff8a2b, #c0392b);"></div>
+        </div>
+        <div class="small muted">not drawn on a second lh surface — one per hemisphere is placed (hypothetical)</div>
+      </div>
+
+      <div class="layer-card hidden">
+        <div class="layer-head">
+          <input type="checkbox">
+          <span class="layer-title">standard error</span>
+          <button class="ghost small-btn">↑</button>
+          <button class="ghost small-btn">↓</button>
+          <span class="pill">default</span>
+        </div>
+        <div class="layer-reps muted small">drawn in: volume only — no surface representation</div>
+        <div class="small muted">hidden · the pane keeps its place in the layer order</div>
+      </div>
+
+    </div>
+
+    <div class="group" style="margin-top: var(--np-s2);">
+      <span class="k">Histogram · why the zero bin is clipped</span>
+      <div class="row" style="align-items: flex-end; gap: var(--np-s6);">
+        <div class="stack" style="gap: 6px;">
+          <div class="hist" style="width: 240px;">
+            <div class="bar" style="height: 0.2%"></div><div class="bar" style="height: 0.2%"></div>
+            <div class="bar" style="height: 0.5%"></div><div class="bar" style="height: 0.3%"></div>
+            <div class="bar" style="height: 0.4%"></div><div class="bar" style="height: 0.9%"></div>
+            <div class="bar" style="height: 0.5%"></div><div class="bar" style="height: 0.5%"></div>
+            <div class="bar" style="height: 1.2%"></div><div class="bar" style="height: 0.6%"></div>
+            <div class="bar" style="height: 1.3%"></div><div class="bar" style="height: 0.7%"></div>
+            <div class="bar" style="height: 0.7%"></div><div class="bar" style="height: 1.4%"></div>
+            <div class="bar" style="height: 0.7%"></div><div class="bar" style="height: 0.7%"></div>
+            <div class="bar" style="height: 100%"></div>
+            <div class="bar" style="height: 0.7%"></div><div class="bar" style="height: 1.4%"></div>
+            <div class="bar" style="height: 0.7%"></div><div class="bar" style="height: 0.7%"></div>
+            <div class="bar" style="height: 1.3%"></div><div class="bar" style="height: 0.6%"></div>
+            <div class="bar" style="height: 0.6%"></div><div class="bar" style="height: 1.1%"></div>
+            <div class="bar" style="height: 0.5%"></div><div class="bar" style="height: 0.9%"></div>
+            <div class="bar" style="height: 0.4%"></div><div class="bar" style="height: 0.3%"></div>
+            <div class="bar" style="height: 0.5%"></div><div class="bar" style="height: 0.2%"></div>
+            <div class="bar" style="height: 0.2%"></div>
+          </div>
+          <span class="lab">scaled to the true maximum — the reference bundle's own speech · t</span>
+        </div>
+        <div class="stack" style="gap: 6px;">
+          <div class="hist" style="width: 240px;">
+            <div class="bar" style="height: 14%"></div><div class="bar" style="height: 13%"></div>
+            <div class="bar" style="height: 35%"></div><div class="bar" style="height: 24%"></div>
+            <div class="bar" style="height: 27%"></div><div class="bar" style="height: 61%"></div>
+            <div class="bar" style="height: 37%"></div><div class="bar" style="height: 37%"></div>
+            <div class="bar" style="height: 82%"></div><div class="bar" style="height: 44%"></div>
+            <div class="bar" style="height: 90%"></div><div class="bar" style="height: 48%"></div>
+            <div class="bar" style="height: 50%"></div><div class="bar" style="height: 100%"></div>
+            <div class="bar" style="height: 52%"></div><div class="bar" style="height: 50%"></div>
+            <div class="bar" style="height: 100%; background: #4a5068;"></div>
+            <div class="bar" style="height: 52%"></div><div class="bar" style="height: 100%"></div>
+            <div class="bar" style="height: 50%"></div><div class="bar" style="height: 48%"></div>
+            <div class="bar" style="height: 90%"></div><div class="bar" style="height: 44%"></div>
+            <div class="bar" style="height: 42%"></div><div class="bar" style="height: 77%"></div>
+            <div class="bar" style="height: 37%"></div><div class="bar" style="height: 61%"></div>
+            <div class="bar" style="height: 27%"></div><div class="bar" style="height: 24%"></div>
+            <div class="bar" style="height: 35%"></div><div class="bar" style="height: 13%"></div>
+            <div class="bar" style="height: 14%"></div>
+          </div>
+          <span class="lab">zero bin clipped and greyed, remaining bins scaled to their own maximum</span>
+        </div>
+      </div>
+      <div class="small muted" style="max-width: 560px;">
+        11 031 of 13 440 values in <span class="mono">speech · t</span> are exactly zero — unmasked background. Scaled
+        honestly, every informative bin is under two pixels. The card clips that bin, greys it, and says so in words;
+        it does not silently drop it.
+      </div>
+    </div>
+  </div>
+
+  <!-- pane states -->
+  <div class="sec">
+    <span class="k">Pane states · badges, absence, divider</span>
+    <div class="row" style="align-items: flex-start; gap: 20px;">
+      <div class="stack" style="gap: var(--np-s2);">
+        <span class="pane-badge">linked to vertex 417, 0.8 mm</span>
+        <span class="pane-badge">no vertex within 3 mm</span>
+        <span class="pane-badge">cursor from surface vertex 417</span>
+        <span class="pane-badge">not linked · surface space ≠ volume space (hypothetical)</span>
+        <span class="lab">badge sits bottom-left of the pane it describes; it is a readout, never a control</span>
+      </div>
+      <div class="stack" style="gap: var(--np-s2);">
+        <div class="pane-empty">
+          <span>speech · effect has no surface representation.</span>
+          <span class="muted small">The producer published it on the volume grid only. Nothing is projected here.</span>
+        </div>
+        <div class="pane-empty">
+          <span>This revision declares no surfaces.</span>
+        </div>
+        <div class="pane-empty">
+          <span>This revision's surfaces share a hemisphere slot (hypothetical).</span>
+        </div>
+      </div>
+      <div class="stack" style="gap: var(--np-s2);">
+        <div class="row" style="gap: 16px;">
+          <div class="stack"><div class="splitter"></div><span class="lab">rest</span></div>
+          <div class="stack"><div class="splitter focus"></div><span class="lab">focus / drag</span></div>
+          <div class="stack"><div class="splitter stacked"></div><span class="lab">stacked &lt; 900 px</span></div>
+        </div>
+        <span class="lab" style="max-width: 240px; display: block;">role=separator · arrow keys move 2 %, Home/End clamp to 5 / 90 %</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- readout, provenance, callouts -->
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+    <div class="sec">
+      <span class="k">Status-bar readout</span>
+      <div class="row" style="gap: var(--np-s6);">
+        <span class="readout-layer" data-readout="world"><span class="k">RAS+</span><span class="mono">−6, −18, 8 mm</span></span>
+        <span class="readout-layer" data-pane="volume"><span class="k">t</span><span class="mono">4.82</span></span>
+        <span class="readout-layer" data-pane="surface"><span class="k">t · L vertex</span><span class="mono">4.51</span></span>
+        <span class="readout-layer" data-readout="link"><span class="k">surface</span><span class="mono">linked to vertex 417, 0.8 mm</span></span>
+      </div>
+      <div class="small muted">
+        Surface keys carry ▲ from the stylesheet. The link readout is the only other thing in cursor blue.
+      </div>
+      <div class="callout warn">First-level temporal noise models differ across inputs: 22 use AR(2), 4 use AR(1).</div>
+      <div class="callout ok">Share link created. It expires in 30 days and carries no account.</div>
+    </div>
+
+    <div class="sec">
+      <span class="k">Provenance nodes</span>
+      <div class="row" style="align-items: flex-start;">
+        <div class="stack" style="gap: var(--np-s2);">
+          <div class="prov-node"><span>group meta random-effects</span><span class="lab">activity · 26 inputs</span></div>
+          <div class="prov-node selected"><span>first-level-02</span><span class="lab">activity · selected</span></div>
+        </div>
+        <div class="stack" style="gap: var(--np-s2);">
+          <div class="prov-node asset"><span>first-level-01</span><span class="lab">asset · dotted</span></div>
+          <div class="prov-node unknown"><span>raw-bids</span><span class="lab">unknown · dashed</span></div>
+        </div>
+      </div>
+      <div class="small muted">
+        A dashed node is a gap the manifest declares, not one the viewer inferred.
+      </div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

@@ -9,7 +9,16 @@ import scala.jdk.CollectionConverters.*
 import neuropublish.protocol.Sha256
 import neuropublish.protocol.json.*
 import neuropublish.rendition.{SurfaceRendition, VertexFieldRendition, VolumeRendition}
-import neuropublish.viewer.{Workspace, WorkspaceLayout, WorkspaceState}
+import neuropublish.viewer.{
+  LayerDisplay,
+  LayerRepresentations,
+  Threshold,
+  Window,
+  Workspace,
+  WorkspaceLayer,
+  WorkspaceLayout,
+  WorkspaceState
+}
 
 /** The golden bundles: reference, valid, invalid, old-version, new-extension, and
   * schema-digest-mismatch, plus the schema documents' single-source-of-truth rules.
@@ -417,10 +426,38 @@ class FixtureSuite extends FunSuite:
   }
 
   test("workspace-state.schema.json accepts what WorkspaceState encodes") {
-    val ws = Workspace(Vector.empty, Some((1.0, -2.0, 3.5)), WorkspaceLayout.default, "layers")
+    // With layers, and with every optional member present: an empty workspace would agree with the
+    // schema about parts neither of them has.
+    val display = LayerDisplay(
+      visible = true,
+      opacity = 0.6,
+      window = Window(-8, 8),
+      threshold = Threshold("two-sided", 3.1, Some(12.0)),
+      colormap = "cold-hot"
+    )
+    val ws = Workspace(
+      Vector(
+        WorkspaceLayer("speech-t", display, display, true, LayerRepresentations(true, Set("left"))),
+        WorkspaceLayer(
+          "speech-z",
+          display,
+          display.copy(threshold = Threshold("positive", 2.3)),
+          false,
+          LayerRepresentations(false, Set("left", "right"))
+        )
+      ),
+      Some((1.0, -2.0, 3.5)),
+      WorkspaceLayout.default,
+      "layers"
+    )
     val json = WorkspaceState.encode(ws)
     assertEquals(SchemaCheck.workspaceState(json), Nil)
-    assertEquals(WorkspaceState.decode(json).map(_.cursor), Right(ws.cursor))
+    assertEquals(WorkspaceState.decode(json), Right(ws))
+    // a threshold with no maximum magnitude omits the member rather than writing a null
+    assert(
+      !json.hcursor.downField("payload").downField("layers").downN(1).downField("current")
+        .downField("threshold").downField("max").succeeded
+    )
     val bad = json.hcursor.downField("payload").downField("inspector").set(Json.fromString("x")).top
       .get
     assertEquals(SchemaCheck.workspaceState(bad).map(_.pointer), List("/payload/inspector"))

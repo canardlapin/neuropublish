@@ -532,12 +532,28 @@ The first implementation must not assume capabilities that are not present:
    int32 faces decoded into `SurfaceGeometry`; `vertex-field-f32@0` into
    `SurfaceField`), with the ADR 0005 surface-vertices key proven at
    ingestion from the GIFTI triangles (SPEC §6, "admission split").
-2. `DisplayThreshold` currently supports disabled and one transparent finite
-   band. Positive, negative, bounded interval, and optional outer two-sided
-   policies need a shared typed extension.
-3. `ColorRamp` currently provides two-stop grayscale and heat ramps. Scientific
+2. **Closed.** `DisplayThreshold` gained `Below`, `Above`, and
+   `TwoSided(inner, outer)` upstream (Intaglio `cdf1562`, pinned through the
+   ScalaFIM revision in `project/Versions.scala`), so the product's
+   positive/negative modes and its maximum magnitude all render from the
+   library rather than from product code. The shape of the upstream type is
+   what the product's `Threshold` can offer: an upper bound is the outer band
+   of a `TwoSided`, so it exists for `two-sided` with a positive minimum and
+   nowhere else.
+3. `ColorRamp` currently provides two-stop grayscale and heat ramps, and
+   `DisplayWindow.normalize` is linear across `[lower, upper]`. Scientific
    multi-stop sequential, diverging, and categorical palettes need a reusable
    upstream implementation with deterministic JVM/JS fixtures.
+
+   This gap is what constrains `publishedDisplay.window.centre`: with one
+   linear ramp the only centre the canvas can draw is the window midpoint, so
+   core 0.1 rejects a published centre anywhere else (SPEC §5,
+   `invalid/window-centre-offset`) and the layer inspector shows the midpoint
+   as a derived, read-only value. A centre is not a product-side transfer
+   function to be written here — a diverging ramp with a movable neutral stop
+   is exactly the reusable behavior axiom 10 assigns upstream. The restriction
+   lifts in a later core version when this lands, so the field's meaning never
+   changes under a producer who already published.
 4. The application still needs a shared `WorkspaceLayer` adapter that maps one
    product layer to the appropriate ScalaFIM volume and surface actions without
    making either renderer authoritative for the other.

@@ -10,7 +10,7 @@ object ManifestChecks:
   def all(m: Manifest): List[Problem] =
     uniqueIds(m) ++ referenceClosure(m) ++ estimandClosure(m) ++ orders(m) ++ measures(m) ++
       sensitivity(m) ++ warningScopes(m) ++ openRecords(m) ++ domains(m) ++ surfaces(m) ++
-      spaces(m) ++ provenanceEdges(m)
+      spaces(m) ++ provenanceEdges(m) ++ displays(m)
 
   private def dupes(pointer: Int => String, ids: List[String], what: String): List[Problem] =
     ids.zipWithIndex.groupBy(_._1).toList.filter(_._2.size > 1).flatMap { (id, occ) =>
@@ -127,6 +127,36 @@ object ManifestChecks:
         Problem(s"/resultFields/$i/measure", msg)
       )
     )
+
+  /** `publishedDisplay.window.centre` names the value the colour scale is centred on. This version
+    * renders one linear ramp across `[min, max]`, so the only centre it can honour is the window
+    * midpoint; a declared centre anywhere else would be accepted and then silently ignored, which
+    * is the one thing a recommendation must never be. It is rejected here until the
+    * diverging-palette work lands upstream (`docs/architecture.md`, "Viewer integration and
+    * upstream gaps"), so the restriction lifts in a later core version rather than the meaning
+    * changing under a producer who already published.
+    *
+    * The comparison is scaled to the window, so a centre written to the precision a producer can
+    * reasonably emit still counts as the midpoint.
+    */
+  def displays(m: Manifest): List[Problem] =
+    m.resultFields.zipWithIndex.flatMap { (f, i) =>
+      val w = f.publishedDisplay.map(_.hcursor.downField("window"))
+      for
+        centre <- w.flatMap(_.get[Double]("centre").toOption)
+        min <- w.flatMap(_.get[Double]("min").toOption)
+        max <- w.flatMap(_.get[Double]("max").toOption)
+        if !centred(centre, min, max)
+      yield Problem(
+        s"/resultFields/$i/publishedDisplay/window/centre",
+        s"window centre $centre is not the window midpoint ${(min + max) / 2.0}; this version renders one linear ramp across [min, max] and cannot centre the colour scale elsewhere"
+      )
+    }
+
+  /** Whether `centre` is the midpoint of `[min, max]` to the window's own precision. */
+  def centred(centre: Double, min: Double, max: Double): Boolean =
+    val scale = List(1.0, math.abs(min), math.abs(max)).max
+    (centre - (min + max) / 2.0).abs <= 1e-9 * scale
 
   val Sensitivities: Set[String] = Set("group-level", "subject-level")
 

@@ -20,6 +20,10 @@ test_that("builders serialize to the schema's records", {
   expect_null(fv$label)
   expect_error(np_threshold("two-sided", -1), "non-negative")
   expect_error(np_window(3, 1), "min < max")
+  # core 0.1 renders one linear ramp across [min, max]: an off-midpoint centre
+  # would be published, accepted by the schema, and then never applied.
+  expect_error(np_window(-2, 8, centre = 0), "midpoint 3")
+  expect_identical(np_window(-2, 8, centre = 3)$centre, 3)
 
   w <- np_warning("w", "msg", concerns = list(analysis = "a"))
   expect_identical(w$concerns$analysis, "a")

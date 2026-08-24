@@ -4,7 +4,7 @@
 workspace, captured before any code existed. It is a mood and layout
 reference, not a specification. The proper design pass happens in the
 "UI design cadence" of the [implementation plan](../implementation-plan.md),
-using the `/design` skill to produce editable artboards for each surface.
+using editable artboards for each surface.
 
 ## What the mockup establishes (adopted)
 
@@ -21,12 +21,18 @@ using the `/design` skill to produce editable artboards for each surface.
   beside the result;
 - a "cite / export" affordance on the project.
 
-## Hybrid artboard (Stage 5, pending the design pass)
+## Workspace artboards (Stage 5 design pass complete)
+
+The editable design source is [artboards/canvas.json](artboards/canvas.json),
+with a directly inspectable HTML rendering in
+[artboards/Main.dc.html](artboards/Main.dc.html). It contains the 1440 px Hybrid
+workspace, the resolved design questions, component states, and a narrow
+stacked layout. These are static design artifacts; the browser implementation
+must still be checked against them with real result data.
 
 The Stage 5 workspace reuses the Volume artboard's regions and tokens
 (`modules/frontend/np.css`) for the Surface and Hybrid presets; no new colours
-were introduced. What the Hybrid artboard must settle when the `/design` pass
-reaches it:
+were introduced. The design pass settled these points:
 
 - the centre is a two-column CSS grid — volume pane · 8 px divider · surface
   pane — whose proportion is `splitFraction` (volume share); the divider is a
@@ -45,9 +51,15 @@ reaches it:
   Hybrid), present on the presentation route too since it changes only what
   the viewer sees locally.
 
-Open questions for the artboard: whether the link badge should live in the
-status bar only; the layer card's "drawn in" line versus representation
-glyphs in the result tree; and a shared colour bar across panes.
+- the pane-local link badge stays close to the canvas while the status bar
+  carries the exact coordinate and value readout;
+- the result tree uses compact representation glyphs, while the expanded layer
+  card names its volume/left/right realizations in text;
+- one colour bar represents the shared scientific field across linked panes.
+
+The next design task is implementation fidelity: replace synthetic viewer
+stand-ins with the conformance result's volume and cortical assets, then run
+wide and narrow browser screenshots against these artboards.
 
 ## What the mockup shows that the plan does not adopt (yet)
 

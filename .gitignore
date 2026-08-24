@@ -36,3 +36,6 @@ clients/r/neuropublish/Meta/
 
 # agent worktrees and local session files
 .claude/
+
+# generated design-canvas runtime; editable sources live beside it
+docs/design/artboards/neuropublish-workspace-ui.html

@@ -39,7 +39,27 @@ object WorkspaceState:
   given [A: Encoder: Decoder]: Codec[Record[A]] = deriveCodec
 
   given Codec[Window] = deriveCodec
-  given Codec[Threshold] = deriveCodec
+
+  /** Written without `max` when there is none: `"max": null` is not a number, and the saved-view
+    * schema's threshold is a closed structure.
+    */
+  given Codec[Threshold] = Codec.from(
+    Decoder.instance(c =>
+      for
+        mode <- c.get[String]("mode")
+        min <- c.get[Double]("min")
+        max <- c.get[Option[Double]]("max")
+      yield Threshold(mode, min, max)
+    ),
+    Encoder.instance(t =>
+      Json.obj(
+        (List(
+          "mode" -> Json.fromString(t.mode),
+          "min" -> Json.fromDoubleOrNull(t.min)
+        ) ++ t.max.map(m => "max" -> Json.fromDoubleOrNull(m)))*
+      )
+    )
+  )
   given Codec[LayerDisplay] = deriveCodec
   given Codec[LayerRepresentations] = Codec.from(
     Decoder.instance(c =>
@@ -84,23 +104,20 @@ object WorkspaceState:
         preset <- c.get[LayoutPreset]("preset")
         nav <- c.get[Double]("navigatorFraction")
         ins <- c.get[Double]("inspectorFraction")
-        drawer <- c.get[Double]("drawerFraction")
         split <- c.get[Option[Double]]("splitFraction")
       yield WorkspaceLayout(
         preset,
         nav,
         ins,
-        drawer,
         split.getOrElse(WorkspaceLayout.default.splitFraction)
       )
     },
-    Encoder.forProduct5(
+    Encoder.forProduct4(
       "preset",
       "navigatorFraction",
       "inspectorFraction",
-      "drawerFraction",
       "splitFraction"
-    )(l => (l.preset, l.navigatorFraction, l.inspectorFraction, l.drawerFraction, l.splitFraction))
+    )(l => (l.preset, l.navigatorFraction, l.inspectorFraction, l.splitFraction))
   )
   given Codec[WorkspaceLayout] = Codec.from(
     Decoder[Record[Json]].emap { r =>

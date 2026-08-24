@@ -1,0 +1,224 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <style>
+    :root {
+      --np-bg-0: #0d0f14; --np-bg-1: #141720; --np-bg-2: #1b1f2a; --np-border: #232838; --np-border-strong: #2a3040;
+      --np-text: #e6e8ee; --np-text-2: #c9cedb; --np-muted: #8b93a7; --np-faint: #6f7790;
+      --np-accent: #6d5ef0; --np-accent-2: #8b7cf6; --np-accent-3: #a89cff; --np-accent-border: #4a3fa8;
+      --np-warn: #e5a33b; --np-warn-border: #6a4a17; --np-ok: #4fb98a; --np-ok-border: #1f5a42; --np-cursor: #7fd1ff;
+      --np-s1: 4px; --np-s2: 8px; --np-s3: 12px; --np-s4: 16px; --np-s5: 20px; --np-s6: 24px;
+      --np-r1: 6px; --np-r2: 10px;
+      --np-font: 'IBM Plex Sans', 'Helvetica Neue', Arial, sans-serif; --np-mono: 'IBM Plex Mono', 'SF Mono', Menlo, monospace;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--np-bg-0); color: var(--np-text); font: 14px/1.5 var(--np-font); }
+    a { color: var(--np-accent-3); text-decoration: none; } a:hover { color: #c4bbff; }
+    .mono { font-family: var(--np-mono); } .muted { color: var(--np-muted); } .small { font-size: 12px; }
+    .k { color: var(--np-muted); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; font-weight: 500; }
+    .q { display: flex; flex-direction: column; gap: var(--np-s3); }
+    .q-title { font-size: 15px; font-weight: 600; }
+    .opts { display: grid; grid-template-columns: 1fr 1fr; gap: var(--np-s4); align-items: stretch; }
+    .opt { border: 1px solid var(--np-border); border-radius: var(--np-r2); background: var(--np-bg-1); padding: var(--np-s3) var(--np-s4); display: flex; flex-direction: column; gap: var(--np-s2); }
+    .opt.pick { border-color: var(--np-accent-border); }
+    .opt-head { display: flex; align-items: center; gap: var(--np-s2); }
+    .opt-name { font-weight: 500; flex: 1; }
+    .pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 999px; font-size: 11px; border: 1px solid var(--np-border-strong); color: var(--np-text-2); }
+    .pill.accent { border-color: var(--np-accent-border); color: #b6acff; }
+    .pill.proposed { border-color: var(--np-accent-border); color: #b6acff; }
+    .demo { background: #05060a; border: 1px solid var(--np-border); border-radius: var(--np-r1); padding: var(--np-s3); position: relative; min-height: 116px; display: flex; flex-direction: column; justify-content: flex-end; gap: var(--np-s2); }
+    .trade { font-size: 12px; color: var(--np-muted); border-top: 1px solid var(--np-border); padding-top: var(--np-s2); }
+    .pane-badge { display: inline-block; padding: 4px 8px; border-radius: var(--np-r1); background: rgba(20, 23, 32, .85); border: 1px solid var(--np-border-strong); color: var(--np-text-2); font-family: var(--np-mono); font-size: 12px; }
+    .status { border-top: 1px solid var(--np-border); background: var(--np-bg-1); padding: var(--np-s2) var(--np-s3); display: flex; gap: var(--np-s4); align-items: baseline; flex-wrap: wrap; }
+    .readout-layer { display: inline-flex; gap: var(--np-s2); align-items: baseline; }
+    .readout-layer[data-pane="surface"] .k::before { content: "▲ "; color: var(--np-faint); }
+    .readout-layer[data-readout="link"] .mono { color: var(--np-cursor); }
+    .tree-row { display: flex; align-items: center; justify-content: space-between; gap: var(--np-s2); padding: 6px var(--np-s2); border-radius: var(--np-r1); color: var(--np-text-2); font-size: 13px; }
+    .tree-row.selected { background: #1f2335; color: var(--np-text); }
+    .reps { font: 10px var(--np-mono); letter-spacing: .04em; text-transform: uppercase; color: var(--np-muted); }
+    .card { background: var(--np-bg-1); border: 1px solid var(--np-border); border-radius: var(--np-r2); padding: var(--np-s2) var(--np-s3); display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+    .ramp { height: 10px; border-radius: 3px; }
+    .ramp-v { width: 10px; border-radius: 3px; }
+    .verdict { border-left: 2px solid var(--np-accent-border); padding-left: var(--np-s3); color: var(--np-text-2); font-size: 13px; }
+    .lab { font: 10px var(--np-mono); color: var(--np-muted); letter-spacing: .04em; }
+  </style>
+</helmet>
+
+<div style="width: 1240px; padding: var(--np-s7); background: var(--np-bg-0); display: flex; flex-direction: column; gap: var(--np-s6);">
+
+  <div>
+    <div style="font-size: 22px; font-weight: 600;">Hybrid — the three open questions</div>
+    <div class="muted" style="max-width: 780px; text-wrap: pretty;">
+      <span class="mono small">docs/design/README.md</span> left these for the design pass. Each is answered below with
+      the reason and what it costs. The rule they all serve: the workspace states what is true of the data and never
+      implies coverage it does not have. Chips mark which answers are changes to what ships today. The single-hemisphere
+      examples are synthetic — in the reference bundle every surface measure carries both hemispheres.
+    </div>
+  </div>
+
+  <!-- Q1 -->
+  <div class="q">
+    <div class="q-title">1 · Where does the link state live?</div>
+    <div class="opts">
+
+      <div class="opt pick">
+        <div class="opt-head">
+          <span class="opt-name">A · Badge in the pane, distance in the status bar</span>
+          <span class="pill accent">chosen</span>
+          <span class="pill proposed">a change</span>
+        </div>
+        <div class="demo">
+          <span class="pane-badge" style="align-self: flex-start;">linked to vertex 417, 0.8 mm</span>
+          <div class="status" style="margin: var(--np-s2) calc(-1 * var(--np-s3)) calc(-1 * var(--np-s3));">
+            <span class="readout-layer" data-pane="surface"><span class="k">t · L vertex</span><span class="mono">4.51</span></span>
+            <span class="readout-layer" data-readout="link"><span class="k">surface</span><span class="mono">0.8 mm</span></span>
+          </div>
+        </div>
+        <div class="trade">
+          The badge names <em>which</em> vertex, beside the surface it belongs to; the status bar keeps only the
+          distance, with the values it qualifies. Costs a little duplication of the number — and it is a change:
+          today the bar carries the whole sentence.
+        </div>
+      </div>
+
+      <div class="opt">
+        <div class="opt-head"><span class="opt-name">B · Status bar only</span>
+          <span class="pill">built today</span></div>
+        <div class="demo">
+          <span class="lab">no badge over the canvas</span>
+          <div class="status" style="margin: var(--np-s2) calc(-1 * var(--np-s3)) calc(-1 * var(--np-s3));">
+            <span class="readout-layer" data-pane="surface"><span class="k">t · L vertex</span><span class="mono">4.51</span></span>
+            <span class="readout-layer" data-readout="link"><span class="k">surface</span><span class="mono">linked to vertex 417, 0.8 mm</span></span>
+          </div>
+        </div>
+        <div class="trade">
+          What ships today. Nothing covers the mesh, and there is one place to look. But with panes stacked under
+          900 px the status bar is far from the surface, and a per-pane fact stops being per-pane.
+        </div>
+      </div>
+
+    </div>
+    <div class="verdict">
+      Keep the badge. It is the only element that says <em>which</em> surface is linked, and when the pick comes from
+      the surface the pane badges swap sides — the surface badge is suppressed and the volume pane reads
+      “cursor from surface vertex 417”. That per-pane pairing has no home in a shared bar.
+    </div>
+  </div>
+
+  <!-- Q2 -->
+  <div class="q">
+    <div class="q-title">2 · “Drawn in” prose, or representation glyphs in the tree?</div>
+    <div class="opts">
+
+      <div class="opt pick">
+        <div class="opt-head">
+          <span class="opt-name">A · Both, with different jobs</span>
+          <span class="pill accent">chosen</span>
+          <span class="pill proposed">glyph wording is a change</span>
+        </div>
+        <div class="demo" style="justify-content: flex-start; gap: var(--np-s3);">
+          <div>
+            <div class="tree-row"><span>effect</span><span class="reps muted">vol</span></div>
+            <div class="tree-row selected"><span>t</span><span class="reps muted">vol ▲lh ▲rh</span></div>
+            <div class="tree-row"><span>z</span><span class="reps muted">vol ▲lh</span></div>
+          </div>
+          <div class="card">
+            <span>speech · z</span>
+            <span style="color: var(--np-text-2);">drawn in: left surface only — no right-hemisphere representation</span>
+          </div>
+        </div>
+        <div class="trade">
+          Glyphs answer “which measures have a surface?” at a glance; the card answers “what exactly am I looking at?”
+          in a sentence. Two surfaces for one fact — they must never disagree. The app already prints
+          <span class="mono">vol surf L surf R</span>; the compact form here is the proposed wording.
+        </div>
+      </div>
+
+      <div class="opt">
+        <div class="opt-head"><span class="opt-name">B · Glyphs only</span></div>
+        <div class="demo" style="justify-content: flex-start;">
+          <div>
+            <div class="tree-row"><span>effect</span><span class="reps muted">vol</span></div>
+            <div class="tree-row selected"><span>t</span><span class="reps muted">vol ▲lh ▲rh</span></div>
+            <div class="tree-row"><span>z</span><span class="reps muted">vol ▲lh</span></div>
+          </div>
+          <span class="lab" style="margin-top: 8px;">card carries no representation line</span>
+        </div>
+        <div class="trade">
+          Compact and never contradictory. But <span class="mono">▲lh</span> alone does not say the right hemisphere is
+          <em>absent</em> rather than merely hidden — exactly the inference the product forbids.
+        </div>
+      </div>
+
+    </div>
+    <div class="verdict">
+      Both. The glyph is a scanning aid over the whole tree; the card states the absence in words, because a missing
+      hemisphere is a scientific fact about the result, not a display setting.
+    </div>
+  </div>
+
+  <!-- Q3 -->
+  <div class="q">
+    <div class="q-title">3 · One colour bar shared across panes?</div>
+    <div class="opts">
+
+      <div class="opt pick">
+        <div class="opt-head">
+          <span class="opt-name">A · Per-layer bar in the card; shared bar only when one scalar layer is visible</span>
+          <span class="pill accent">chosen</span>
+          <span class="pill proposed">a change</span>
+        </div>
+        <div class="demo" style="flex-direction: row; align-items: stretch; gap: var(--np-s3); justify-content: flex-start;">
+          <div style="flex: 1; display: flex; flex-direction: column; gap: 6px; justify-content: flex-end;">
+            <div class="card">
+              <span>speech · t</span>
+              <div class="ramp" style="background: linear-gradient(90deg,#1f4e9c,#3b9bff,#9fdcff 34%,#232838 34%,#232838 66%,#ffe066 66%,#ff8a2b,#c0392b);"></div>
+              <span class="lab">−6.0 · ±2.3 hidden · 6.0</span>
+            </div>
+          </div>
+          <div style="display: flex; flex-direction: column; align-items: center; gap: 4px; justify-content: flex-end;">
+            <span class="lab">6.0</span>
+            <div class="ramp-v" style="height: 62px; background: linear-gradient(180deg,#c0392b,#ff8a2b,#ffe066 34%,#232838 34%,#232838 66%,#9fdcff 66%,#3b9bff,#1f4e9c);"></div>
+            <span class="lab">−6.0</span>
+          </div>
+        </div>
+        <div class="trade">
+          The bar beside the panes appears only when a single scalar layer is visible, so it can be read literally.
+          With two overlays it disappears and the cards remain the authority. Costs an element that comes and goes.
+        </div>
+      </div>
+
+      <div class="opt">
+        <div class="opt-head"><span class="opt-name">B · Always a shared bar spanning both panes</span></div>
+        <div class="demo" style="justify-content: flex-end;">
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <span class="lab">−6.0</span>
+            <div class="ramp" style="flex: 1; background: linear-gradient(90deg,#1f4e9c,#3b9bff,#9fdcff 34%,#232838 34%,#232838 66%,#ffe066 66%,#ff8a2b,#c0392b);"></div>
+            <span class="lab">6.0</span>
+          </div>
+          <span class="lab">whose scale is it, with two overlays on screen?</span>
+        </div>
+        <div class="trade">
+          Always present, always in the same place, and it reads well in a screenshot. But two layers with different
+          windows share one bar, and the bar then belongs to neither — a picture that lies quietly.
+        </div>
+      </div>
+
+    </div>
+    <div class="verdict">
+      Conditional shared bar. A colour bar is a claim about what the colours mean; it may only appear when that claim
+      is unambiguous. Everywhere else the layer card, which is per-layer by construction, carries the scale.
+    </div>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

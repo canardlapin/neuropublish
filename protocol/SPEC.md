@@ -141,7 +141,20 @@ admits a manifest has therefore not admitted it; the server has.
 - `publishedDisplay` is a recommendation: `threshold.mode` is one of
   `two-sided | positive | negative | off`, `threshold.min >= 0`,
   `window.min < window.max` is expected by viewers, `colormap` is a closed
-  URL-safe grammar. None of it is an inferential rule.
+  URL-safe grammar, and `opacity`, when present, is in `[0, 1]`. None of it is
+  an inferential rule. A viewer applies every member it accepts: a value read
+  from the manifest and then replaced by the viewer's own default would show
+  the producer a recommendation they never made, which is the failure a closed
+  structure exists to prevent.
+- `publishedDisplay.window.centre` names the value the colour scale is centred
+  on. In core 0.1 it must be the window midpoint `(min + max) / 2`, compared to
+  within `1e-9 * max(1, |min|, |max|)` so a centre written to the precision a
+  producer can emit still counts; a centre anywhere else is rejected
+  (`invalid/window-centre-offset`) rather than accepted and ignored, because
+  this version renders one linear ramp across `[min, max]`. A later core
+  version lifts the restriction when the upstream diverging-palette work lands
+  (`docs/architecture.md`, "Viewer integration and upstream gaps"); until then
+  the field is legal, checked, and never misleading.
 
 ### Ordering
 

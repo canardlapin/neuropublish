@@ -58,6 +58,40 @@ test("readouts at a URL-set cursor match the oracle", async ({ page }) => {
   expect(await readout(page, "t1")).toBe("0.00");
 });
 
+test("a maximum magnitude reaches the canvas, and exists only where the renderer can honour it", async ({ page }) => {
+  await page.goto("/w/rotman/p/sherlock");
+  await ready(page);
+  const href = await page.getByRole("link", { name: "Open current revision" }).getAttribute("href");
+  await page.goto(href);
+  await ready(page); await settle(page);
+  const card = page.locator('.layer-card[data-layer="speech-t"]');
+  // measure the t layer alone: z sits underneath and would show through wherever t is hidden
+  await page.locator('.layer-card[data-layer="speech-z"] input[type=checkbox]').click();
+  await settle(page); await settle(page);
+  const unbounded = await colourPixels(page);
+  const hi = card.getByLabel("maximum |value|");
+  await expect(hi).toHaveValue(""); // none, and it says so rather than inventing a bound
+  // published threshold is two-sided 3.1; the volume runs to ±5.75, so |v| > 4 is a real slice of it
+  await hi.click(); await page.keyboard.type("4"); await page.keyboard.press("Enter");
+  await settle(page); await settle(page);
+  const bounded = await colourPixels(page);
+  expect(bounded).toBeLessThan(unbounded);
+  expect(bounded).toBeGreaterThan(0); // the band 3.1 ≤ |v| ≤ 4 is still drawn
+  await page.waitForTimeout(400); // URL sync is debounced
+  expect(page.url()).toContain("ts3.1_4");
+
+  // a one-sided mode has no upper bound to give: the control is disabled and says why,
+  // and the bound is dropped rather than kept as state the canvas would ignore
+  await card.locator("select").first().selectOption("positive");
+  await settle(page);
+  await expect(hi).toBeDisabled();
+  await expect(hi).toHaveValue("");
+  await page.waitForTimeout(400);
+  expect(page.url()).not.toContain("_4");
+  // the colour scale states the centre it actually renders
+  await expect(card.locator('[data-testid="window-centre"]')).toHaveText("0.00");
+});
+
 test("threshold and window are independent, reorder and presentation survive a URL round trip, reset restores", async ({ page }) => {
   await page.goto("/w/rotman/p/sherlock");
   await ready(page);

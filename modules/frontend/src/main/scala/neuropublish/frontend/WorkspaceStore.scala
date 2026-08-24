@@ -78,7 +78,8 @@ final class WorkspaceStore(
     val m = d.threshold.min
     d.threshold.mode match
       case "two-sided" if m > 0 =>
-        DisplayThreshold.twoSidedMagnitude(m).getOrElse(DisplayThreshold.Disabled)
+        DisplayThreshold.twoSidedMagnitude(m, d.threshold.max)
+          .getOrElse(DisplayThreshold.Disabled)
       case "positive" =>
         DisplayThreshold.below(m).getOrElse(DisplayThreshold.Disabled) // show v >= min
       case "negative" =>

@@ -1,0 +1,350 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <style>
+    /* Tokens and component rules copied from modules/frontend/np.css. */
+    :root {
+      --np-bg-0: #0d0f14; --np-bg-1: #141720; --np-bg-2: #1b1f2a; --np-border: #232838; --np-border-strong: #2a3040;
+      --np-text: #e6e8ee; --np-text-2: #c9cedb; --np-muted: #8b93a7; --np-faint: #6f7790;
+      --np-accent: #6d5ef0; --np-accent-2: #8b7cf6; --np-accent-3: #a89cff; --np-accent-border: #4a3fa8;
+      --np-warn: #e5a33b; --np-warn-border: #6a4a17; --np-ok: #4fb98a; --np-ok-border: #1f5a42; --np-cursor: #7fd1ff;
+      --np-ramp-cold: linear-gradient(180deg,#1f4e9c,#3b9bff,#9fdcff); --np-ramp-hot: linear-gradient(180deg,#ffe066,#ff8a2b,#c0392b);
+      --np-s1: 4px; --np-s2: 8px; --np-s3: 12px; --np-s4: 16px; --np-s5: 20px; --np-s6: 24px; --np-s7: 36px;
+      --np-r1: 6px; --np-r2: 10px; --np-h-input: 30px; --np-h-button: 36px; --np-hit: 44px;
+      --np-font: 'IBM Plex Sans', 'Helvetica Neue', Arial, sans-serif; --np-mono: 'IBM Plex Mono', 'SF Mono', Menlo, monospace;
+      /* Not tokens: renderer stand-ins for mesh and slice fills the real canvas paints from data. */
+      --stand-in-tissue: #2b3040; --stand-in-rim: #20242f; --stand-in-edge: #353b4d;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--np-bg-0); color: var(--np-text); font: 14px/1.5 var(--np-font); }
+    a { color: var(--np-accent-3); text-decoration: none; } a:hover { color: #c4bbff; }
+    .mono { font-family: var(--np-mono); } .muted { color: var(--np-muted); } .small { font-size: 12px; }
+    .k { color: var(--np-muted); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; font-weight: 500; }
+    .pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 999px; font-size: 11px; border: 1px solid var(--np-border-strong); color: var(--np-text-2); background: transparent; font-family: inherit; }
+    .pill.accent { border-color: var(--np-accent-border); color: #b6acff; }
+    .pill.warn { border-color: var(--np-warn-border); color: var(--np-warn); cursor: pointer; }
+    button { display: inline-flex; align-items: center; gap: 8px; height: var(--np-h-button); padding: 0 12px; border-radius: var(--np-r1); border: 1px solid var(--np-border-strong); background: var(--np-bg-2); color: var(--np-text); font: 500 13px var(--np-font); cursor: pointer; }
+    button.ghost { background: transparent; }
+    .small-btn { height: 28px; padding: 0 8px; }
+    input, select { height: var(--np-h-input); padding: 0 8px; border-radius: var(--np-r1); border: 1px solid var(--np-border-strong); background: #0f1219; color: var(--np-text); font: 12px var(--np-mono); }
+    input[type=range] { padding: 0; accent-color: var(--np-accent); height: var(--np-s5); }
+    input[type=checkbox] { height: 16px; width: 16px; accent-color: var(--np-accent); }
+    .topbar { height: 56px; display: flex; align-items: center; gap: var(--np-s3); padding: 0 var(--np-s6); border-bottom: 1px solid var(--np-border); background: #10131b; }
+    .spacer { flex: 1; } .crumb { color: var(--np-text); max-width: 32vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .account { display: flex; align-items: center; gap: var(--np-s2); }
+    .account-user { display: inline-flex; align-items: center; gap: var(--np-s2); color: var(--np-text-2); }
+    .workspace { display: grid; grid-template-columns: 260px minmax(0, 1fr) 360px; flex: 1; min-height: 0; }
+    .navigator { border-right: 1px solid var(--np-border); padding: var(--np-s5) var(--np-s3); overflow: hidden; }
+    .navigator h2, .inspector h2 { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--np-muted); margin: 0 var(--np-s2) var(--np-s3); }
+    .tree-row { display: flex; align-items: center; justify-content: space-between; gap: var(--np-s2); padding: var(--np-s2); border-radius: var(--np-r1); width: 100%; text-align: left; min-height: 36px; color: var(--np-text-2); font-weight: 400; }
+    .tree-row.analysis { font-weight: 500; color: var(--np-text); }
+    .tree-row.estimand { padding-left: var(--np-s4); }
+    .tree-row.measure { padding-left: var(--np-s6); }
+    .tree-row.measure.selected { background: #1f2335; color: var(--np-text); }
+    .reps { font-size: 10px; letter-spacing: .04em; text-transform: uppercase; margin-left: var(--np-s1); }
+    .inspector { border-left: 1px solid var(--np-border); padding: var(--np-s5) var(--np-s4); overflow: hidden; }
+    .tabs { display: flex; gap: var(--np-s4); margin-bottom: var(--np-s3); }
+    .tab { color: var(--np-muted); padding: 0 0 6px; border-bottom: 2px solid transparent; font-size: 13px; font-weight: 500; }
+    .tab.active { color: var(--np-text); border-bottom-color: var(--np-accent-2); }
+    .layers { display: flex; flex-direction: column; gap: var(--np-s3); }
+    .layer-card { background: var(--np-bg-1); border: 1px solid var(--np-border); border-radius: var(--np-r2); padding: var(--np-s3) var(--np-s4); display: flex; flex-direction: column; gap: var(--np-s2); }
+    .layer-head { display: flex; align-items: center; gap: var(--np-s2); } .layer-title { flex: 1; min-width: 0; }
+    .layer-head button.ghost { height: 28px; padding: 0 8px; }
+    .layer-reps { margin-top: -4px; }
+    .field { display: grid; grid-template-columns: 120px minmax(0, 1fr); align-items: center; gap: var(--np-s2); font-size: 13px; color: var(--np-text-2); }
+    .group { display: flex; flex-direction: column; gap: var(--np-s1); padding-top: var(--np-s1); border-top: 1px solid var(--np-border); }
+    .ramp { height: 10px; border-radius: 3px; margin-top: var(--np-s1); }
+    .summary .hist { display: flex; align-items: flex-end; gap: 1px; height: 36px; margin-top: var(--np-s2); }
+    .summary .bar { flex: 1; background: #3a4160; border-radius: 1px; }
+    .status-bar { border-top: 1px solid var(--np-border); padding: var(--np-s3) var(--np-s6); background: var(--np-bg-1); min-height: 48px; display: flex; align-items: center; }
+    .readout { display: flex; gap: var(--np-s6); flex-wrap: wrap; }
+    .readout-layer { display: inline-flex; gap: var(--np-s2); align-items: baseline; }
+    .readout-layer[data-pane="surface"] .k::before { content: "▲ "; color: var(--np-faint); }
+    .readout-layer[data-readout="link"] .mono { color: var(--np-cursor); }
+    .callout { border: 1px solid var(--np-border); border-radius: var(--np-r2); padding: var(--np-s3) var(--np-s4); }
+    .callout.warn { border-color: var(--np-warn-border); color: var(--np-text-2); }
+    .centre { display: grid; grid-template-rows: minmax(0, 1fr); min-height: 480px; min-width: 0; }
+    .pane { min-width: 0; min-height: 0; position: relative; display: flex; flex-direction: column; }
+    .canvas-host { background: #05060a; position: relative; }
+    .surface-canvas { flex: 1; min-height: 0; position: relative; }
+    .surface-toolbar { display: flex; gap: var(--np-s4); align-items: center; padding: var(--np-s2) var(--np-s3); background: var(--np-bg-1); border-bottom: 1px solid var(--np-border); }
+    .field.inline { display: inline-flex; grid-template-columns: none; gap: var(--np-s2); align-items: center; }
+    .field.inline > span { font-size: 12px; color: var(--np-muted); }
+    .field.inline select { height: 26px; font-size: 12px; }
+    .pane-badge { position: absolute; left: var(--np-s3); bottom: var(--np-s3); padding: 4px 8px; border-radius: var(--np-r1); background: rgba(20, 23, 32, .85); border: 1px solid var(--np-border-strong); color: var(--np-text-2); font-family: var(--np-mono); font-size: 12px; pointer-events: none; }
+    .splitter { background: var(--np-border); cursor: col-resize; width: 8px; position: relative; outline: none; }
+    .splitter::after { content: ""; position: absolute; top: 50%; left: 2px; width: 4px; height: 36px; margin-top: -18px; border-radius: 2px; background: var(--np-border-strong); }
+    .segmented { display: inline-flex; border: 1px solid var(--np-border-strong); border-radius: var(--np-r1); overflow: hidden; margin-left: var(--np-s4); }
+    .seg { height: 28px; padding: 0 10px; display: inline-flex; align-items: center; background: transparent; color: var(--np-muted); font-size: 12px; }
+    .seg + .seg { border-left: 1px solid var(--np-border-strong); }
+    .seg.active { background: var(--np-bg-2); color: var(--np-text); }
+    .slice-label { position: absolute; left: 10px; top: 8px; font: 10px var(--np-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--np-muted); }
+    .proposed { border-color: var(--np-accent-border); color: #b6acff; }
+  </style>
+</helmet>
+
+<div style="width: 1440px; height: 900px; display: flex; flex-direction: column; background: var(--np-bg-0); overflow: hidden;">
+
+  <div class="topbar">
+    <a class="crumb muted">rotman</a>
+    <span class="muted">/</span>
+    <a class="crumb">sherlock-speech</a>
+    <span class="muted">/</span>
+    <span class="crumb mono muted">[REVISION]</span>
+    <span class="crumb muted" style="color: var(--np-text-2);">Sherlock naturalistic movie — speech-feature group model</span>
+    <div class="segmented">
+      <span class="seg">Volume</span>
+      <span class="seg">Surface</span>
+      <span class="seg active">Hybrid</span>
+    </div>
+    <div class="spacer"></div>
+    <button class="ghost">Views</button>
+    <button class="ghost">Save view</button>
+    <button class="ghost">Share</button>
+    <button class="ghost">Reset view</button>
+    <span class="account">
+      <span class="account-user">Bradley Buchsbaum <span class="muted small">[EMAIL]</span></span>
+      <button class="ghost small-btn">Sign out</button>
+    </span>
+  </div>
+
+  <div class="workspace">
+
+    <div class="navigator">
+      <h2>Results</h2>
+      <div class="tree-row analysis">
+        <span>Group model · speech features</span>
+        <span class="muted small">n = 26</span>
+      </div>
+      <div class="tree-row estimand"><span>speech coefficient</span></div>
+      <div class="tree-row measure">
+        <span>effect</span>
+        <span><span class="muted small">β</span><span class="reps muted">vol</span></span>
+      </div>
+      <div class="tree-row measure">
+        <span>standard error</span>
+        <span><span class="muted small">se</span><span class="reps muted">vol</span></span>
+      </div>
+      <div class="tree-row measure selected">
+        <span>t statistic</span>
+        <span><span class="muted small">t</span><span class="reps muted">vol surf L surf R</span></span>
+      </div>
+      <div class="tree-row measure">
+        <span>z statistic</span>
+        <span><span class="muted small">z</span><span class="reps muted">vol surf L surf R</span></span>
+      </div>
+      <div class="tree-row estimand"><span>articulatory rate</span></div>
+      <div class="tree-row estimand"><span>speech &gt; silence</span></div>
+    </div>
+
+    <div class="centre" style="grid-template-columns: minmax(0, 1fr) 8px minmax(0, 1fr);">
+
+      <div class="pane canvas-host volume-pane">
+        <div style="flex: 1; display: flex; flex-direction: column;">
+
+          <div style="flex: 1; position: relative; border-bottom: 1px solid #10131b;">
+            <span class="slice-label">axial · z = 8</span>
+            <svg width="100%" height="100%" viewBox="0 0 406 264" preserveAspectRatio="xMidYMid meet">
+              <defs>
+                <radialGradient id="blobA" cx="50%" cy="50%">
+                  <stop offset="0%" stop-color="#ffe066" stop-opacity=".95"/>
+                  <stop offset="55%" stop-color="#ff8a2b" stop-opacity=".8"/>
+                  <stop offset="100%" stop-color="#c0392b" stop-opacity="0"/>
+                </radialGradient>
+              </defs>
+              <ellipse cx="203" cy="132" rx="94" ry="114" fill="var(--stand-in-rim)"/>
+              <ellipse cx="203" cy="132" rx="86" ry="105" fill="var(--stand-in-tissue)"/>
+              <path d="M203 28 L203 236" stroke="var(--stand-in-rim)" stroke-width="3"/>
+              <ellipse cx="171" cy="106" rx="33" ry="25" fill="url(#blobA)"/>
+              <ellipse cx="234" cy="114" rx="17" ry="13" fill="url(#blobA)" opacity=".55"/>
+              <line x1="171" y1="26" x2="171" y2="238" stroke="var(--np-cursor)" stroke-width="1" opacity=".85"/>
+              <line x1="16" y1="106" x2="390" y2="106" stroke="var(--np-cursor)" stroke-width="1" opacity=".85"/>
+            </svg>
+          </div>
+
+          <div style="flex: 1; position: relative; border-bottom: 1px solid #10131b;">
+            <span class="slice-label">coronal · y = −18</span>
+            <svg width="100%" height="100%" viewBox="0 0 406 264" preserveAspectRatio="xMidYMid meet">
+              <ellipse cx="203" cy="128" rx="101" ry="92" fill="var(--stand-in-rim)"/>
+              <ellipse cx="203" cy="128" rx="93" ry="84" fill="var(--stand-in-tissue)"/>
+              <path d="M203 44 L203 212" stroke="var(--stand-in-rim)" stroke-width="3"/>
+              <ellipse cx="167" cy="112" rx="29" ry="21" fill="url(#blobA)"/>
+              <line x1="167" y1="34" x2="167" y2="222" stroke="var(--np-cursor)" stroke-width="1" opacity=".85"/>
+              <line x1="16" y1="112" x2="390" y2="112" stroke="var(--np-cursor)" stroke-width="1" opacity=".85"/>
+            </svg>
+          </div>
+
+          <div style="flex: 1; position: relative;">
+            <span class="slice-label">sagittal · x = −6</span>
+            <svg width="100%" height="100%" viewBox="0 0 406 264" preserveAspectRatio="xMidYMid meet">
+              <ellipse cx="197" cy="128" rx="108" ry="90" fill="var(--stand-in-rim)"/>
+              <ellipse cx="197" cy="128" rx="100" ry="82" fill="var(--stand-in-tissue)"/>
+              <path d="M252 174 q25 12 42 -6" stroke="var(--stand-in-rim)" stroke-width="8" fill="none"/>
+              <ellipse cx="163" cy="118" rx="33" ry="23" fill="url(#blobA)"/>
+              <line x1="163" y1="38" x2="163" y2="218" stroke="var(--np-cursor)" stroke-width="1" opacity=".85"/>
+              <line x1="16" y1="118" x2="390" y2="118" stroke="var(--np-cursor)" stroke-width="1" opacity=".85"/>
+            </svg>
+          </div>
+
+        </div>
+      </div>
+
+      <div class="splitter"></div>
+
+      <div class="pane canvas-host surface-pane">
+        <div class="surface-toolbar">
+          <label class="field inline"><span>view from</span><select><option>lateral</option></select></label>
+          <label class="field inline"><span>projection</span><select><option>perspective</option></select></label>
+        </div>
+        <div class="surface-canvas" style="display: flex; flex-direction: column;">
+
+          <div style="flex: 1; position: relative; border-bottom: 1px solid #10131b;">
+            <span class="slice-label">left · lateral</span>
+            <svg width="100%" height="100%" viewBox="0 0 382 356" preserveAspectRatio="xMidYMid meet">
+              <defs>
+                <radialGradient id="patchL" cx="50%" cy="50%">
+                  <stop offset="0%" stop-color="#ffe066" stop-opacity=".95"/>
+                  <stop offset="60%" stop-color="#ff8a2b" stop-opacity=".75"/>
+                  <stop offset="100%" stop-color="#c0392b" stop-opacity="0"/>
+                </radialGradient>
+              </defs>
+              <path d="M56 190 q6 -86 96 -110 q92 -24 150 34 q40 46 20 106 q-18 54 -92 62 q-92 10 -148 -22 q-28 -18 -26 -70 z"
+                    fill="var(--stand-in-tissue)" stroke="var(--stand-in-edge)" stroke-width="1.5"/>
+              <path d="M92 152 q54 -22 108 -6 M120 214 q60 18 118 -6 M168 118 q10 50 -6 96"
+                    stroke="var(--np-border)" stroke-width="3" fill="none" stroke-linecap="round"/>
+              <ellipse cx="150" cy="176" rx="46" ry="34" fill="url(#patchL)"/>
+              <circle cx="150" cy="176" r="4.5" fill="var(--np-cursor)"/>
+              <circle cx="150" cy="176" r="10" fill="none" stroke="var(--np-cursor)" stroke-width="1" opacity=".6"/>
+            </svg>
+          </div>
+
+          <div style="flex: 1; position: relative;">
+            <span class="slice-label">right · lateral</span>
+            <svg width="100%" height="100%" viewBox="0 0 382 356" preserveAspectRatio="xMidYMid meet">
+              <path d="M326 190 q-6 -86 -96 -110 q-92 -24 -150 34 q-40 46 -20 106 q18 54 92 62 q92 10 148 -22 q28 -18 26 -70 z"
+                    fill="var(--stand-in-tissue)" stroke="var(--stand-in-edge)" stroke-width="1.5"/>
+              <path d="M290 152 q-54 -22 -108 -6 M262 214 q-60 18 -118 -6 M214 118 q-10 50 6 96"
+                    stroke="var(--np-border)" stroke-width="3" fill="none" stroke-linecap="round"/>
+              <ellipse cx="236" cy="182" rx="26" ry="19" fill="url(#patchL)" opacity=".5"/>
+            </svg>
+          </div>
+
+        </div>
+        <span class="pane-badge">linked to vertex 417, 0.8 mm</span>
+      </div>
+
+    </div>
+
+    <div class="inspector">
+      <div class="tabs">
+        <span class="tab active">Layers</span>
+        <span class="tab">Analysis</span>
+        <span class="tab">Provenance</span>
+      </div>
+
+      <div class="layers">
+
+        <div class="layer-card">
+          <div class="layer-head">
+            <input type="checkbox" checked>
+            <span class="layer-title">t statistic</span>
+            <button class="ghost">↑</button>
+            <button class="ghost">↓</button>
+            <span class="pill accent">published</span>
+          </div>
+          <div class="layer-reps muted small">drawn in: volume · left and right surface</div>
+
+          <label class="field"><span>opacity</span><input type="range" value="85"></label>
+
+          <div class="group">
+            <div class="k">Visible values</div>
+            <label class="field"><span>mode</span><select><option>two-sided</option></select></label>
+            <label class="field"><span>minimum |value|</span><input value="3.1"></label>
+          </div>
+
+          <div class="group">
+            <div class="k">Colour scale</div>
+            <label class="field"><span>minimum</span><input value="-8.0"></label>
+            <label class="field"><span>maximum</span><input value="8.0"></label>
+            <label class="field"><span>colormap</span><select><option>cold-hot</option></select></label>
+            <div class="ramp" style="background: linear-gradient(90deg, #1f4e9c, #3b9bff, #9fdcff 39%, var(--np-border) 39%, var(--np-border) 61%, #ffe066 61%, #ff8a2b, #c0392b);"></div>
+          </div>
+
+          <div class="group summary">
+            <div class="hist">
+              <div class="bar" style="height: 14%"></div><div class="bar" style="height: 13%"></div>
+              <div class="bar" style="height: 35%"></div><div class="bar" style="height: 24%"></div>
+              <div class="bar" style="height: 27%"></div><div class="bar" style="height: 61%"></div>
+              <div class="bar" style="height: 37%"></div><div class="bar" style="height: 37%"></div>
+              <div class="bar" style="height: 82%"></div><div class="bar" style="height: 44%"></div>
+              <div class="bar" style="height: 90%"></div><div class="bar" style="height: 48%"></div>
+              <div class="bar" style="height: 50%"></div><div class="bar" style="height: 100%"></div>
+              <div class="bar" style="height: 52%"></div><div class="bar" style="height: 50%"></div>
+              <div class="bar" style="height: 100%; background: #4a5068;"></div>
+              <div class="bar" style="height: 52%"></div><div class="bar" style="height: 100%"></div>
+              <div class="bar" style="height: 50%"></div><div class="bar" style="height: 48%"></div>
+              <div class="bar" style="height: 90%"></div><div class="bar" style="height: 44%"></div>
+              <div class="bar" style="height: 42%"></div><div class="bar" style="height: 77%"></div>
+              <div class="bar" style="height: 37%"></div><div class="bar" style="height: 61%"></div>
+              <div class="bar" style="height: 27%"></div><div class="bar" style="height: 24%"></div>
+              <div class="bar" style="height: 35%"></div><div class="bar" style="height: 13%"></div>
+              <div class="bar" style="height: 14%"></div>
+            </div>
+            <div class="muted mono small">min −5.75 · max 5.25 · median 0.00 · missing 0 · zero 11031</div>
+            <div class="small muted">
+              <span class="pill proposed" style="margin-right: 6px;">proposed</span>
+              zero bin clipped and greyed. The app scales every bar to the histogram maximum, so this map draws as one
+              spike and thirty-one invisible bins.
+            </div>
+          </div>
+        </div>
+
+        <div class="layer-card">
+          <div class="layer-head">
+            <input type="checkbox" checked>
+            <span class="layer-title">effect</span>
+            <button class="ghost">↑</button>
+            <button class="ghost">↓</button>
+            <span class="pill">default</span>
+          </div>
+          <div class="layer-reps muted small">drawn in: volume only — no surface representation</div>
+          <label class="field"><span>opacity</span><input type="range" value="70"></label>
+          <div class="group">
+            <div class="k">Colour scale</div>
+            <label class="field"><span>colormap</span><select><option>cold-hot</option></select></label>
+            <div class="ramp" style="background: linear-gradient(90deg, #1f4e9c, #3b9bff, #9fdcff 40%, var(--np-border) 40%, var(--np-border) 60%, #ffe066 60%, #ff8a2b, #c0392b);"></div>
+          </div>
+          <div class="small muted">no display recommendation in the manifest; window from the data range</div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <div class="status-bar">
+    <div class="readout">
+      <span class="readout-layer" data-readout="world"><span class="k">RAS+</span><span class="mono">−6, −18, 8 mm</span></span>
+      <span class="readout-layer" data-pane="volume"><span class="k">t</span><span class="mono">4.82</span></span>
+      <span class="readout-layer" data-pane="volume"><span class="k">β</span><span class="mono">0.41</span></span>
+      <span class="readout-layer" data-pane="surface"><span class="k">t · L vertex</span><span class="mono">4.51</span></span>
+      <span class="readout-layer" data-readout="link"><span class="k">surface</span><span class="mono">linked to vertex 417, 0.8 mm</span></span>
+    </div>
+    <div class="spacer"></div>
+    <span class="small muted">click a pane to set the cursor</span>
+  </div>
+
+  <div class="callout warn small" style="margin: var(--np-s3) var(--np-s6);">
+    First-level temporal noise models differ across inputs: 22 use AR(2), 4 use AR(1).
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

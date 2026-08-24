@@ -48,11 +48,13 @@
       "additionalProperties": false
     },
     "threshold": {
+      "description": "`max` is the maximum magnitude: values with |v| > max are hidden too. It is written only for `two-sided`, the one mode whose upper bound the renderer can express.",
       "type": "object",
       "required": ["mode", "min"],
       "properties": {
         "mode": { "type": "string", "enum": ["two-sided", "positive", "negative", "off"] },
-        "min": { "type": "number", "minimum": 0 }
+        "min": { "type": "number", "minimum": 0 },
+        "max": { "type": "number", "exclusiveMinimum": 0 }
       },
       "additionalProperties": false
     },
@@ -79,6 +81,19 @@
           "description": "false when `published` is a data-derived default rather than a producer recommendation.",
           "type": "boolean",
           "default": true
+        },
+        "representations": {
+          "description": "Where the field can be drawn. A fact of the revision, not presentation: recorded so a restored view can say a layer is absent from a pane rather than silently omitting it.",
+          "type": "object",
+          "properties": {
+            "volume": { "type": "boolean" },
+            "surfaces": {
+              "type": "array",
+              "items": { "type": "string", "enum": ["left", "right"] },
+              "uniqueItems": true
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -99,12 +114,12 @@
         },
         "payload": {
           "type": "object",
-          "required": ["preset", "navigatorFraction", "inspectorFraction", "drawerFraction"],
+          "required": ["preset", "navigatorFraction", "inspectorFraction"],
           "properties": {
             "preset": { "type": "string", "enum": ["volume", "surface", "hybrid"] },
             "navigatorFraction": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1 },
             "inspectorFraction": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1 },
-            "drawerFraction": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1 }
+            "splitFraction": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1 }
           },
           "unevaluatedProperties": true
         }

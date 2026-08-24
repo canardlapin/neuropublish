@@ -222,11 +222,29 @@ np_threshold <- function(mode = c("two-sided", "positive", "negative", "off"), m
 
 #' @rdname np_display
 #' @param max Window maximum.
-#' @param centre Optional window centre.
+#' @param centre Optional window centre: the value the colour scale is centred
+#'   on. Core 0.1 renders one linear ramp across `[min, max]`, so the only
+#'   centre it can honour is the midpoint; the server rejects any other, and
+#'   this checks it here rather than at push.
 #' @export
 np_window <- function(min, max, centre = NULL) {
   if (!is.numeric(min) || !is.numeric(max) || !is.finite(min) || !is.finite(max) || min >= max) {
     stop("window needs finite `min < max`", call. = FALSE)
+  }
+  if (!is.null(centre)) {
+    if (!is.numeric(centre) || length(centre) != 1L || !is.finite(centre)) {
+      stop("window `centre` must be a single finite number", call. = FALSE)
+    }
+    mid <- (as.numeric(min) + as.numeric(max)) / 2
+    if (abs(as.numeric(centre) - mid) > 1e-9 * max(1, abs(min), abs(max))) {
+      stop(
+        sprintf(
+          "window `centre` must be the midpoint %g in core 0.1; got %g",
+          mid, as.numeric(centre)
+        ),
+        call. = FALSE
+      )
+    }
   }
   np_compact(list(min = as.numeric(min), centre = if (!is.null(centre)) as.numeric(centre), max = as.numeric(max)))
 }

@@ -9,6 +9,10 @@ package neuropublish.viewer
   * Stage 5 adds the surface camera (`sc=left,perspective`) and the Hybrid divider (`sf=0.5`, the
   * volume pane's share of the centre width); both are omitted when they equal the defaults.
   *
+  * A two-sided threshold with a maximum magnitude appends it after an underscore (`ts3.1_8`); both
+  * bounds are non-negative, so the separator can never be confused with a sign. A link written
+  * before maximum magnitude existed still reads: `ts3.1` is simply a threshold with no upper bound.
+  *
   * Layer ids and colormap names are percent-encoded so they can never collide with the separators.
   * Only *current* display state is encoded; published recommendations come from the revision.
   * Unknown or malformed parts are ignored (the revision's recommendation fills in), never guessed.
@@ -41,7 +45,8 @@ object ViewUrl:
     val layers = w.layers.map { l =>
       val c = l.current
       val thr = c.threshold.mode match
-        case "two-sided" => s"ts${num(c.threshold.min)}"
+        case "two-sided" =>
+          s"ts${num(c.threshold.min)}${c.threshold.max.map(m => s"_${num(m)}").getOrElse("")}"
         case "positive" => s"pos${num(c.threshold.min)}"
         case "negative" => s"neg${num(c.threshold.min)}"
         case _ => "off"
@@ -108,7 +113,14 @@ object ViewUrl:
           t <- thr match
             case "off" => Some(Threshold("off", 0.0))
             case x if x.startsWith("ts") =>
-              x.drop(2).toDoubleOption.filter(_ >= 0).map(Threshold("two-sided", _))
+              x.drop(2).split('_') match
+                case Array(lo) => lo.toDoubleOption.filter(_ >= 0).map(Threshold("two-sided", _))
+                case Array(lo, hi) =>
+                  for
+                    l <- lo.toDoubleOption.filter(_ >= 0)
+                    h <- hi.toDoubleOption.filter(_ > l)
+                  yield Threshold("two-sided", l, Some(h))
+                case _ => None
             case x if x.startsWith("pos") =>
               x.drop(3).toDoubleOption.filter(_ >= 0).map(Threshold("positive", _))
             case x if x.startsWith("neg") =>

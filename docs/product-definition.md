@@ -1,6 +1,6 @@
 # Neuropublish product definition
 
-Date: 2026-08-22
+Date: 2026-08-23
 
 ## What the product is
 
@@ -292,6 +292,15 @@ Colour scale
 Every layer distinguishes the producer's recommendation from the viewer's
 current state. The user can reset one control, one layer, or the complete view.
 
+Two of these values are narrower than they look, and the interface says so
+rather than implying more. `maximum magnitude` belongs to the two-sided mode
+with a positive minimum, the one shape the renderer can express, and is
+unavailable elsewhere. `centre` is derived and read-only while the colour scale
+is a single linear ramp: it reports the window midpoint, which is what the
+canvas actually draws. Both become settable when multi-stop diverging palettes
+land upstream; until then the protocol rejects a published centre that is not
+the midpoint instead of accepting one and ignoring it.
+
 ### Analysis and provenance inspectors
 
 The analysis panel presents a designed scientific synopsis. It does not dump
@@ -339,7 +348,6 @@ Included:
 
 Deferred:
 
-- surface and Hybrid workspaces;
 - trusted finite-indexed domains, atlas realizations, and parcel-space
   visualization (the open domain-descriptor hook ships in the MVP protocol);
 - arbitrary docking and popout windows;

@@ -147,7 +147,9 @@ final case class Loaded(
 
   /** The producer's recommendation, or — when the manifest carries none — a data-derived default
     * (window = data range, no threshold) that the layer card labels "default" rather than
-    * "published". Unknown threshold modes are not guessed: they become `off`.
+    * "published". Unknown threshold modes are not guessed: they become `off`. Every field the
+    * manifest schema admits under `publishedDisplay` is read here; a declared value the viewer
+    * silently replaced with its own default would be a recommendation the producer never made.
     */
   def published(f: ResultField): LayerDisplay =
     val c = f.publishedDisplay.map(_.hcursor)
@@ -169,11 +171,14 @@ final case class Loaded(
     val cmap = c.flatMap(
       _.downField("colormap").as[String].toOption
     ).filter(Colormap.valid).getOrElse("cold-hot")
+    val op = c.flatMap(_.downField("opacity").as[Double].toOption).filter(o =>
+      o.isFinite && o >= 0.0 && o <= 1.0
+    ).getOrElse(0.85)
     // Product rule (product definition, MVP scope): inferential measures are shown by default, descriptive ones are available.
     val visibleByDefault = f.measure.endsWith("/t-statistic") || f.measure.endsWith("/z-statistic")
     LayerDisplay(
       visible = visibleByDefault,
-      opacity = 0.85,
+      opacity = op,
       window = Window(math.min(lo, hi - 1e-9), hi),
       threshold = thr,
       colormap = cmap

@@ -1198,18 +1198,16 @@ repository once those stores and paths exist.
 | --- | --- | --- |
 | `neuropublish-v0-1` | MVP coordination epic | End-to-end hosted definition of done |
 | `neuropublish-v0-1-bootstrap` | Repository, dependency bootstrap, rendition and lifecycle spikes | Clean JVM/JS scaffold, external resolution, fidelity measurements |
-| `neuropublish-v0-1-thin-spine` | Thin local spine | Push → commit → two overlays visible with a static token |
 | `neuropublish-v0-1-protocol` | Neutral core protocol | Versioned schemas, typed validation, byte digest, route scheme |
 | `neuropublish-v0-1-parcel-domains` | Stage 5b finite-indexed and parcel-domain track | Ordered identity, coverage-aware hard assignments, mismatch fixtures, linked parcel-space proof |
 | `neuropublish-v0-1-foreign-producer` | Foreign-producer conformance | Julia bundle publishes without Scala SDK |
-| `neuropublish-v0-1-ingestion` | Server-side rendition and summary worker | Derived representations recorded outside the digest |
-| `neuropublish-v0-1-viewer-prereqs` | Reusable Scala viewer prerequisites | Thresholds, colormaps, lifecycle |
-| `neuropublish-v0-1-publication-spine` | Upload and immutable revision spine | Resumable direct upload, atomic commit, linear history, reindex |
+| `neuropublish-v0-1-viewer-prereqs` | Reusable Scala viewer prerequisites | Thresholds, colormaps, lifecycle. Thresholds and lifecycle are done upstream and consumed at the current pin; what remains is multi-stop diverging palettes with a movable neutral stop, which is what `publishedDisplay.window.centre` waits on (`docs/architecture.md`, upstream gap 3) |
+| `neuropublish-v0-1-publication-spine` | Thin spine, ingestion, upload, and immutable revision commit | Push → commit → derived renditions → two overlays visible; resumable direct upload, linear history, reindex |
 | `neuropublish-v0-1-volume` | Volume scientific workspace | Underlay plus two overlays with truthful controls |
 | `neuropublish-v0-1-identity-sharing` | Identity, saved views, and sharing | Device login and revocable read-only view |
-| `neuropublish-v0-1-provenance-ui` | Application provenance | Heterogeneous fixture represented truthfully |
+| `neuropublish-v0-1-provenance` | Portable provenance and application provenance UI | Heterogeneous fixture represented truthfully; real `fmrireg`/`fmrigds` receipts follow |
 | `neuropublish-v0-1-surface` | Surface and hybrid workspace | Linked RAS+ picking with exact topology admission |
-| `neuropublish-r-track` | `fmrigds`, `fmrireg`, `neuromosaic`, and `rMVPA` receipts and adapters | One-call R publication through the neutral bundle |
+| `neuropublish-v0-1-r-clients` | `fmrigds`, `fmrireg`, `neuromosaic`, and `rMVPA` receipts and adapters | One-call R publication through the neutral bundle |
 | `neuropublish-v0-1-hardening` | Hosted release hardening | Security, restore, browser, and compatibility gates |
 | `neuropublish-post-mvp-docking` | Evidence-led docking experiment | Presets versus typed DOM versus vendor spike |
 
@@ -1256,16 +1254,19 @@ These choices have a decision deadline rather than an implicit default:
 7. **PostgreSQL row-level security:** decide by follow-up ADR before a second
    workspace is admitted (ADR 0004).
 
-## Immediate next actions
+## Immediate next actions (2026-08-24)
 
-1. ~~Accept ADRs 0001–0005.~~ Accepted 2026-08-22.
-2. Initialize the repository at `canardlapin/neuropublish` and the child Mote
-   store.
-3. Scaffold the cross JVM/JS build and protocol conformance module.
-4. Write the hand-written reference bundle, including the heterogeneous
-   cohort and unknown-record cases, and record the reference result identity.
-5. Run the rendition-fidelity and viewer-lifecycle spikes.
-6. Build the Stage 1 thin spine before any protocol freeze or dashboard work.
-7. Design the governing journey as artboards (`/design`) now, in parallel
-   with bootstrap and the thin spine; log any protocol gaps it exposes.
-8. Freeze only the core vocabulary needed by the reference result.
+1. Admit the bounded-threshold/display-window slice and the completed Stage 5
+   artboards through the full local gate.
+2. Repair generated hosted CI, including deterministic workflow generation and
+   dependency-submission permissions, then reconcile completed Mote items with
+   repository evidence.
+3. Implement the artboard's visual hierarchy against realistic reference
+   volume and cortical assets, with wide and narrow browser evidence.
+4. Build and rehearse the smallest secure private-alpha deployment: one JVM
+   service, one ingestion worker, PostgreSQL, an S3-compatible object store,
+   backups, rate limits, CSP, and an operator runbook.
+5. Run the Stage 5b dependency spike against the native
+   image4s/locus4s/ScalaFIM atlas baseline. Keep the neutral protocol track
+   independent; only begin Scala parcel-realization adapters after exact-domain
+   and lifecycle gates pass.

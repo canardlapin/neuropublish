@@ -33,10 +33,12 @@ class WorkspaceSuite extends ScalaCheckSuite:
       )
     ),
     genId.flatMap(id =>
+      // maxima that are legal, below the minimum, and on modes that cannot carry one at all
       Gen.zip(
         Gen.oneOf("two-sided", "positive", "negative", "off", "bogus"),
-        Gen.choose(-1.0, 10.0)
-      ).map((m, x) => Action.SetThreshold(id, Threshold(m, x)))
+        Gen.choose(-1.0, 10.0),
+        Gen.option(Gen.choose(-1.0, 30.0))
+      ).map((m, x, hi) => Action.SetThreshold(id, Threshold(m, x, hi)))
     ),
     genId.flatMap(id =>
       Gen.oneOf("gray", "cold-hot", "BAD;cmap", "viridis-2", "").map(Action.SetColormap(id, _))
@@ -98,12 +100,40 @@ class WorkspaceSuite extends ScalaCheckSuite:
         math.abs(x.current.window.min - y.current.window.min) < 1e-4 &&
         math.abs(x.current.window.max - y.current.window.max) < 1e-4 &&
         math.abs(x.current.threshold.min - y.current.threshold.min) < 1e-4 &&
+        x.current.threshold.max.zip(y.current.threshold.max).forall((a, b) =>
+          math.abs(a - b) < 1e-4
+        ) && x.current.threshold.max.isDefined == y.current.threshold.max.isDefined &&
         x.current.colormap == y.current.colormap
       } &&
       back.cursor.zip(w.cursor).forall((p, q) =>
         math.abs(p._1 - q._1) < 1e-4 && math.abs(p._2 - q._2) < 1e-4 && math.abs(p._3 - q._3) < 1e-4
       )
     }
+  }
+
+  test("a maximum magnitude survives the URL, and only exists where it can be rendered") {
+    val bounded =
+      Workspace.reduce(base, Action.SetThreshold("a", Threshold("two-sided", 3.1, Some(8.0))))
+    val q = ViewUrl.encode(bounded)
+    assert(q.contains("ts3.1_8"), q)
+    assertEquals(ViewUrl(q, base), bounded)
+    // a link written before maximum magnitude existed still reads as an unbounded threshold
+    assertEquals(
+      ViewUrl(q.replace("ts3.1_8", "ts3.1"), base).layers.head.current.threshold,
+      Threshold("two-sided", 3.1)
+    )
+    // below the minimum, on a one-sided mode, or with no minimum at all: all rejected
+    List(
+      Threshold("two-sided", 3.1, Some(2.0)),
+      Threshold("positive", 3.1, Some(8.0)),
+      Threshold("two-sided", 0.0, Some(8.0))
+    ).foreach(t => assertEquals(Workspace.reduce(bounded, Action.SetThreshold("a", t)), bounded))
+    // changing the mode drops it rather than keeping a bound the renderer cannot honour
+    assertEquals(
+      Workspace.reduce(bounded, Action.SetThreshold("a", Threshold("positive", 3.1)))
+        .layers.head.current.threshold,
+      Threshold("positive", 3.1)
+    )
   }
 
   test("malformed URL parts are ignored, not guessed") {

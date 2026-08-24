@@ -8,10 +8,24 @@ package neuropublish.viewer
   */
 final case class Window(min: Double, max: Double)
 
-/** mode ∈ Threshold.Modes; every mode renders (Intaglio Below/Above/TwoSided). */
-final case class Threshold(mode: String, min: Double)
+/** mode ∈ Threshold.Modes; every mode renders (Intaglio Below/Above/TwoSided). `max` is the maximum
+  * magnitude: values with `|v| > max` are hidden as well.
+  *
+  * It exists only for `two-sided` with `min > 0`, which is exactly what the renderer can express:
+  * Intaglio draws it as the outer band of a `TwoSided` threshold, whose inner band is what `min`
+  * names. There is no outer band without an inner one, and `Below`/`Above` carry no outer bound at
+  * all, so any other combination would be state the renderer would have to drop.
+  */
+final case class Threshold(mode: String, min: Double, max: Option[Double] = None)
 object Threshold:
   val Modes: Set[String] = Set("two-sided", "positive", "negative", "off")
+
+  /** Whether a maximum magnitude can be set at all: see the note on `Threshold`. */
+  def boundable(t: Threshold): Boolean = t.mode == "two-sided" && t.min > 0 && t.min.isFinite
+
+  def valid(t: Threshold): Boolean =
+    Modes(t.mode) && t.min.isFinite && t.min >= 0 &&
+      t.max.forall(m => boundable(t) && m.isFinite && m > t.min)
 
 /** Colormap identifiers are a closed, URL-safe grammar here; the palette itself lives with the
   * renderer.
@@ -102,7 +116,7 @@ object Workspace:
         update(w, id)(_.copy(window = win))
       else w
     case Action.SetThreshold(id, t) =>
-      if t.min.isFinite && t.min >= 0 && Threshold.Modes(t.mode) then
+      if Threshold.valid(t) then
         update(w, id)(_.copy(threshold = if t.mode == "off" then Threshold("off", 0.0) else t))
       else w
     case Action.SetColormap(id, c) =>
@@ -127,6 +141,6 @@ object Workspace:
     w.layers.map(_.id).distinct.length == w.layers.length &&
       w.layers.forall { l =>
         val c = l.current
-        c.opacity >= 0 && c.opacity <= 1 && c.window.min < c.window.max && c.threshold.min >= 0 &&
-        Threshold.Modes(c.threshold.mode) && Colormap.valid(c.colormap)
+        c.opacity >= 0 && c.opacity <= 1 && c.window.min < c.window.max &&
+        Threshold.valid(c.threshold) && Colormap.valid(c.colormap)
       } && w.layout.isValid && SurfaceCameraState.valid(w.surfaceCamera)
