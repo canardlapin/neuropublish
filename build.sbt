@@ -1,5 +1,5 @@
 import org.scalajs.linker.interface.{ModuleKind, ModuleSplitStyle}
-import org.typelevel.sbt.gha.JavaSpec
+import org.typelevel.sbt.gha.{JavaSpec, PermissionValue, Permissions, WorkflowJob}
 
 // ---------------------------------------------------------------------------
 // Neuropublish — scientific results publication and review for neuroimaging.
@@ -51,6 +51,38 @@ ThisBuild / githubWorkflowBuildPreamble := Seq(
 ThisBuild / githubWorkflowEnv ++= Map(
   "NP_TEST_REQUIRE_TOOLS" -> "1",
   "NP_TEST_REQUIRE_DOCKER" -> "1"
+)
+
+// The Typelevel default derives modules-ignore from every imported git build.
+// That aggregation is not ordered, so githubWorkflowCheck can generate a
+// different line on Linux than on macOS. Keep the dependency graph job, but
+// define its no-publish boundary explicitly and grant only the write scope the
+// dependency-submission API requires.
+ThisBuild / tlCiDependencyGraphJob := false
+ThisBuild / githubWorkflowAddedJobs += WorkflowJob(
+  "dependency-submission",
+  "Submit Dependencies",
+  steps = githubWorkflowJobSetup.value.toList :+ WorkflowStep.DependencySubmission(
+    workingDirectory = None,
+    modulesIgnore = Some(
+      List(
+        "gale-docs_3",
+        "locus4s-docs_3",
+        "neuropublish_3",
+        "ravel-docs_3",
+        "rootjs_3",
+        "rootjvm_3",
+        "rootnative_3"
+      )
+    ),
+    configsIgnore = Some(List("scala-doc-tool", "scala-tool", "test", "test-internal")),
+    token = None
+  ),
+  sbtStepPreamble = Nil,
+  cond = Some("github.event.repository.fork == false && github.event_name != 'pull_request'"),
+  permissions = Some(Permissions.Specify.defaultRestrictive.withContents(PermissionValue.Write)),
+  scalas = Nil,
+  javas = List(githubWorkflowJavaVersions.value.head)
 )
 
 // Pre-release: no publication until Stage 6 decides a release channel.

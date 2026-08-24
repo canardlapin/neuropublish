@@ -92,6 +92,19 @@ jobs:
         os: [ubuntu-22.04]
         java: [temurin@21]
     runs-on: ${{ matrix.os }}
+    permissions:
+      actions: none
+      checks: none
+      contents: write
+      deployments: none
+      id-token: none
+      issues: none
+      packages: read
+      pages: none
+      pull-requests: none
+      repository-projects: none
+      security-events: none
+      statuses: none
     steps:
       - name: Checkout current branch (full)
         uses: actions/checkout@v6
@@ -117,5 +130,5 @@ jobs:
       - name: Submit Dependencies
         uses: scalacenter/sbt-dependency-submission@v2
         with:
-          modules-ignore: ravel-docs_3 neuropublish_3 locus4s-docs_3 rootjs_3 rootjvm_3 rootnative_3 rootjs_3 rootjvm_3 rootnative_3 gale-docs_3
-          configs-ignore: test scala-tool scala-doc-tool test-internal
+          modules-ignore: gale-docs_3 locus4s-docs_3 neuropublish_3 ravel-docs_3 rootjs_3 rootjvm_3 rootnative_3
+          configs-ignore: scala-doc-tool scala-tool test test-internal
