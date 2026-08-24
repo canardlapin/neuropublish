@@ -5,7 +5,16 @@ Status: accepted (2026-08-22)
 Date: 2026-08-22
 
 Amended: 2026-08-22 (delivery scope, mapping coverage, and binary identity
-profiles)
+profiles); 2026-08-24 (neutral protocol/admission implementation status)
+
+Implementation status: the first Stage 5b slice now trusts
+`finite-indexed@1.0` and `hard-assignment@1.0`, recomputes exact finite keys,
+checks assignment declarations and bytes during ingestion, and requires mapping
+plus derivation receipts for cross-domain representations. The wider decision
+is not yet complete: label-coded conversion records, incomplete-realization
+warnings, server-derived pullbacks, surface realizations, linked parcel UI,
+and ScalaFIM adapters remain tracked work. The Scala, R-client, and standalone
+Julia identity oracles agree byte-for-byte on the committed parcel fixture.
 
 ## Context
 
@@ -85,17 +94,18 @@ of every future scientific domain. Neuropublish defines trusted descriptors
 for the common structural cases:
 
 ```text
-org.neuropublish.domain/finite-indexed    (defined; not yet trusted in code — Stage 5b)
+org.neuropublish.domain/finite-indexed    (trusted: records/finite-indexed-v1.schema.json)
 org.neuropublish.domain/volume-grid       (trusted: records/volume-grid-v1.schema.json)
 org.neuropublish.domain/surface-vertices  (trusted: records/surface-vertices-v1.schema.json, Stage 5)
+org.neuropublish.mapping/hard-assignment  (trusted: records/hard-assignment-v1.schema.json)
 ```
 
-`volume-grid@1.0` and `surface-vertices@1.0` are in the implementation's
-trusted list; a record naming `finite-indexed` is in the trusted namespace
-without a known schema and is rejected, not silently admitted, until the
-Stage 5b module lands with its schema digest. The surface-vertices key
-depends on the topology asset's bytes, so it is recomputed at ingestion rather
-than at admission (SPEC §6, "admission split").
+All four versioned records above are now in the implementation's trusted list
+and are pinned to the exact schema-file digests. The finite key is recomputed
+from its ordered keys at manifest admission; hard-assignment ordinal bounds and
+coverage are recomputed from canonical bytes at ingestion. The
+surface-vertices key also depends on asset bytes and is recomputed at ingestion
+(SPEC §6, "admission split").
 
 An unknown descriptor is preserved. It is usable for download and generic
 inspection, but it does not gain rendering or alignment behavior until a

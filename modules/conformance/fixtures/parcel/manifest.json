@@ -1,0 +1,251 @@
+{
+  "core" : "0.1",
+  "title" : "Exact ordered parcel field",
+  "synopsis" : "A four-parcel scalar field with one complete volume realization.",
+  "sensitivity" : "group-level",
+  "domains" : [
+    {
+      "id" : "mni-toy",
+      "key" : {
+        "descriptor" : {
+          "id" : "org.neuropublish.domain/volume-grid",
+          "version" : "1.0",
+          "digest" : "sha256:69c25b8868349828e41cd6d610ac619af118fb7b807b7306f706b727ed23dfb7"
+        },
+        "size" : 8,
+        "structuralFingerprint" : "sha256:7a643222a8ccd1bb49b3c55540213702bc2fd5e57343c6073fe25cbfd8768f5b"
+      },
+      "descriptor" : {
+        "schema" : {
+          "id" : "org.neuropublish.domain/volume-grid",
+          "version" : "1.0",
+          "digest" : "sha256:69c25b8868349828e41cd6d610ac619af118fb7b807b7306f706b727ed23dfb7"
+        },
+        "payload" : {
+          "space" : "MNI152NLin2009cAsym",
+          "coordinateConvention" : "RAS+",
+          "spatialUnit" : "mm",
+          "ordinalLayout" : "x-fastest",
+          "shape" : [
+            2,
+            2,
+            2
+          ],
+          "affine" : [
+            [
+              2,
+              0,
+              0,
+              -1
+            ],
+            [
+              0,
+              2,
+              0,
+              -1
+            ],
+            [
+              0,
+              0,
+              2,
+              -1
+            ],
+            [
+              0,
+              0,
+              0,
+              1
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id" : "schaefer-ordered",
+      "key" : {
+        "descriptor" : {
+          "id" : "org.neuropublish.domain/finite-indexed",
+          "version" : "1.0",
+          "digest" : "sha256:b1b14b1242abbb1dde64a736e10a8672d6bc12a7602884f15cc148bbd03dc4ad"
+        },
+        "size" : 4,
+        "structuralFingerprint" : "sha256:7297cb3eb45df97653c90bfb586eee3857912df6fe0bdc789dd6c7ab849c9394"
+      },
+      "descriptor" : {
+        "schema" : {
+          "id" : "org.neuropublish.domain/finite-indexed",
+          "version" : "1.0",
+          "digest" : "sha256:b1b14b1242abbb1dde64a736e10a8672d6bc12a7602884f15cc148bbd03dc4ad"
+        },
+        "payload" : {
+          "ordering" : "explicit",
+          "elementKeys" : [
+            "schaefer2018-7networks-lh-visual-1",
+            "schaefer2018-7networks-lh-default-1",
+            "schaefer2018-7networks-rh-visual-1",
+            "schaefer2018-7networks-rh-default-1"
+          ],
+          "keysAsset" : "parcel-keys"
+        }
+      }
+    }
+  ],
+  "domainMappings" : [
+    {
+      "id" : "schaefer-volume",
+      "source" : "mni-toy",
+      "target" : "schaefer-ordered",
+      "descriptor" : {
+        "schema" : {
+          "id" : "org.neuropublish.mapping/hard-assignment",
+          "version" : "1.0",
+          "digest" : "sha256:2908586eb3b1260472096664177620f98452f785bc47e9dcf06433578b2fc526"
+        },
+        "payload" : {
+          "asset" : "parcel-assignment",
+          "coverage" : "complete",
+          "emptyParcels" : [
+          ],
+          "derivation" : "construct-schaefer-assignment"
+        }
+      }
+    }
+  ],
+  "assets" : [
+    {
+      "id" : "parcel-keys",
+      "mediaType" : "application/vnd.neuropublish.finite-indexed-keys-v1",
+      "digest" : "sha256:7297cb3eb45df97653c90bfb586eee3857912df6fe0bdc789dd6c7ab849c9394",
+      "size" : 219
+    },
+    {
+      "id" : "parcel-assignment",
+      "mediaType" : "application/vnd.neuropublish.hard-assignment-i32le-v1",
+      "digest" : "sha256:daa961c1c1d1aa3cbc2455ed421c8868e2ef5dbab325f2bc403f6f2db66c398c",
+      "size" : 32
+    },
+    {
+      "id" : "parcel-values",
+      "mediaType" : "application/vnd.neuropublish.scalar-f32le-v1",
+      "digest" : "sha256:f8e39216001236ce9a0c67f579f4cc257ba24baddbb027b40a9e4892c2e68b07",
+      "size" : 16
+    },
+    {
+      "id" : "parcel-pullback",
+      "mediaType" : "application/x-nifti",
+      "digest" : "sha256:29a6b4747a8e98708af3357cdbd121b0ddaf499a7d0c4f52d38b9b87b1ab94e9",
+      "size" : 384
+    }
+  ],
+  "analyses" : [
+    {
+      "id" : "parcel-model",
+      "label" : "Parcel summary model",
+      "sampleSize" : 24,
+      "estimands" : [
+        {
+          "id" : "parcel-effect",
+          "label" : "parcel effect",
+          "order" : 1
+        }
+      ]
+    }
+  ],
+  "resultFields" : [
+    {
+      "id" : "parcel-effect-field",
+      "label" : "Schaefer parcel effect",
+      "estimand" : "parcel-effect",
+      "measure" : "org.neuropublish.measure/effect",
+      "domain" : "schaefer-ordered",
+      "selection" : {
+
+      },
+      "representations" : [
+        {
+          "kind" : "table",
+          "asset" : "parcel-values"
+        },
+        {
+          "kind" : "volume",
+          "asset" : "parcel-pullback",
+          "domain" : "mni-toy",
+          "mapping" : "schaefer-volume",
+          "derivation" : "pullback-parcel-values"
+        }
+      ],
+      "order" : 1,
+      "publishedDisplay" : {
+        "threshold" : {
+          "mode" : "off",
+          "min" : 0
+        },
+        "window" : {
+          "min" : -2.25,
+          "centre" : 0,
+          "max" : 2.25
+        },
+        "colormap" : "cold-hot",
+        "opacity" : 0.8
+      }
+    }
+  ],
+  "provenance" : {
+    "entities" : [
+    ],
+    "activities" : [
+      {
+        "id" : "construct-schaefer-assignment",
+        "label" : "Construct explicit ordinal assignment",
+        "schema" : {
+          "id" : "org.example.parcel/construct-assignment",
+          "version" : "1.0"
+        },
+        "payload" : {
+          "background" : -1,
+          "targetOrdinals" : "zero-based",
+          "sourceOrder" : "mni-toy x-fastest"
+        }
+      },
+      {
+        "id" : "pullback-parcel-values",
+        "label" : "Pull parcel values back to volume support",
+        "schema" : {
+          "id" : "org.example.parcel/pullback",
+          "version" : "1.0"
+        },
+        "payload" : {
+          "sourceField" : "parcel-effect-field",
+          "mapping" : "schaefer-volume",
+          "converter" : "org.example.parcel/pullback-f32-v1",
+          "parameters" : {
+            "background" : "NaN"
+          },
+          "outputDigest" : "sha256:29a6b4747a8e98708af3357cdbd121b0ddaf499a7d0c4f52d38b9b87b1ab94e9"
+        }
+      }
+    ],
+    "edges" : [
+      {
+        "from" : "construct-schaefer-assignment",
+        "to" : "parcel-assignment",
+        "role" : "generated"
+      },
+      {
+        "from" : "parcel-effect-field",
+        "to" : "pullback-parcel-values",
+        "role" : "used"
+      },
+      {
+        "from" : "parcel-assignment",
+        "to" : "pullback-parcel-values",
+        "role" : "used"
+      },
+      {
+        "from" : "pullback-parcel-values",
+        "to" : "parcel-pullback",
+        "role" : "generated"
+      }
+    ]
+  }
+}

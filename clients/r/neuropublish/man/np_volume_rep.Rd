@@ -4,13 +4,22 @@
 \alias{np_volume_rep}
 \title{Volume representation of a result field}
 \usage{
-np_volume_rep(asset)
+np_volume_rep(asset, domain = NULL, mapping = NULL, derivation = NULL)
 }
 \arguments{
 \item{asset}{The id of the asset holding the volume.}
+
+\item{domain}{Optional support-domain id when it differs from the field's
+scientific domain.}
+
+\item{mapping}{For a finite-indexed field on another support, the exact
+\code{domainMappings[]} id from support to field domain.}
+
+\item{derivation}{Required with a cross-domain \code{domain}: the provenance
+activity that produced this volume representation.}
 }
 \value{
-A plain list \code{list(kind = "volume", asset)}.
+A plain volume representation list.
 }
 \description{
 Volume representation of a result field

@@ -10,7 +10,8 @@ object ManifestChecks:
   def all(m: Manifest): List[Problem] =
     uniqueIds(m) ++ referenceClosure(m) ++ estimandClosure(m) ++ orders(m) ++ measures(m) ++
       sensitivity(m) ++ warningScopes(m) ++ openRecords(m) ++ domains(m) ++ surfaces(m) ++
-      spaces(m) ++ provenanceEdges(m) ++ displays(m)
+      domainMappings(m) ++ representationMappings(m) ++ spaces(m) ++ provenanceEdges(m) ++
+      displays(m)
 
   private def dupes(pointer: Int => String, ids: List[String], what: String): List[Problem] =
     ids.zipWithIndex.groupBy(_._1).toList.filter(_._2.size > 1).flatMap { (id, occ) =>
@@ -25,6 +26,7 @@ object ManifestChecks:
       ) ++
       dupes(i => s"/resultFields/$i/id", m.resultFields.map(_.id), "result field") ++
       dupes(i => s"/domains/$i/id", m.domains.map(_.id), "domain") ++
+      dupes(i => s"/domainMappings/$i/id", m.domainMappings.map(_.id), "domain mapping") ++
       dupes(i => s"/surfaces/$i/id", m.surfaces.map(_.id), "surface") ++
       dupes(i => s"/warnings/$i/id", m.warnings.map(_.id), "warning") ++
       dupes(
@@ -39,22 +41,41 @@ object ManifestChecks:
       )
 
   private def provenanceIds(m: Manifest, kind: String): List[String] =
-    m.raw.hcursor.downField("provenance").downField(kind).as[List[io.circe.Json]].toOption
-      .getOrElse(Nil).flatMap(_.hcursor.get[String]("id").toOption)
+    m.provenanceIds(kind)
 
   /** Representations, underlays, surfaces, and fields reference declared assets and domains. */
   def referenceClosure(m: Manifest): List[Problem] =
     val assets = m.assets.map(_.id).toSet
     val domains = m.domains.map(_.id).toSet
     val reps = m.resultFields.zipWithIndex.flatMap((f, fi) =>
-      f.representations.zipWithIndex.collect {
-        case (r, ri) if !assets(r.asset) =>
-          Problem(
-            s"/resultFields/$fi/representations/$ri/asset",
+      f.representations.zipWithIndex.flatMap { (r, ri) =>
+        val at = s"/resultFields/$fi/representations/$ri"
+        List(
+          Option.when(!assets(r.asset))(Problem(
+            s"$at/asset",
             s"representation references undeclared asset '${r.asset}'"
+          )),
+          r.domain.filterNot(domains).map(id =>
+            Problem(s"$at/domain", s"representation references undeclared domain '$id'")
+          ),
+          r.mapping.filterNot(m.domainMappings.map(_.id).toSet).map(id =>
+            Problem(s"$at/mapping", s"representation references undeclared domain mapping '$id'")
           )
+        ).flatten
       }
     )
+    val mappings = m.domainMappings.zipWithIndex.flatMap { (mapping, i) =>
+      List(
+        Option.when(!domains(mapping.source))(Problem(
+          s"/domainMappings/$i/source",
+          s"domain mapping references undeclared source domain '${mapping.source}'"
+        )),
+        Option.when(!domains(mapping.target))(Problem(
+          s"/domainMappings/$i/target",
+          s"domain mapping references undeclared target domain '${mapping.target}'"
+        ))
+      ).flatten
+    }
     val fieldDomains = m.resultFields.zipWithIndex.collect {
       case (f, fi) if !domains(f.domain) =>
         Problem(
@@ -82,7 +103,7 @@ object ManifestChecks:
         )
       ).flatten
     )
-    reps ++ fieldDomains ++ under ++ surf
+    reps ++ mappings ++ fieldDomains ++ under ++ surf
 
   /** Every result field's estimand is declared by some analysis. */
   def estimandClosure(m: Manifest): List[Problem] =
@@ -229,7 +250,91 @@ object ManifestChecks:
             if r.schema.id == TrustedSchemas.SurfaceVerticesV1.id =>
           val onDomain = m.surfaces.filter(_.domain == d.id).map(s => (s.asset, s.hemisphere))
           SurfaceVertices.check(at, r, d.key, onDomain)
+        case Interpretation.Understood(r, _)
+            if r.schema.id == TrustedSchemas.FiniteIndexedV1.id =>
+          FiniteIndexed.check(at, r, d.key, m.assets)
         case _ => Nil
+    }
+
+  /** Trusted domain mappings check both exact endpoint kinds and every declaration-level fact
+    * available without opening the mapping asset. Binary bounds and coverage are checked by
+    * [[HardAssignment.checkBytes]] when the canonical asset is available.
+    */
+  def domainMappings(m: Manifest): List[Problem] =
+    m.domainMappings.zipWithIndex.flatMap { (mapping, i) =>
+      val at = s"/domainMappings/$i"
+      TrustedSchemas.interpret(s"$at/descriptor", mapping.descriptor) match
+        case Interpretation.Understood(record, _)
+            if record.schema.id == TrustedSchemas.HardAssignmentV1.id =>
+          HardAssignment.checkDeclaration(at, mapping, m)
+        case _ => Nil
+    }
+
+  /** A representation whose support differs from its scientific field domain is derived and must
+    * name a provenance activity. A finite-indexed field additionally needs a trusted hard mapping
+    * from support to field domain; equal counts or atlas labels never establish parcel alignment.
+    */
+  def representationMappings(m: Manifest): List[Problem] =
+    val activities = provenanceIds(m, "activities").toSet
+    m.resultFields.zipWithIndex.flatMap { (field, fi) =>
+      val finiteField = m.domain(field.domain).exists { domain =>
+        TrustedSchemas.interpret("", domain.descriptor) match
+          case Interpretation.Understood(record, _) =>
+            record.schema.id == TrustedSchemas.FiniteIndexedV1.id
+          case _ => false
+      }
+      field.representations.zipWithIndex.flatMap { (representation, ri) =>
+        val at = s"/resultFields/$fi/representations/$ri"
+        val explicitSurfaceDomain = Option.when(
+          representation.kind == "surface" && representation.domain.nonEmpty
+        )(Problem(
+          s"$at/domain",
+          "a surface representation gets its support domain from its surface; it must not restate domain"
+        ))
+        val support =
+          if representation.kind == "surface" then
+            representation.surface.flatMap(m.surface).map(_.domain)
+          else Some(representation.domain.getOrElse(field.domain))
+        val unknownDerivation = representation.derivation.filterNot(activities).map(id =>
+          Problem(s"$at/derivation", s"derivation references unknown provenance activity '$id'")
+        )
+        val mappingProblems = support.toList.flatMap { supportId =>
+          if supportId == field.domain then
+            representation.mapping.map(_ =>
+              Problem(
+                s"$at/mapping",
+                "a same-domain representation must not claim a cross-domain mapping"
+              )
+            ).toList
+          else
+            val missingMapping = Option.when(finiteField && representation.mapping.isEmpty)(Problem(
+              s"$at/mapping",
+              s"finite-indexed field '${field.id}' represented on '$supportId' requires a trusted hard mapping to '${field.domain}'"
+            ))
+            val missingDerivation = Option.when(representation.derivation.isEmpty)(Problem(
+              s"$at/derivation",
+              "cross-domain representation requires a derivation activity"
+            ))
+            val mismatch = representation.mapping.flatMap(m.domainMapping).flatMap { mapping =>
+              if mapping.source != supportId || mapping.target != field.domain then
+                Some(Problem(
+                  s"$at/mapping",
+                  s"mapping '${mapping.id}' is ${mapping.source} -> ${mapping.target}, expected $supportId -> ${field.domain}"
+                ))
+              else if finiteField then
+                TrustedSchemas.interpret("", mapping.descriptor) match
+                  case Interpretation.Understood(record, _)
+                      if record.schema.id == TrustedSchemas.HardAssignmentV1.id => None
+                  case _ => Some(Problem(
+                      s"$at/mapping",
+                      s"mapping '${mapping.id}' is not a trusted hard assignment"
+                    ))
+              else None
+            }
+            List(missingMapping, missingDerivation, mismatch).flatten
+        }
+        List(explicitSurfaceDomain, unknownDerivation).flatten ++ mappingProblems
+      }
     }
 
   /** How a domain reads as a surface support: a readable surface-vertices payload, a
@@ -295,7 +400,6 @@ object ManifestChecks:
     * surface's triangles realize the domain's key — is verified at ingestion (SPEC §6).
     */
   def surfaces(m: Manifest): List[Problem] =
-    val activities = provenanceIds(m, "activities").toSet
     // an asset renders as one thing: a geometry, a volume, or a vertex field. Two roles on one
     // asset silently keep the first rendition target and drop the rest, and several surfaces on
     // one asset would take one of their hemispheres for the whole rendition (SPEC §5).
@@ -376,10 +480,7 @@ object ManifestChecks:
                     s"representation is the $h hemisphere but surface '$sid' is ${s.hemisphere}"
                   ))
                 case _ => None
-          val derivation = r.derivation.filterNot(activities).map(d =>
-            Problem(s"$at/derivation", s"derivation references unknown provenance activity '$d'")
-          )
-          List(surface, derivation).flatten
+          List(surface).flatten
       }
     )
     onSurfaces ++ onReps

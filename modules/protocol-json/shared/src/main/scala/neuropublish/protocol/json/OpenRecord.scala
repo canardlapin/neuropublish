@@ -42,8 +42,8 @@ object OpenRecord:
     yield OpenRecord(schema, payload.getOrElse(Json.obj()))
   }
 
-  /** Every open record in a manifest with its JSON Pointer: domain descriptors, analysis methods,
-    * provenance activities.
+  /** Every open record in a manifest with its JSON Pointer: domain and mapping descriptors,
+    * analysis methods, and provenance activities.
     */
   def collect(manifest: Json): List[(String, OpenRecord)] =
     val c = manifest.hcursor
@@ -57,9 +57,13 @@ object OpenRecord:
     val methods = items("analyses").flatMap { (i, a) =>
       a.hcursor.downField("method").focus.flatMap(at(s"/analyses/$i/method", _))
     }
+    val mappings = items("domainMappings").flatMap { (i, mapping) =>
+      mapping.hcursor.downField("descriptor").focus
+        .flatMap(at(s"/domainMappings/$i/descriptor", _))
+    }
     val activities = c.downField("provenance").downField("activities").as[List[Json]].toOption
       .getOrElse(Nil).zipWithIndex.flatMap((a, i) => at(s"/provenance/activities/$i", a))
-    domains ++ methods ++ activities
+    domains ++ mappings ++ methods ++ activities
 
 /** How the reference implementation reads an open record (architecture, "Open semantic records").
   */
@@ -94,7 +98,22 @@ object TrustedSchemas:
     Some(Sha256.unsafe("2adc4285db8d257af4aa4e54272631451b7103d1a124b83544dc0814f85487e8"))
   )
 
-  val all: List[SchemaRefWire] = List(VolumeGridV1, SurfaceVerticesV1)
+  /** `protocol/schemas/records/finite-indexed-v1.schema.json` (ADR 0005 section 1). */
+  val FiniteIndexedV1 = SchemaRefWire(
+    "org.neuropublish.domain/finite-indexed",
+    "1.0",
+    Some(Sha256.unsafe("b1b14b1242abbb1dde64a736e10a8672d6bc12a7602884f15cc148bbd03dc4ad"))
+  )
+
+  /** `protocol/schemas/records/hard-assignment-v1.schema.json` (ADR 0005 section 2). */
+  val HardAssignmentV1 = SchemaRefWire(
+    "org.neuropublish.mapping/hard-assignment",
+    "1.0",
+    Some(Sha256.unsafe("2908586eb3b1260472096664177620f98452f785bc47e9dcf06433578b2fc526"))
+  )
+
+  val all: List[SchemaRefWire] =
+    List(VolumeGridV1, SurfaceVerticesV1, FiniteIndexedV1, HardAssignmentV1)
   private val byId: Map[String, List[SchemaRefWire]] = all.groupBy(_.id)
 
   def isTrustedNamespace(id: String): Boolean =
@@ -139,4 +158,8 @@ object TrustedSchemas:
     if t == VolumeGridV1 then "volume grid descriptor (shape, affine, space); renderable"
     else if t == SurfaceVerticesV1 then
       "surface vertex domain (hemisphere, counts, topology asset); renderable on its surfaces"
+    else if t == FiniteIndexedV1 then
+      "finite indexed domain (exact ordered element keys); alignable by structural fingerprint"
+    else if t == HardAssignmentV1 then
+      "hard assignment (checked partial map from spatial support to finite target)"
     else "record"

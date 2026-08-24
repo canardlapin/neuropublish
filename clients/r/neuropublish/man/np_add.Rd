@@ -9,8 +9,8 @@ np_add(manifest, collection, record)
 \arguments{
 \item{manifest}{A manifest from \code{\link[=np_manifest]{np_manifest()}}.}
 
-\item{collection}{One of \code{domains}, \code{assets}, \code{analyses}, \code{resultFields},
-\code{underlays}, \code{warnings}.}
+\item{collection}{One of \code{domains}, \code{domainMappings}, \code{assets}, \code{analyses},
+\code{resultFields}, \code{underlays}, \code{warnings}.}
 
 \item{record}{A record built with the matching \verb{np_*()} builder.}
 }

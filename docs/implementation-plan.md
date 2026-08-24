@@ -1104,6 +1104,19 @@ adopts the native image API and restores the proven resource-lifecycle
 contract; Scala realization adapters wait for that migration, not for a new
 domain abstraction.
 
+**Implemented neutral slice (2026-08-24).** The trusted finite-indexed and
+hard-assignment schemas, exact key preimage, declaration checks, ingestion-time
+ordinal/coverage checks, cross-domain mapping-plus-derivation rule, and a
+packed volume parcel fixture are present and tested on JVM and Scala.js.
+Same-sized reordered and foreign Schaefer-style identities fail closed. The
+fixture's volume is still a producer-authored derivative: server-derived
+pullbacks, a surface realization, `allow-empty` user warnings, label-to-key
+conversion records, linked parcel selection/table UI, and the ScalaFIM
+consumer/adapter migration remain open. The R client and standalone Julia
+oracle do agree with Scala on the finite preimage and hard-assignment bytes.
+The Stage 5b exit criteria below therefore remain the completion bar rather
+than a claim about this slice.
+
 ### Protocol and admission
 
 - trusted `finite-indexed/v1` descriptor with a deterministic ordered-key

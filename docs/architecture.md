@@ -185,11 +185,14 @@ surface space, hemisphere, topology, and vertex-order identity but not geometry
 coordinates. Labels and colors are keyed metadata and do not establish
 alignment. ADR 0005 defines the version-1 byte profiles.
 
-Stage 2 freezes this domain envelope and implements only the trusted
-volume-grid descriptor required by the reference result. Trusted
-finite-indexed interpretation, atlas mappings, parcel pullbacks, and parcel UI
-arrive in the Stage 5b parcel track. Unknown descriptors remain preserved and
-inspectable but confer no rendering or alignment behavior.
+Stage 2 froze this domain envelope around the reference volume. The first
+Stage 5b slice now trusts exact finite-indexed domains and hard assignments,
+checks assignment bytes during ingestion, and admits a cross-domain
+representation only with an exact mapping and a derivation activity. Unknown
+descriptors remain preserved and inspectable but confer no rendering or
+alignment behavior. This is the neutral core, not the whole parcel workspace:
+server-derived pullbacks, surface realizations, parcel table/picking UI,
+incomplete-realization warnings, and ScalaFIM adapters remain downstream work.
 
 A parcel field is defined over a finite parcel domain. An atlas realization is
 a separate mapping from an exact volume or surface support domain to that

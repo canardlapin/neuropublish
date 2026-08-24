@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://neuropublish.org/schema/0.1/records/hard-assignment-v1.schema.json",
+  "title": "Neuropublish hard-assignment domain mapping version 1.0",
+  "description": "A checked partial map from an exact volume-grid or surface-vertices support domain to an exact finite-indexed target. The assignment asset contains one signed int32 little-endian target ordinal per source element; -1 is background.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["asset", "coverage", "emptyParcels", "derivation"],
+  "properties": {
+    "asset": {
+      "description": "The assets[].id of the hard-assignment-i32le-v1 payload.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    },
+    "coverage": {
+      "type": "string",
+      "enum": ["complete", "allow-empty"]
+    },
+    "emptyParcels": {
+      "description": "Exact empty target keys in target-domain order; empty for complete coverage.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "derivation": {
+      "description": "The provenance activity that produced the ordinal assignment, including any label-to-key conversion.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    }
+  }
+}

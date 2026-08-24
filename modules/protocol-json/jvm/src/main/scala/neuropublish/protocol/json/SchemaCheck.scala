@@ -34,6 +34,8 @@ object SchemaCheck:
   lazy val renditionHeaderSchema: JsonSchema = load("rendition-header")
   lazy val volumeGridV1Schema: JsonSchema = load("records/volume-grid-v1")
   lazy val surfaceVerticesV1Schema: JsonSchema = load("records/surface-vertices-v1")
+  lazy val finiteIndexedV1Schema: JsonSchema = load("records/finite-indexed-v1")
+  lazy val hardAssignmentV1Schema: JsonSchema = load("records/hard-assignment-v1")
 
   def validate(schema: JsonSchema, json: Json): List[Problem] =
     schema.validate(json.noSpaces, InputFormat.JSON).asScala.toList.map { v =>
@@ -58,3 +60,11 @@ object SchemaCheck:
   /** A trusted `surface-vertices@1.0` descriptor payload against its records schema. */
   def surfaceVerticesV1(at: String, payload: Json): List[Problem] =
     validate(surfaceVerticesV1Schema, payload).map(p => p.copy(pointer = at + p.pointer))
+
+  /** A trusted `finite-indexed@1.0` descriptor payload against its records schema. */
+  def finiteIndexedV1(at: String, payload: Json): List[Problem] =
+    validate(finiteIndexedV1Schema, payload).map(p => p.copy(pointer = at + p.pointer))
+
+  /** A trusted `hard-assignment@1.0` mapping payload against its records schema. */
+  def hardAssignmentV1(at: String, payload: Json): List[Problem] =
+    validate(hardAssignmentV1Schema, payload).map(p => p.copy(pointer = at + p.pointer))

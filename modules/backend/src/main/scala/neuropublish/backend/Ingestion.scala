@@ -6,9 +6,13 @@ import fs2.io.file.Files
 import neuropublish.api.IngestionStatus
 import neuropublish.protocol.Sha256
 import neuropublish.protocol.json.{
+  FiniteIndexed,
+  HardAssignment,
+  Interpretation,
   Manifest,
   ManifestAsset,
   ManifestChecks,
+  Problem,
   Surface,
   SurfaceVertices,
   TrustedSchemas
@@ -261,6 +265,58 @@ object Derivation:
       )
     yield p
 
+  /** Open every trusted hard-assignment asset and prove its ordinal bounds and declared target
+    * coverage before deriving any browser rendition. Manifest admission can prove the mapping's
+    * endpoints, media type, byte count, provenance reference, and target-key declarations; only
+    * ingestion has the canonical bytes needed to prove that the partial map actually realizes those
+    * declarations. Unsupported mapping records remain inert and are never interpreted.
+    */
+  def validateDomainMappings(
+      objects: ObjectStore,
+      manifest: Manifest
+  ): IO[Either[String, Unit]] =
+    manifest.domainMappings.zipWithIndex.foldLeftM[IO, Either[String, Unit]](Right(())) {
+      case (left @ Left(_), _) => IO.pure(left)
+      case (Right(()), (mapping, i)) =>
+        val at = s"/domainMappings/$i"
+        TrustedSchemas.interpret(s"$at/descriptor", mapping.descriptor) match
+          case Interpretation.Understood(record, _)
+              if record.schema.id == TrustedSchemas.HardAssignmentV1.id =>
+            val prepared =
+              for
+                payload <- HardAssignment.readPayload(
+                  s"$at/descriptor/payload",
+                  record.payload
+                ).left.map(Problem.render)
+                source <- manifest.domain(mapping.source)
+                  .toRight(s"$at/source: undeclared source domain '${mapping.source}'")
+                sourceSize <- source.key.flatMap(_.hcursor.get[Long]("size").toOption)
+                  .toRight(s"$at/source: source domain '${mapping.source}' has no exact size")
+                target <- manifest.domain(mapping.target)
+                  .toRight(s"$at/target: undeclared target domain '${mapping.target}'")
+                targetPayload <- FiniteIndexed.readPayload(
+                  s"$at/target",
+                  target.descriptor.payload
+                ).left.map(Problem.render)
+                asset <- manifest.asset(payload.asset)
+                  .toRight(s"$at/descriptor/payload/asset: undeclared asset '${payload.asset}'")
+              yield (payload, sourceSize, targetPayload.elementKeys, asset)
+
+            prepared match
+              case Left(message) => IO.pure(Left(message))
+              case Right((payload, sourceSize, targetKeys, asset)) =>
+                objects.get(asset.digest).map {
+                  case None =>
+                    Left(
+                      s"$at/descriptor/payload/asset: assignment asset '${asset.id}' (${asset.digest.render}) was not uploaded"
+                    )
+                  case Some(bytes) =>
+                    HardAssignment.checkBytes(at, payload, sourceSize, targetKeys, bytes)
+                      .left.map(Problem.render).map(_ => ())
+                }
+          case _ => IO.pure(Right(()))
+    }
+
   /** One scalar per vertex of `surface` from a GIFTI document: the first data array that is not the
     * geometry (`NIFTI_INTENT_NONE`, `SHAPE`, or similar), narrowed to float32 by the caller.
     *
@@ -345,7 +401,7 @@ object Derivation:
             case Some(g) => IO.pure(Right((cache, g)))
             case None =>
               readSurface(objects, manifest, s).map(_.map(g => (cache + (s.asset -> g), g)))
-    manifest.renditionTargets
+    val targets = manifest.renditionTargets
       .foldLeftM[IO, Either[String, Cache]](Right(Map.empty)) {
         case (l @ Left(_), _) => IO.pure(l)
         case (Right(cache), t) =>
@@ -400,6 +456,10 @@ object Derivation:
               }
             case other => IO.pure(Left(s"asset ${t.assetId}: unknown rendition kind $other"))
       }.map(_.map(_ => ()))
+    validateDomainMappings(objects, manifest).flatMap {
+      case Left(message) => IO.pure(Left(message))
+      case Right(()) => targets
+    }
 
   /** Every rendition of the manifest; stops at the first failure. */
   def deriveAll(objects: ObjectStore, manifest: Manifest): IO[Either[String, List[Derived]]] =

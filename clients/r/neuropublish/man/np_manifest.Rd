@@ -35,7 +35,8 @@ A plain list.
 \description{
 Creates the top-level manifest list with \code{core = "0.1"}, the title, synopsis
 and sensitivity, and empty collections to fill with \code{\link[=np_domain_volume]{np_domain_volume()}},
-\code{\link[=np_asset_volume]{np_asset_volume()}}, \code{\link[=np_analysis]{np_analysis()}}, \code{\link[=np_field]{np_field()}}, \code{\link[=np_underlay]{np_underlay()}},
+\code{\link[=np_domain_finite]{np_domain_finite()}}, \code{\link[=np_domain_mapping_hard]{np_domain_mapping_hard()}}, \code{\link[=np_asset_volume]{np_asset_volume()}},
+\code{\link[=np_analysis]{np_analysis()}}, \code{\link[=np_field]{np_field()}}, \code{\link[=np_underlay]{np_underlay()}},
 \code{\link[=np_warning]{np_warning()}} and \code{\link[=np_provenance]{np_provenance()}}. Anything passed through \code{...} is added
 verbatim (an extension field such as \code{`x-lab-run`}), and you may also
 add members to the returned list directly: unknown fields survive

@@ -25,6 +25,7 @@ as_neuropublish(x, ...)
   space_name = "MNI152NLin2009cAsym",
   display = list(),
   staging = np_staging_dir(),
+  labels = NULL,
   ...
 )
 }
@@ -59,6 +60,10 @@ anatomical underlay (with \code{underlay_label}).}
 by volume name.}
 
 \item{staging}{Where NIfTI files are written; see \code{\link[=np_asset_volume]{np_asset_volume()}}.}
+
+\item{labels}{Optional named character vector mapping field volume names to
+producer-authored human labels. Unnamed fields keep the protocol's legacy
+estimand and measure fallback in viewers.}
 }
 \value{
 A \code{neuropublish_result}.

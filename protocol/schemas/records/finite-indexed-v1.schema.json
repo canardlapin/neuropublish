@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://neuropublish.org/schema/0.1/records/finite-indexed-v1.schema.json",
+  "title": "Neuropublish finite-indexed domain descriptor version 1.0",
+  "description": "An exact finite ordered scientific set (ADR 0005 section 1). Element identity and array order, not labels or count alone, establish alignment. The keys asset contains the descriptor's NPUDOM1 binary identity preimage.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ordering", "elementKeys", "keysAsset"],
+  "properties": {
+    "ordering": {
+      "const": "explicit"
+    },
+    "elementKeys": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "keysAsset": {
+      "description": "The assets[].id whose bytes are the finite-indexed/v1 identity preimage.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    }
+  }
+}

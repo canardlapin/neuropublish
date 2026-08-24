@@ -3,6 +3,7 @@ package neuropublish.protocol.json
 import io.circe.parser.parse
 import java.nio.file.{Files, Path}
 import munit.FunSuite
+import neuropublish.protocol.Sha256
 
 /** JVM: the JSON Schema stage and the single-source-of-truth rule for the schema documents. */
 class SchemaSuite extends FunSuite:
@@ -11,14 +12,36 @@ class SchemaSuite extends FunSuite:
       .find(Files.isDirectory(_)).getOrElse(fail("protocol/schemas not found"))
 
   test("the classpath schemas are the protocol/schemas files") {
-    for name <- List("manifest", "workspace-state", "rendition-header") do
-      val res = getClass.getClassLoader.getResourceAsStream(s"schemas/$name.schema.json")
-      assert(res != null, s"schemas/$name.schema.json is not on the classpath")
+    val names = List(
+      "manifest.schema.json",
+      "workspace-state.schema.json",
+      "rendition-header.schema.json",
+      "records/volume-grid-v1.schema.json",
+      "records/surface-vertices-v1.schema.json",
+      "records/finite-indexed-v1.schema.json",
+      "records/hard-assignment-v1.schema.json"
+    )
+    for name <- names do
+      val res = getClass.getClassLoader.getResourceAsStream(s"schemas/$name")
+      assert(res != null, s"schemas/$name is not on the classpath")
       assertEquals(
         new String(res.readAllBytes(), "UTF-8"),
-        Files.readString(schemas.resolve(s"$name.schema.json")),
+        Files.readString(schemas.resolve(name)),
         name
       )
+  }
+
+  test("trusted schema identities are the exact committed record-schema bytes") {
+    val records = List(
+      "volume-grid-v1.schema.json" -> TrustedSchemas.VolumeGridV1,
+      "surface-vertices-v1.schema.json" -> TrustedSchemas.SurfaceVerticesV1,
+      "finite-indexed-v1.schema.json" -> TrustedSchemas.FiniteIndexedV1,
+      "hard-assignment-v1.schema.json" -> TrustedSchemas.HardAssignmentV1
+    )
+    records.foreach { (name, trusted) =>
+      val actual = Sha256.of(Files.readAllBytes(schemas.resolve("records").resolve(name)))
+      assertEquals(Some(actual), trusted.digest, trusted.render)
+    }
   }
 
   private val base =

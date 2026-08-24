@@ -37,7 +37,45 @@ np_volume_grid_schema <- list(
   digest = "sha256:69c25b8868349828e41cd6d610ac619af118fb7b807b7306f706b727ed23dfb7"
 )
 
+#' Trusted finite-indexed domain schema reference
+#'
+#' The exact schema reference for `org.neuropublish.domain/finite-indexed@1.0`.
+#' [np_domain_finite()] uses it for both the descriptor and exact domain key.
+#'
+#' @format A list with `id`, `version` and `digest`.
+#' @examples
+#' np_finite_indexed_schema$id
+#' @export
+np_finite_indexed_schema <- list(
+  id = "org.neuropublish.domain/finite-indexed",
+  version = "1.0",
+  digest = "sha256:b1b14b1242abbb1dde64a736e10a8672d6bc12a7602884f15cc148bbd03dc4ad"
+)
+
+#' Trusted hard-assignment mapping schema reference
+#'
+#' The exact schema reference for
+#' `org.neuropublish.mapping/hard-assignment@1.0`.
+#'
+#' @format A list with `id`, `version` and `digest`.
+#' @examples
+#' np_hard_assignment_schema$id
+#' @export
+np_hard_assignment_schema <- list(
+  id = "org.neuropublish.mapping/hard-assignment",
+  version = "1.0",
+  digest = "sha256:2908586eb3b1260472096664177620f98452f785bc47e9dcf06433578b2fc526"
+)
+
 #' The NIfTI media type used for volume assets
 #' @keywords internal
 #' @noRd
 np_nifti_media_type <- "application/x-nifti"
+
+#' @keywords internal
+#' @noRd
+np_finite_indexed_keys_media_type <- "application/vnd.neuropublish.finite-indexed-keys-v1"
+
+#' @keywords internal
+#' @noRd
+np_hard_assignment_media_type <- "application/vnd.neuropublish.hard-assignment-i32le-v1"

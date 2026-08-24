@@ -27,7 +27,9 @@ final case class Representation(
     asset: String,
     surface: Option[String] = None,
     hemisphere: Option[String] = None,
-    derivation: Option[String] = None
+    derivation: Option[String] = None,
+    domain: Option[String] = None,
+    mapping: Option[String] = None
 )
 
 final case class ResultField(
@@ -72,6 +74,14 @@ final case class Analysis(
 /** ADR 0005 domain hook: local id, open descriptor, optional exact key (retained as JSON). */
 final case class Domain(id: String, descriptor: OpenRecord, key: Option[Json])
 
+/** ADR 0005 domain relation: an exact source and target plus open mapping semantics. */
+final case class DomainMapping(
+    id: String,
+    source: String,
+    target: String,
+    descriptor: OpenRecord
+)
+
 final case class Warning(id: String, message: String, concerns: Option[Json])
 
 final case class Manifest(
@@ -87,7 +97,8 @@ final case class Manifest(
     domains: List[Domain],
     warnings: List[Warning],
     migratedFrom: Option[String],
-    raw: Json
+    raw: Json,
+    domainMappings: List[DomainMapping] = Nil
 ):
   def asset(id: String): Option[ManifestAsset] = assets.find(_.id == id)
 
@@ -97,6 +108,13 @@ final case class Manifest(
       resultFields.flatMap(_.representations.filter(_.kind == "volume").map(_.asset))).distinct
 
   def surface(id: String): Option[Surface] = surfaces.find(_.id == id)
+  def domain(id: String): Option[Domain] = domains.find(_.id == id)
+  def domainMapping(id: String): Option[DomainMapping] = domainMappings.find(_.id == id)
+
+  /** Provenance ids from the retained open graph. */
+  def provenanceIds(kind: String): List[String] =
+    raw.hcursor.downField("provenance").downField(kind).as[List[Json]].toOption
+      .getOrElse(Nil).flatMap(_.hcursor.get[String]("id").toOption)
 
   /** Surface-geometry assets, in `surfaces[]` order. */
   def surfaceAssetIds: List[String] = surfaces.map(_.asset).distinct
@@ -148,7 +166,15 @@ object Manifest:
     yield ManifestAsset(id, digest, size, mediaType, catalog)
   }
   given Decoder[Representation] =
-    Decoder.forProduct5("kind", "asset", "surface", "hemisphere", "derivation")(
+    Decoder.forProduct7(
+      "kind",
+      "asset",
+      "surface",
+      "hemisphere",
+      "derivation",
+      "domain",
+      "mapping"
+    )(
       Representation.apply
     )
   given Decoder[ResultField] = Decoder.forProduct9(
@@ -176,6 +202,8 @@ object Manifest:
     yield Analysis(id, label, estimands, sampleSize.map(_.toInt), method)
   }
   given Decoder[Domain] = Decoder.forProduct3("id", "descriptor", "key")(Domain.apply)
+  given Decoder[DomainMapping] =
+    Decoder.forProduct4("id", "source", "target", "descriptor")(DomainMapping.apply)
   given Decoder[Warning] = Decoder.forProduct3("id", "message", "concerns")(Warning.apply)
 
   given Decoder[Manifest] = Decoder.instance { c =>
@@ -192,6 +220,7 @@ object Manifest:
       surfaces <- list[Surface]("surfaces")
       analyses <- list[Analysis]("analyses")
       domains <- list[Domain]("domains")
+      domainMappings <- list[DomainMapping]("domainMappings")
       warnings <- list[Warning]("warnings")
       migratedFrom <- c.downField("migratedFrom").as[Option[String]]
     yield Manifest(
@@ -207,7 +236,8 @@ object Manifest:
       domains,
       warnings,
       migratedFrom,
-      c.value
+      c.value,
+      domainMappings
     )
   }
 

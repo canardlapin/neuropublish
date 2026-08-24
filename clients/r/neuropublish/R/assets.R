@@ -37,6 +37,34 @@ np_asset_volume <- function(id, x, staging = np_staging_dir(), catalog = NULL, .
   } else {
     stop("`x` must be a neuroim2 NeuroVol or the path of a NIfTI file", call. = FALSE)
   }
+  np_asset_file(id, path, np_nifti_media_type, catalog = catalog, ...)
+}
+
+#' Declare an existing file as a staging asset
+#'
+#' Builds one `assets[]` entry for any protocol media type. The file is not
+#' interpreted; [np_write_bundle()] copies it and `npub pack` establishes its
+#' content digest and size. Use [np_asset_volume()] when an in-memory
+#' `NeuroVol` must first be written as NIfTI.
+#'
+#' @param id Asset id.
+#' @param path Path to an existing regular file.
+#' @param media_type IANA or protocol media type.
+#' @param catalog Optional informational catalog reference.
+#' @param ... Further named members added verbatim.
+#' @return A plain staging `assets[]` record.
+#' @examples
+#' f <- tempfile()
+#' writeBin(as.raw(0:3), f)
+#' np_asset_file("bytes", f, "application/octet-stream")
+#' @export
+np_asset_file <- function(id, path, media_type, catalog = NULL, ...) {
+  id <- np_check_id(id)
+  if (!is.character(path) || length(path) != 1L || is.na(path) ||
+    !file.exists(path) || dir.exists(path)) {
+    stop("asset '", id, "': `path` must name an existing file", call. = FALSE)
+  }
+  media_type <- np_check_string(media_type, "media_type")
   extra <- list(...)
   if (length(extra) && (is.null(names(extra)) || any(!nzchar(names(extra))))) {
     stop("every extra asset member must be named", call. = FALSE)
@@ -44,7 +72,7 @@ np_asset_volume <- function(id, x, staging = np_staging_dir(), catalog = NULL, .
   c(
     np_compact(list(
       id = id,
-      mediaType = np_nifti_media_type,
+      mediaType = media_type,
       path = normalizePath(path, winslash = "/", mustWork = TRUE),
       catalog = catalog
     )),

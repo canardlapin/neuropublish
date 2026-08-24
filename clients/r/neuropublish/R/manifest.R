@@ -35,7 +35,8 @@ np_object <- function(x) {
 #'
 #' Creates the top-level manifest list with `core = "0.1"`, the title, synopsis
 #' and sensitivity, and empty collections to fill with [np_domain_volume()],
-#' [np_asset_volume()], [np_analysis()], [np_field()], [np_underlay()],
+#' [np_domain_finite()], [np_domain_mapping_hard()], [np_asset_volume()],
+#' [np_analysis()], [np_field()], [np_underlay()],
 #' [np_warning()] and [np_provenance()]. Anything passed through `...` is added
 #' verbatim (an extension field such as `` `x-lab-run` ``), and you may also
 #' add members to the returned list directly: unknown fields survive
@@ -72,6 +73,7 @@ np_manifest <- function(title, synopsis, sensitivity = "group-level",
     warnings = list(),
     axes = axes,
     domains = list(),
+    domainMappings = list(),
     assets = list(),
     analyses = list(),
     resultFields = list(),
@@ -181,11 +183,40 @@ np_analysis <- function(id, label, method = NULL, sample_size = NULL, estimands)
 #' Volume representation of a result field
 #'
 #' @param asset The id of the asset holding the volume.
-#' @return A plain list `list(kind = "volume", asset)`.
+#' @param domain Optional support-domain id when it differs from the field's
+#'   scientific domain.
+#' @param mapping For a finite-indexed field on another support, the exact
+#'   `domainMappings[]` id from support to field domain.
+#' @param derivation Required with a cross-domain `domain`: the provenance
+#'   activity that produced this volume representation.
+#' @return A plain volume representation list.
 #' @examples
 #' np_volume_rep("speech-t")
 #' @export
-np_volume_rep <- function(asset) list(kind = "volume", asset = np_check_id(asset, "asset"))
+np_volume_rep <- function(asset, domain = NULL, mapping = NULL, derivation = NULL) {
+  if (!is.null(domain) && is.null(derivation)) {
+    stop("a cross-domain volume representation requires `derivation`", call. = FALSE)
+  }
+  if (is.null(domain) && !is.null(mapping)) {
+    stop("`mapping` requires an explicit cross-domain `domain`", call. = FALSE)
+  }
+  np_compact(list(
+    kind = "volume",
+    asset = np_check_id(asset, "asset"),
+    domain = if (is.null(domain)) NULL else np_check_id(domain, "domain"),
+    mapping = if (is.null(mapping)) NULL else np_check_id(mapping, "mapping"),
+    derivation = if (is.null(derivation)) NULL else np_check_id(derivation, "derivation")
+  ))
+}
+
+#' Table representation of a result field
+#'
+#' @param asset The id of the asset holding values in field-domain order.
+#' @return A plain `list(kind = "table", asset)` representation.
+#' @examples
+#' np_table_rep("parcel-values")
+#' @export
+np_table_rep <- function(asset) list(kind = "table", asset = np_check_id(asset, "asset"))
 
 #' Published display recommendation
 #'
@@ -381,8 +412,8 @@ np_edge <- function(from, to, role = NULL) {
 #' duplicate ids within their collection.
 #'
 #' @param manifest A manifest from [np_manifest()].
-#' @param collection One of `domains`, `assets`, `analyses`, `resultFields`,
-#'   `underlays`, `warnings`.
+#' @param collection One of `domains`, `domainMappings`, `assets`, `analyses`,
+#'   `resultFields`, `underlays`, `warnings`.
 #' @param record A record built with the matching `np_*()` builder.
 #' @return The updated manifest.
 #' @examples
@@ -391,7 +422,9 @@ np_edge <- function(from, to, role = NULL) {
 #' length(m$warnings)
 #' @export
 np_add <- function(manifest, collection, record) {
-  collection <- match.arg(collection, c("domains", "assets", "analyses", "resultFields", "underlays", "warnings"))
+  collection <- match.arg(collection, c(
+    "domains", "domainMappings", "assets", "analyses", "resultFields", "underlays", "warnings"
+  ))
   existing <- manifest[[collection]]
   if (is.null(existing)) existing <- list()
   if (!is.null(record$id)) {
