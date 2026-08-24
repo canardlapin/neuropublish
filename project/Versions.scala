@@ -18,6 +18,16 @@ object Versions {
   val jsonSchemaValidator = "1.5.9"
   val slf4j = "2.0.17"
 
+  // Patched floors for JVM families pulled transitively by Doobie, Flyway, and the AWS SDK.
+  // Keep these centralized because the deployable backend and worker must resolve one coherent
+  // family version even when an upstream module still advertises an older patch.
+  val fs2SecurityFloor = "3.13.0"
+  val jackson = "2.18.9"
+  val netty = "4.1.137.Final"
+  val postgresql = "42.7.12"
+  val httpClient5 = "5.6.3"
+  val httpCore5 = "5.4.3"
+
   val munit = "1.3.0"
   val munitScalacheck = "1.1.0"
   val munitCatsEffect = "2.1.0"

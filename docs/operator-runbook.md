@@ -45,6 +45,19 @@ equivalent bucket policy supporting the presigned `GET` and `PUT` requests. It s
 listing and use encryption, object versioning, and lifecycle rules appropriate to the institution's
 data classification.
 
+## Runtime dependency gate
+
+`npCheck` and both `stageRuntime` packaging tasks inspect the resolved backend and worker
+classpaths, not only the declared version catalog. They fail unless the deployable artifacts contain
+the audited patch lines for FS2, Jackson, Netty, PostgreSQL JDBC, and Apache HTTP Components. The
+central overrides in `build.sbt` keep each family coherent when Doobie, Flyway, or the AWS SDK still
+advertises an older transitive patch.
+
+Treat that local gate as necessary but not sufficient. After pushing a release candidate, require a
+successful `dependency-submission` job and re-query the repository's open Dependabot alerts. Do not
+dismiss an alert merely because a newer direct dependency is declared: the staged runtime
+classpath, submitted graph, and GitHub result must agree.
+
 ## Local full-stack rehearsal
 
 Copy `ops/alpha.env.example` to a private temporary path and replace every `change-me` value. For a

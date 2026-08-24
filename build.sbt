@@ -5,8 +5,49 @@ lazy val stageRuntime = taskKey[File](
   "Stage one JVM application's complete runtime classpath in a relocatable directory"
 )
 
+lazy val runtimeDependencyGate = taskKey[Unit](
+  "Fail unless the deployable JVM classpath contains the audited dependency patch levels"
+)
+
 lazy val runtimeStageSettings = Seq(
+  runtimeDependencyGate := {
+    val entries = (Runtime / fullClasspath).value.map(_.data.getName).toSet
+    val required = Seq(
+      "fs2-core_3" -> Versions.fs2SecurityFloor,
+      "fs2-io_3" -> Versions.fs2SecurityFloor,
+      "jackson-annotations" -> Versions.jackson,
+      "jackson-core" -> Versions.jackson,
+      "jackson-databind" -> Versions.jackson,
+      "jackson-dataformat-yaml" -> Versions.jackson,
+      "netty-buffer" -> Versions.netty,
+      "netty-codec" -> Versions.netty,
+      "netty-codec-http" -> Versions.netty,
+      "netty-codec-http2" -> Versions.netty,
+      "netty-common" -> Versions.netty,
+      "netty-handler" -> Versions.netty,
+      "netty-resolver" -> Versions.netty,
+      "netty-transport" -> Versions.netty,
+      "netty-transport-classes-epoll" -> Versions.netty,
+      "netty-transport-native-unix-common" -> Versions.netty,
+      "postgresql" -> Versions.postgresql,
+      "httpclient5" -> Versions.httpClient5,
+      "httpcore5" -> Versions.httpCore5,
+      "httpcore5-h2" -> Versions.httpCore5
+    )
+    val missing = required.collect {
+      case (artifact, version) if !entries(s"$artifact-$version.jar") =>
+        s"$artifact-$version.jar"
+    }
+    if (missing.nonEmpty)
+      sys.error(
+        "deployable runtime is missing audited dependency versions: " + missing.mkString(", ")
+      )
+    streams.value.log.info(
+      s"audited ${required.size} dependency versions on the deployable runtime classpath"
+    )
+  },
   stageRuntime := {
+    runtimeDependencyGate.value
     val output = target.value / "alpha-runtime"
     val entries = (Runtime / fullClasspath).value.map(_.data)
     IO.delete(output)
@@ -111,6 +152,32 @@ ThisBuild / githubWorkflowAddedJobs += WorkflowJob(
 // Pre-release: no publication until Stage 6 decides a release channel.
 ThisBuild / tlCiReleaseBranches := Seq()
 ThisBuild / githubWorkflowPublishTargetBranches := Seq()
+
+// Security floors are resolved on every Neuropublish subproject, including library-only graphs
+// submitted to GitHub. Patch-family alignment matters for Jackson and Netty: overriding only the
+// alerted codec jar can leave an unsupported mixture on the deployable backend/worker classpath.
+ThisBuild / dependencyOverrides ++= Seq(
+  "co.fs2" %% "fs2-core" % Versions.fs2SecurityFloor,
+  "co.fs2" %% "fs2-io" % Versions.fs2SecurityFloor,
+  "com.fasterxml.jackson.core" % "jackson-annotations" % Versions.jackson,
+  "com.fasterxml.jackson.core" % "jackson-core" % Versions.jackson,
+  "com.fasterxml.jackson.core" % "jackson-databind" % Versions.jackson,
+  "com.fasterxml.jackson.dataformat" % "jackson-dataformat-yaml" % Versions.jackson,
+  "io.netty" % "netty-buffer" % Versions.netty,
+  "io.netty" % "netty-codec" % Versions.netty,
+  "io.netty" % "netty-codec-http" % Versions.netty,
+  "io.netty" % "netty-codec-http2" % Versions.netty,
+  "io.netty" % "netty-common" % Versions.netty,
+  "io.netty" % "netty-handler" % Versions.netty,
+  "io.netty" % "netty-resolver" % Versions.netty,
+  "io.netty" % "netty-transport" % Versions.netty,
+  "io.netty" % "netty-transport-classes-epoll" % Versions.netty,
+  "io.netty" % "netty-transport-native-unix-common" % Versions.netty,
+  "org.apache.httpcomponents.client5" % "httpclient5" % Versions.httpClient5,
+  "org.apache.httpcomponents.core5" % "httpcore5" % Versions.httpCore5,
+  "org.apache.httpcomponents.core5" % "httpcore5-h2" % Versions.httpCore5,
+  "org.postgresql" % "postgresql" % Versions.postgresql
+)
 
 // ---------------------------------------------------------------------------
 // Upstream Scala imaging libraries as exact git-revision source pins.
@@ -429,4 +496,7 @@ lazy val root = project
 addCommandAlias("npCompile", "root/compile")
 addCommandAlias("npTest", "root/test")
 addCommandAlias("npFormat", ";root/scalafmtAll;scalafmtSbt")
-addCommandAlias("npCheck", ";root/scalafmtCheckAll;scalafmtSbtCheck;root/compile;root/test")
+addCommandAlias(
+  "npCheck",
+  ";root/scalafmtCheckAll;scalafmtSbtCheck;root/compile;backend/runtimeDependencyGate;ingestion/runtimeDependencyGate;root/test"
+)
